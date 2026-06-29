@@ -1,0 +1,23 @@
+# 가상환경 / 캐시
+.venv/
+__pycache__/
+*.pyc
+
+# 런타임 생성물 (사용자별)
+config.json
+*.log
+cat.log
+
+# 빌드 / 배포 산출물
+build/
+dist/
+*.spec
+*.zip
+
+# 작업용 원본 이미지 (사용자가 직접 넣음)
+source/
+
+# 미리보기 / 잡파일
+**/_preview.png
+frames_preview.png
+.DS_Store
