@@ -37,6 +37,8 @@ cd memory-cat
 `windows/` 폴더의 `README.txt`를 보세요. 요약:
 
 ```bat
+git clone https://github.com/hyeonheebee/memory-cat.git
+cd memory-cat
 pip install pyside6 psutil
 pythonw windows\windows_cat.pyw
 ```
