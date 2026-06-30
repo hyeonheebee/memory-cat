@@ -14,17 +14,25 @@ macOS와 Windows를 지원합니다.
 
 ## Screenshots
 
-기본 테마는 디스크 사용량에 따라 애기냥 → 통통냥 → 돼지냥으로 변합니다.
+<table>
+  <tr>
+    <td align="center">
+      <img src="./cute.png" width="260"><br>
+      <sub>디스크가 꽉 차면 통통해지는 기본 냥이</sub>
+    </td>
+    <td align="center">
+      <img src="./simple.png" width="260"><br>
+      <sub>테마별로 다른 뚱냥이</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="./context-menu.png" width="400"><br>
+      <sub>우클릭으로 디스크, RAM, 메모리 많이 쓰는 앱, 테마와 크기를 확인할 수 있습니다</sub>
+    </td>
+  </tr>
+</table>
 
-![Cute theme](./cute.png)
-
-우클릭하면 디스크, RAM, 스왑 사용량과 메모리 많이 쓰는 앱을 확인할 수 있습니다.
-
-![Context menu](./context-menu.png)
-
-다른 테마도 선택할 수 있습니다.
-
-![Simple theme](./simple.png)
 
 ## 만든 이유
 
@@ -58,8 +66,8 @@ macOS와 Windows를 지원합니다.
 |---|---|
 | 귀여운 | 3D 토이 느낌의 뚱냥이. 뚱뚱할수록 눈이 게슴츠레해집니다 |
 | 단순한 | 심플한 일러스트 스타일의 뚱냥이 |
-| 광기 | 큰 반짝이 눈을 가진 맑눈광냥이. 살짝 부담스럽습니다 |
-| 경각심 | 금방이라도 쓰러질것같은 지친냥이. 이름처럼 경각심을 줍니다 |
+| 광기 | 큰 반짝이 눈을 가진 치비냥. 약간 이상하지만 귀엽습니다 |
+| 경각심 | 금방이라도 쓰러질것같은 지친냥. 이름처럼 경각심을 줍니다 |
 
 
 ---
