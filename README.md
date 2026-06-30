@@ -152,6 +152,15 @@ import_theme.py      converts an image into a custom theme
 frames/<theme>/      PNG frames for each theme
 ```
 
+## Privacy / 개인정보
+
+메모리 뚱냥이는 어떤 데이터도 외부로 보내지 않습니다.
+
+- 네트워크 요청 없음
+- 텔레메트리 없음
+- 분석/추적 없음
+- 디스크와 메모리 사용량은 내 컴퓨터 안에서만 확인합니다
+
 ## Notes
 이 프로젝트는 재미로 시작한 작은 데스크톱 위젯입니다.
 
