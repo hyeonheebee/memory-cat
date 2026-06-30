@@ -1,41 +1,88 @@
 # 메모리 뚱냥이 🐱 (Memory Tubby Cat)
 
-바탕화면에 둥둥 떠 있는 고양이가 **하드 용량(디스크)** 이 찰수록 **애기냥 → 돼지냥**으로 빵빵해집니다.
-[RunCat](https://github.com/Kyome22/RunCat_for_macOS)의 "디스크 용량" 버전 같은 느낌이에요. macOS · Windows 둘 다 지원.
+A tiny desktop cat that gets chubbier as your disk fills up.  
+디스크 용량이 찰수록 점점 통통해지는 데스크톱 고양이 위젯입니다.
 
-> A cute desktop pet that gets chubbier as your disk fills up. The fatter the cat, the fuller your drive. Works on macOS & Windows.
+Think RunCat, but for disk usage.  
+The fatter the cat, the fuller your drive.
 
-- 디스크가 찰수록 고양이가 통통해지고 살짝 튐 (램 사용량도 함께 표시)
-- 드래그로 이동 / 우클릭으로 상세·테마·크기 변경
-- **테마 4종** 기본 제공 + **이미지만 있으면 나만의 테마 추가**
-- 설정은 자동 저장, 로그인 시 자동 실행
+메모리 뚱냥이는 바탕화면 위에 둥둥 떠 있는 작은 고양이입니다.  
+디스크가 여유로우면 작은 애기냥, 디스크가 거의 꽉 차면 빵빵한 돼지냥이 됩니다.
 
-## 테마
+macOS와 Windows를 지원합니다.
+이미지 커스텀이 가능합니다. 
+
+## Screenshots
+
+기본 테마는 디스크 사용량에 따라 애기냥 → 통통냥 → 돼지냥으로 변합니다.
+
+![Cute theme](./cute.png)
+
+우클릭하면 디스크, RAM, 스왑 사용량과 메모리 많이 쓰는 앱을 확인할 수 있습니다.
+
+![Context menu](./context-menu.png)
+
+다른 테마도 선택할 수 있습니다.
+
+![Simple theme](./simple.png)
+
+## 만든 이유
+
+요즘 Claude Code와 Hermes 같은 AI 도구를 열심히 써보다 보니, 어느 순간 디스크 용량이 생각보다 빨리 줄어드는 걸 느꼈습니다.
+
+가상환경, 패키지, 캐시, 데스크톱 앱 파일들이 조용히 쌓이더라고요.
+
+디스크 용량 경고는 유용하지만 별로 귀엽지는 않았고, 디스크가 찰수록 고양이가 같이 통통해지면 재밌기도 하고 눈으로 확인하기에도 좋겠다고 생각했습니다.
+특히, 이 위젯을 만드는데 아이디어를 준 친구가 고양이를 좋아하거든요. 
+
+그래서 만든 작은 시스템 모니터이자 데스크톱 펫입니다.
+
+
+## Features
+
+- 디스크 사용량에 따라 고양이가 애기냥 → 통통냥 → 돼지냥으로 변합니다
+- RAM 사용량도 함께 볼 수 있습니다
+- 메모리 많이 쓰는 앱을 확인할 수 있습니다
+- 바탕화면 위에 둥둥 떠 있고, 드래그로 위치를 옮길 수 있습니다
+- 우클릭으로 상세 사용량, 메모리 많이 쓰는 앱, 테마, 크기를 확인하고 바꿀 수 있습니다
+- 이미지 한 장으로 나만의 테마를 추가할 수 있습니다
+- 설정을 자동 저장합니다
+- 로그인 시 자동 실행할 수 있습니다
+- macOS와 Windows를 지원합니다
+
+## Themes
+
+기본 테마는 귀여운 것부터 약간 이상한 것까지 4종을 제공합니다.
 
 | 테마 | 설명 |
 |---|---|
-| 귀여운 | 3D 토이 느낌 (뚱뚱할수록 눈 게슴츠레) |
-| 단순한 | 심플 일러스트 뚱냥 |
-| 광기 | 큰 반짝이 눈 치비냥 |
-| 경각심 | 하찮은 멍냥 |
+| 귀여운 | 3D 토이 느낌의 뚱냥이. 뚱뚱할수록 눈이 게슴츠레해집니다 |
+| 단순한 | 심플한 일러스트 스타일의 뚱냥이 |
+| 광기 | 큰 반짝이 눈을 가진 맑눈광냥이. 살짝 부담스럽습니다 |
+| 경각심 | 금방이라도 쓰러질것같은 지친냥이. 이름처럼 경각심을 줍니다 |
+
 
 ---
 
-## 설치 — macOS
-
+## Installation — macOS
 ```bash
 git clone https://github.com/hyeonheebee/memory-cat.git
 cd memory-cat
-./install_mac.command        # 더블클릭해도 됩니다
+./install_mac.command        
 ```
+`install_mac.command`는 더블클릭해서 실행해도 됩니다.
+Python 3.9 이상이 설치되어 있으면, 가상환경을 만들고 필요한 의존성을 설치한 뒤 앱을 실행합니다.
 
-`python3`(3.9+)만 있으면 가상환경 만들고 의존성 설치 후 자동 실행까지 됩니다.
-제거는 `./uninstall_mac.command`.
+삭제하려면 아래 명령어를 실행하세요.
+```bash
+./uninstall_mac.command
+```
+---
 
-## 설치 — Windows
+## Installation — Windows
 
-`windows/` 폴더의 `README.txt`를 보세요. 요약:
-
+Windows에서는 `windows/` 폴더의 `README.txt`를 참고해주세요.
+간단히 실행하려면:
 ```bat
 git clone https://github.com/hyeonheebee/memory-cat.git
 cd memory-cat
@@ -43,40 +90,66 @@ pip install pyside6 psutil
 pythonw windows\windows_cat.pyw
 ```
 
-파이썬 없이 쓰고 싶으면 `windows\build_exe.bat`로 `.exe`를 만들 수 있어요.
+Python 없이 `.exe`로 사용하고 싶다면:
+```bat
+`windows\build_exe.bat`
+```
+로 `.exe`를 만들 수 있어요.
+
 
 ---
 
 ## 나만의 테마 만들기 🎨
 
-**가로로 N단계(마름 → 뚱뚱) 늘어선 고양이 이미지 한 장**만 있으면 됩니다.
-(ChatGPT 등으로 "같은 고양이가 6단계로 점점 통통해지는, 흰 배경, 한 줄" 이미지를 뽑으면 좋아요.)
+가로로 N단계가 나열된 고양이 이미지 한 장만 있으면 나만의 테마를 만들 수 있습니다.
+예를 들면 이런 이미지입니다.
 
+> 같은 고양이가 6단계로 점점 통통해지는 이미지  
+> 흰 배경  
+> 한 줄로 나열된 형태
+
+ChatGPT나 이미지 생성 도구로 이런 식의 이미지를 만든 뒤 사용할 수 있습니다.
+
+[1] 개발용 의존성을 먼저 설치합니다.
 ```bash
 # (가상환경 기준) 이미지 변환 도구 의존성
 ./.venv/bin/python -m pip install -r requirements-dev.txt
+```
 
+[2]이미지를 테마로 변환합니다.
+```bash
 # 이미지 -> 테마 (흰 배경 자동 제거 + 정렬 + 단계화)
 ./.venv/bin/python import_theme.py 내고양이.png 내테마이름
 ```
 
-앱을 다시 실행하면 우클릭 **테마** 메뉴에 `내테마이름`이 자동으로 생깁니다.
-(테마는 `frames/<이름>/` 폴더를 자동 인식해요.)
+앱을 다시 실행하면 우클릭 테마 메뉴에 `내 테마이름`이 자동으로 나타납니다.
+테마는 아래 폴더를 자동으로 인식합니다
+```bash
+frames/<테마이름>/
+```
 
-코드로 그리는 테마는 `python generate_frames.py`로 다시 뽑을 수 있습니다.
-
+코드로 그리는 기본 테마 프레임은 아래 명령어로 다시 만들 수 있습니다.
+```bash
+python generate_frames.py
+```
 ---
 
-## 구조
+## Project structure
+```
+desktop_cat.py       macOS app, built with PyObjC
+windows/             Windows app, built with PySide6
+metrics.py           shared disk and memory metrics
+generate_frames.py   generates built-in theme frames
+import_theme.py      converts an image into a custom theme
+frames/<theme>/      PNG frames for each theme
+```
 
-```
-desktop_cat.py      macOS 앱 (PyObjC)
-windows/            Windows 앱 (PySide6)
-metrics.py          디스크/메모리 측정 (공통)
-generate_frames.py  코드 테마 프레임 생성
-import_theme.py     이미지 -> 테마 변환
-frames/<theme>/     테마별 프레임 PNG
-```
+## Notes
+이 프로젝트는 재미로 시작한 작은 데스크톱 위젯입니다.
+
+설치 환경에 따라 예상하지 못한 이슈가 있을 수 있습니다.  
+써보다가 고양이가 이상하게 굴거나, 너무 빨리 살찌거나, 실행이 잘 안 되면 이슈로 알려주세요. 
+[피드백 제보 링크](https://forms.gle/yeboaGjzpfzaqWAJA)
 
 ## 만든이 / License
 
