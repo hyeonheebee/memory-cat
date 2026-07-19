@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import desktop_cat
+from i18n import LANGUAGE_AUTO, LANGUAGE_EN
 from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
 
 
@@ -19,6 +20,18 @@ class DesktopCatTests(unittest.TestCase):
 
         self.assertEqual(config["personality"], DEFAULT_PERSONALITY)
         self.assertEqual(config["custom_personality"], "")
+        self.assertEqual(config["language"], LANGUAGE_AUTO)
+
+    def test_language_override_round_trips_through_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            config = dict(desktop_cat.DEFAULT, language=LANGUAGE_EN)
+            self.assertTrue(desktop_cat.save_config(config, path))
+            loaded = desktop_cat.load_config(path)
+
+        self.assertEqual(loaded["language"], LANGUAGE_EN)
+        self.assertEqual(desktop_cat.theme_label("cute", LANGUAGE_EN), "Cute")
+        self.assertEqual(desktop_cat.size_label("보통", LANGUAGE_EN), "Medium")
 
     def test_custom_personality_round_trips_through_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -37,6 +50,7 @@ class DesktopCatTests(unittest.TestCase):
         controller.cfg = dict(desktop_cat.DEFAULT)
         controller._diagnosis_running = False
         controller._diagnosis_thread = None
+        controller.language = LANGUAGE_EN
         controller._notify = Mock(return_value=True)
         thread = Mock()
         with patch.object(desktop_cat.threading, "Thread", return_value=thread) as ctor:
@@ -66,11 +80,13 @@ class DesktopCatTests(unittest.TestCase):
             patch.object(desktop_cat, "NSOperationQueue", queue_provider),
         ):
             desktop_cat._diagnosis_worker(
-                "무뚝뚝한 무사냥", "", callback
+                "무뚝뚝한 무사냥", "", LANGUAGE_EN, callback
             )
 
         diagnose.assert_called_once_with(
-            personality="무뚝뚝한 무사냥", custom_personality=""
+            personality="무뚝뚝한 무사냥",
+            custom_personality="",
+            language=LANGUAGE_EN,
         )
         queue.addOperationWithBlock_.assert_called_once()
         callback.assert_called_once_with(result)

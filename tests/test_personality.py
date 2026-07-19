@@ -50,6 +50,21 @@ class PersonalityTests(unittest.TestCase):
         self.assertEqual(selection, personality.DEFAULT_PERSONALITY)
         self.assertEqual(custom, "")
 
+    def test_english_presets_keep_stable_config_keys_and_english_names(self):
+        expected_labels = (
+            "Sassy Butler Cat",
+            "Warm Auntie Cat",
+            "Stoic Samurai Cat",
+        )
+        labels = tuple(
+            personality.preset_label(name, "en")
+            for name in personality.preset_names()
+        )
+        self.assertEqual(labels, expected_labels)
+        prompt = personality.compile_personality("냉소적 집사냥", language="en")
+        self.assertIn("Sassy Butler Cat", prompt)
+        self.assertIn("deletion allowlist", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

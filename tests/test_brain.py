@@ -119,6 +119,19 @@ class BrainTests(unittest.TestCase):
             {"browser_cache"},
         )
 
+    def test_english_fallback_and_prompt_include_language_and_chonk_stage(self):
+        with (
+            patch.object(brain, "_load_api_key", return_value=None),
+            patch.object(
+                brain, "collect_cleanup_candidates", return_value=self.candidates
+            ),
+        ):
+            result = brain.diagnose(self.snapshot, language="en")
+
+        self.assertIn("MEGACHONKER", " ".join(result["why_slow"]))
+        self.assertIn("English", brain.system_prompt_for(language="en"))
+        self.assertNotIn("잠시", result["one_line_advice"])
+
     def test_api_result_cannot_add_non_whitelisted_category(self):
         parsed = brain._AIDiagnosis(
             why_slow=["디스크 여유 공간이 적습니다."],

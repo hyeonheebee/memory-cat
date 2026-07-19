@@ -31,11 +31,21 @@ from Foundation import (
 
 import metrics as mc
 from brain import diagnose as run_diagnosis, safe_trash
+from i18n import (
+    LANGUAGE_AUTO,
+    LANGUAGE_EN,
+    LANGUAGE_KO,
+    LANGUAGE_OVERRIDES,
+    chonk_stage,
+    resolve_language,
+    tr,
+)
 from personality import (
     CUSTOM_PERSONALITY,
     DEFAULT_PERSONALITY,
     config_personality,
     normalize_custom_personality,
+    preset_label,
     preset_names,
 )
 
@@ -46,14 +56,26 @@ REFRESH_SEC = 4.0
 NSStatusWindowLevel = 25
 CATBOTTOM = 46.0
 
-THEME_LABELS = {"cute": "귀여운", "simple": "단순한", "madness": "광기", "derpy": "경각심"}
+THEME_STRING_KEYS = {
+    "cute": "theme_cute",
+    "simple": "theme_simple",
+    "madness": "theme_madness",
+    "derpy": "theme_derpy",
+}
 THEME_ORDER = ["cute", "simple", "madness", "derpy"]
 SIZES = {"작게": 78.0, "보통": 104.0, "크게": 138.0, "왕": 176.0}
+SIZE_STRING_KEYS = {
+    "작게": "size_small",
+    "보통": "size_medium",
+    "크게": "size_large",
+    "왕": "size_king",
+}
 DEFAULT = {
     "theme": "cute",
     "size": "보통",
     "personality": DEFAULT_PERSONALITY,
     "custom_personality": "",
+    "language": LANGUAGE_AUTO,
 }
 
 
@@ -72,6 +94,8 @@ def load_config(path=CONFIG):
         selection, custom = config_personality(loaded)
         cfg["personality"] = selection
         cfg["custom_personality"] = custom
+        language = loaded.get("language", LANGUAGE_AUTO)
+        cfg["language"] = language if language in LANGUAGE_OVERRIDES else LANGUAGE_AUTO
     return cfg
 
 
@@ -84,27 +108,28 @@ def save_config(cfg, path=CONFIG):
         return False
 
 
-def diagnosis_notification_text(result):
+def diagnosis_notification_text(result, language=LANGUAGE_KO):
     """진단 JSON을 macOS 알림에 들어갈 짧은 텍스트로 만든다."""
     why = [str(line).strip() for line in result.get("why_slow", []) if str(line).strip()]
     advice = str(result.get("one_line_advice", "")).strip()
     lines = [f"• {line}" for line in why[:3]]
     if advice:
         lines.append(f"🐾 {advice}")
-    return "\n".join(lines) or "진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
+    return "\n".join(lines) or tr(language, "diagnosis_empty")
 
 
-def _diagnosis_worker(personality, custom_personality, callback):
+def _diagnosis_worker(personality, custom_personality, language, callback):
     """API/측정을 작업 스레드에서 수행하고 callback만 메인 큐로 보낸다."""
     try:
         result = run_diagnosis(
             personality=personality,
             custom_personality=custom_personality,
+            language=language,
         )
     except Exception:
         result = {
-            "why_slow": ["진단 데이터를 읽는 중 문제가 생겼습니다."],
-            "one_line_advice": "잠시 후 다시 시도해 주세요.",
+            "why_slow": [tr(language, "diagnosis_error")],
+            "one_line_advice": tr(language, "retry_later"),
             "cleanup_recommendations": [],
             "source": "fallback",
         }
@@ -144,8 +169,14 @@ def discover_themes():
             + [t for t in found if t not in THEME_ORDER])
 
 
-def theme_label(key):
-    return THEME_LABELS.get(key, key)
+def theme_label(key, language=LANGUAGE_KO):
+    string_key = THEME_STRING_KEYS.get(key)
+    return tr(language, string_key) if string_key else key
+
+
+def size_label(key, language=LANGUAGE_KO):
+    string_key = SIZE_STRING_KEYS.get(key)
+    return tr(language, string_key) if string_key else key
 
 
 def frame_count(theme):
@@ -236,6 +267,7 @@ class CatController(NSObject):
         self.view = view
         self.window = window
         self.cfg = load_config()
+        self.language = resolve_language(self.cfg["language"])
         themes = discover_themes()
         if themes and self.cfg["theme"] not in themes:
             self.cfg["theme"] = themes[0]
@@ -277,20 +309,22 @@ class CatController(NSObject):
         n = frame_count(theme)
         idx = int(round(dpct / 100 * (n - 1)))
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
+        language = self.language
         self.view.updateImage_l1_l2_(
-            img, f"디스크 {dpct:.0f}%", f"램 {vm.percent:.0f}%")
+            img,
+            f"{tr(language, 'disk')} {dpct:.0f}%",
+            f"{tr(language, 'ram')} {vm.percent:.0f}%",
+        )
 
-        mood = ("여유 😺" if dpct < 60 else "포동 🐈" if dpct < 80
-                else "배불러 🍙" if dpct < 92 else "빵빵! 🐷")
+        mood = chonk_stage(dpct, language)
         self.detail = [
-            f"기분: {mood}  (디스크 {round(dpct)}%)",
-            f"💾 디스크 {dpct:.0f}%  ·  {mc.human_gb(disk.used)} / {mc.human_gb(disk.total)}  (여유 {mc.human_gb(disk.free)})",
-            f"🧠 RAM {vm.percent:.0f}%  ·  {mc.human_gb(vm.used)} / {mc.human_gb(vm.total)}",
+            tr(language, "mood_detail", mood=mood, percent=round(dpct)),
+            tr(language, "disk_detail", percent=dpct, used=mc.human_gb(disk.used), total=mc.human_gb(disk.total), free=mc.human_gb(disk.free)),
+            tr(language, "ram_detail", percent=vm.percent, used=mc.human_gb(vm.used), total=mc.human_gb(vm.total)),
         ]
         if sw.total > 0:
-            self.detail.append(
-                f"스왑 {sw.percent:.0f}%  ·  {mc.human_gb(sw.used)} / {mc.human_gb(sw.total)}")
-        self.detail.append("─ 메모리 먹는 앱 ─")
+            self.detail.append(tr(language, "swap_detail", percent=sw.percent, used=mc.human_gb(sw.used), total=mc.human_gb(sw.total)))
+        self.detail.append(tr(language, "memory_apps"))
         try:
             for name, rss in mc.top_memory_apps():
                 self.detail.append(f"{rss / 1024 ** 2:,.0f} MB   {name}")
@@ -310,14 +344,15 @@ class CatController(NSObject):
     def setPersonality_(self, sender):
         self.cfg["personality"] = sender.representedObject()
         save_config(self.cfg)
-        self._notify("뚱냥이 성격 변경", f"이제 {self.cfg['personality']} 말투로 진단할게요.")
+        label = preset_label(self.cfg["personality"], self.language)
+        self._notify(tr(self.language, "personality_changed_title"), tr(self.language, "personality_changed_body", personality=label))
 
     def setCustomPersonality_(self, sender):
         alert = NSAlert.alloc().init()
-        alert.setMessageText_("뚱냥이 성격을 직접 알려 주세요")
-        alert.setInformativeText_("예: 다정하지만 핵심만 말하고, 말끝에 냥을 붙여줘")
-        alert.addButtonWithTitle_("저장")
-        alert.addButtonWithTitle_("취소")
+        alert.setMessageText_(tr(self.language, "custom_title"))
+        alert.setInformativeText_(tr(self.language, "custom_hint"))
+        alert.addButtonWithTitle_(tr(self.language, "save"))
+        alert.addButtonWithTitle_(tr(self.language, "cancel"))
         field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 380, 28))
         field.setStringValue_(self.cfg.get("custom_personality", ""))
         alert.setAccessoryView_(field)
@@ -327,23 +362,31 @@ class CatController(NSObject):
 
         custom = normalize_custom_personality(field.stringValue())
         if not custom:
-            self._notify("성격을 저장하지 않았어요", "한 문장 이상 입력해 주세요.")
+            self._notify(tr(self.language, "custom_empty_title"), tr(self.language, "custom_empty_body"))
             return
         self.cfg["personality"] = CUSTOM_PERSONALITY
         self.cfg["custom_personality"] = custom
         save_config(self.cfg)
-        self._notify("커스텀 성격 저장", custom)
+        self._notify(tr(self.language, "custom_saved_title"), custom)
+
+    def setLanguage_(self, sender):
+        self.cfg["language"] = sender.representedObject()
+        self.language = resolve_language(self.cfg["language"])
+        save_config(self.cfg)
+        self.refresh_(None)
+        selected = tr(self.language, f"language_{self.language}")
+        self._notify(tr(self.language, "language_changed_title"), tr(self.language, "language_changed_body", language=selected))
 
     def diagnose_(self, sender):
         if self._diagnosis_running:
-            self._notify("🧠 이미 진단 중이에요", "뚱냥이가 숫자를 살펴보고 있습니다.")
+            self._notify(tr(self.language, "diagnosis_already_title"), tr(self.language, "diagnosis_already_body"))
             return
         personality, custom = config_personality(self.cfg)
         self._diagnosis_running = True
-        self._notify("🧠 왜 느린지 보는 중", "고양이가 디스크와 메모리를 살펴보고 있어요.")
+        self._notify(tr(self.language, "diagnosis_running_title"), tr(self.language, "diagnosis_running_body"))
         self._diagnosis_thread = threading.Thread(
             target=_diagnosis_worker,
-            args=(personality, custom, self._finish_diagnosis),
+            args=(personality, custom, self.language, self._finish_diagnosis),
             name="memory-cat-diagnosis",
             daemon=True,
         )
@@ -352,9 +395,10 @@ class CatController(NSObject):
     @objc.python_method
     def _finish_diagnosis(self, result):
         self._diagnosis_running = False
-        body = diagnosis_notification_text(result)
-        if not self._notify("🧠 뚱냥이 진단", body):
-            self._show_information_alert("🧠 뚱냥이 진단", body)
+        body = diagnosis_notification_text(result, self.language)
+        title = tr(self.language, "diagnosis_result_title")
+        if not self._notify(title, body):
+            self._show_information_alert(title, body)
 
         recommendations = result.get("cleanup_recommendations", [])
         if recommendations and self._confirm_cleanup_review(recommendations):
@@ -381,7 +425,7 @@ class CatController(NSObject):
         alert = NSAlert.alloc().init()
         alert.setMessageText_(title)
         alert.setInformativeText_(body)
-        alert.addButtonWithTitle_("확인")
+        alert.addButtonWithTitle_(tr(self.language, "confirm"))
         NSApp.activateIgnoringOtherApps_(True)
         alert.runModal()
 
@@ -391,13 +435,10 @@ class CatController(NSObject):
         if count == 0:
             return False
         alert = NSAlert.alloc().init()
-        alert.setMessageText_("안전한 정리 후보를 볼까요?")
-        alert.setInformativeText_(
-            f"화이트리스트 항목 {count}개를 하나씩 확인합니다. "
-            "동의한 항목만 macOS 휴지통으로 이동하며 영구 삭제하지 않습니다."
-        )
-        alert.addButtonWithTitle_("항목별 검토")
-        alert.addButtonWithTitle_("나중에")
+        alert.setMessageText_(tr(self.language, "cleanup_review_title"))
+        alert.setInformativeText_(tr(self.language, "cleanup_review_body", count=count))
+        alert.addButtonWithTitle_(tr(self.language, "review_items"))
+        alert.addButtonWithTitle_(tr(self.language, "later"))
         NSApp.activateIgnoringOtherApps_(True)
         return alert.runModal() == NSAlertFirstButtonReturn
 
@@ -405,19 +446,19 @@ class CatController(NSObject):
     def _confirm_cleanup_item(self, recommendation, item):
         category = recommendation.get("category")
         path = item.get("path", "")
-        size = item.get("size", "크기 알 수 없음")
+        size = item.get("size", tr(self.language, "unknown_size"))
         reason = recommendation.get("reason", "")
         alert = NSAlert.alloc().init()
-        alert.setMessageText_(f"{recommendation.get('label', '정리 후보')} · {size}")
+        alert.setMessageText_(f"{recommendation.get('label', tr(self.language, 'cleanup_candidate'))} · {size}")
         if category == "trash":
-            action_note = "이미 휴지통 안에 있어 확인만 하며, 영구 삭제하지 않습니다."
-            primary = "확인"
+            action_note = tr(self.language, "trash_review_note")
+            primary = tr(self.language, "confirm")
         else:
-            action_note = "이 항목을 macOS 휴지통으로 이동할까요?"
-            primary = "휴지통으로 이동"
+            action_note = tr(self.language, "move_question")
+            primary = tr(self.language, "move_to_trash")
         alert.setInformativeText_(f"{path}\n\n{reason}\n{action_note}")
         alert.addButtonWithTitle_(primary)
-        alert.addButtonWithTitle_("건너뛰기")
+        alert.addButtonWithTitle_(tr(self.language, "skip"))
         NSApp.activateIgnoringOtherApps_(True)
         return alert.runModal() == NSAlertFirstButtonReturn
 
@@ -425,17 +466,17 @@ class CatController(NSObject):
     def _show_cleanup_summary(self, summary):
         parts = []
         if summary["moved"]:
-            parts.append(f"{summary['moved']}개를 휴지통으로 이동")
+            parts.append(tr(self.language, "summary_moved", count=summary["moved"]))
         if summary["already_in_trash"]:
-            parts.append(f"휴지통 안 {summary['already_in_trash']}개 확인")
+            parts.append(tr(self.language, "summary_in_trash", count=summary["already_in_trash"]))
         if summary["skipped"]:
-            parts.append(f"{summary['skipped']}개 건너뜀")
+            parts.append(tr(self.language, "summary_skipped", count=summary["skipped"]))
         if summary["failed"]:
-            parts.append(f"{summary['failed']}개 이동 실패")
-        body = " · ".join(parts) or "변경한 항목이 없습니다."
+            parts.append(tr(self.language, "summary_failed", count=summary["failed"]))
+        body = " · ".join(parts) or tr(self.language, "summary_none")
         if summary["moved"]:
-            body += " 공간은 휴지통을 직접 비운 뒤 확보됩니다."
-        self._notify("🧹 정리 결과", body)
+            body += tr(self.language, "summary_reclaim_note")
+        self._notify(tr(self.language, "cleanup_result_title"), body)
 
     def popUpMenu_(self, event):
         menu = NSMenu.alloc().init()
@@ -445,7 +486,10 @@ class CatController(NSObject):
             menu.addItem_(it)
         menu.addItem_(NSMenuItem.separatorItem())
 
-        diagnose_title = "🧠 진단 중…" if self._diagnosis_running else "🧠 왜 느려?"
+        diagnose_title = tr(
+            self.language,
+            "menu_diagnosing" if self._diagnosis_running else "menu_diagnose",
+        )
         di = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             diagnose_title, b"diagnose:", ""
         )
@@ -456,32 +500,32 @@ class CatController(NSObject):
 
         theme_menu = NSMenu.alloc().init()
         for key in discover_themes():
-            it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(theme_label(key), b"setTheme:", "")
+            it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(theme_label(key, self.language), b"setTheme:", "")
             it.setTarget_(self)
             it.setRepresentedObject_(key)
             if key == self.cfg["theme"]:
                 it.setState_(1)
             theme_menu.addItem_(it)
-        ti = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("테마", None, "")
+        ti = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_theme"), None, "")
         ti.setSubmenu_(theme_menu)
         menu.addItem_(ti)
 
         size_menu = NSMenu.alloc().init()
         for label in SIZES:
-            it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(label, b"setSize:", "")
+            it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(size_label(label, self.language), b"setSize:", "")
             it.setTarget_(self)
             it.setRepresentedObject_(label)
             if label == self.cfg["size"]:
                 it.setState_(1)
             size_menu.addItem_(it)
-        si = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("크기", None, "")
+        si = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_size"), None, "")
         si.setSubmenu_(size_menu)
         menu.addItem_(si)
 
         personality_menu = NSMenu.alloc().init()
         for name in preset_names():
             it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                name, b"setPersonality:", ""
+                preset_label(name, self.language), b"setPersonality:", ""
             )
             it.setTarget_(self)
             it.setRepresentedObject_(name)
@@ -489,21 +533,42 @@ class CatController(NSObject):
                 it.setState_(1)
             personality_menu.addItem_(it)
         custom_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "직접 입력…", b"setCustomPersonality:", ""
+            tr(self.language, "menu_custom"), b"setCustomPersonality:", ""
         )
         custom_item.setTarget_(self)
         if self.cfg["personality"] == CUSTOM_PERSONALITY:
             custom_item.setState_(1)
         personality_menu.addItem_(custom_item)
-        pi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("성격", None, "")
+        pi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_personality"), None, "")
         pi.setSubmenu_(personality_menu)
         menu.addItem_(pi)
 
+        language_menu = NSMenu.alloc().init()
+        for override in LANGUAGE_OVERRIDES:
+            if override == LANGUAGE_AUTO:
+                current = tr(self.language, f"language_{self.language}")
+                label = tr(self.language, "language_auto", language=current)
+            else:
+                label = tr(self.language, f"language_{override}")
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                label, b"setLanguage:", ""
+            )
+            item.setTarget_(self)
+            item.setRepresentedObject_(override)
+            if override == self.cfg["language"]:
+                item.setState_(1)
+            language_menu.addItem_(item)
+        language_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            tr(self.language, "menu_language"), None, ""
+        )
+        language_item.setSubmenu_(language_menu)
+        menu.addItem_(language_item)
+
         menu.addItem_(NSMenuItem.separatorItem())
-        r = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("새로고침", b"refresh:", "")
+        r = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_refresh"), b"refresh:", "")
         r.setTarget_(self)
         menu.addItem_(r)
-        q = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("종료", b"quit:", "")
+        q = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_quit"), b"quit:", "")
         q.setTarget_(self)
         menu.addItem_(q)
         NSMenu.popUpContextMenu_withEvent_forView_(menu, event, self.view)
