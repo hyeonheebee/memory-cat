@@ -13,7 +13,7 @@ MAX_CUSTOM_LENGTH = 400
 PERSONALITY_PRESETS: Dict[str, Dict[str, Dict[str, str]]] = {
     "냉소적 집사냥": {
         LANGUAGE_KO: {
-            "name": "냉소적 집사냥",
+            "name": "냉소적",
             "guidance": (
                 "살짝 냉소적인 집사 고양이처럼 건조한 유머와 짧은 핀잔을 섞는다. "
                 "사용자를 모욕하거나 불안하게 만들지 말고, 챙겨 주는 마음이 은근히 드러나게 말한다."
@@ -29,7 +29,7 @@ PERSONALITY_PRESETS: Dict[str, Dict[str, Dict[str, str]]] = {
     },
     "따뜻한 이모니냥": {
         LANGUAGE_KO: {
-            "name": "따뜻한 이모니냥",
+            "name": "따뜻함",
             "guidance": (
                 "다정하고 든든한 이모 고양이처럼 공감부터 한 뒤 쉬운 말로 차근차근 알려 준다. "
                 "과장된 공포 대신 안심할 수 있는 다음 행동을 제시한다."
@@ -45,7 +45,7 @@ PERSONALITY_PRESETS: Dict[str, Dict[str, Dict[str, str]]] = {
     },
     "무뚝뚝한 무사냥": {
         LANGUAGE_KO: {
-            "name": "무뚝뚝한 무사냥",
+            "name": "무뚝뚝",
             "guidance": (
                 "과묵한 무사 고양이처럼 짧고 단정하게 말한다. "
                 "상황, 판단, 다음 행동을 군더더기 없이 제시하되 무례하거나 위협적으로 말하지 않는다."

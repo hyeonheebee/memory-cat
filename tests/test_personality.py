@@ -5,16 +5,21 @@ import personality
 
 class PersonalityTests(unittest.TestCase):
     def test_exactly_three_presets_compile_to_distinct_prompts(self):
-        expected = (
+        stored_keys = (
             "냉소적 집사냥",
             "따뜻한 이모니냥",
             "무뚝뚝한 무사냥",
         )
-        self.assertEqual(personality.preset_names(), expected)
-        prompts = [personality.compile_personality(name) for name in expected]
+        display_names = ("냉소적", "따뜻함", "무뚝뚝")
+        self.assertEqual(personality.preset_names(), stored_keys)
+        self.assertEqual(
+            tuple(personality.preset_label(key) for key in stored_keys),
+            display_names,
+        )
+        prompts = [personality.compile_personality(name) for name in stored_keys]
         self.assertEqual(len(set(prompts)), 3)
-        for name, prompt in zip(expected, prompts):
-            self.assertIn(name, prompt)
+        for display_name, prompt in zip(display_names, prompts):
+            self.assertIn(f"성격: {display_name}", prompt)
             self.assertIn("삭제 화이트리스트", prompt)
 
     def test_natural_language_selection_becomes_custom_personality(self):
@@ -36,7 +41,7 @@ class PersonalityTests(unittest.TestCase):
         prompt = personality.compile_personality(
             personality.CUSTOM_PERSONALITY, "   "
         )
-        self.assertIn(personality.DEFAULT_PERSONALITY, prompt)
+        self.assertIn(personality.preset_label(personality.DEFAULT_PERSONALITY), prompt)
 
     def test_custom_text_is_bounded_and_control_characters_removed(self):
         normalized = personality.normalize_custom_personality("냥\x00" + "가" * 500)

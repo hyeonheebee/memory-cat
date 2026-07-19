@@ -24,6 +24,29 @@ class I18nTests(unittest.TestCase):
             ["여유 😺", "포동 🐈", "배불러 🍙", "빵빵! 🐷"],
         )
 
+    def test_translation_can_format_a_language_placeholder(self):
+        self.assertEqual(
+            i18n.tr("ko", "language_auto", language="한국어"),
+            "자동 (한국어)",
+        )
+
+    def test_diagnosis_menu_uses_friendly_cat_wording_in_both_languages(self):
+        expected = {
+            "ko": ("🐾 배불러?", "🐾 살펴보는 중…", "🐾 다시 살펴보기", "📋 마지막 진단 보기"),
+            "en": ("🐾 Feeling full?", "🐾 Checking…", "🐾 Check again", "📋 View last diagnosis"),
+        }
+        for language, labels in expected.items():
+            with self.subTest(language=language):
+                self.assertEqual(
+                    (
+                        i18n.tr(language, "menu_diagnose"),
+                        i18n.tr(language, "menu_diagnosing"),
+                        i18n.tr(language, "menu_diagnose_again"),
+                        i18n.tr(language, "menu_last_diagnosis"),
+                    ),
+                    labels,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,7 +22,7 @@ from AppKit import (
     NSWindowCollectionBehaviorStationary,
     NSCompositingOperationSourceOver, NSCompositingOperationCopy,
     NSRectFillUsingOperation, NSApp,
-    NSAlert, NSTextField, NSAlertFirstButtonReturn,
+    NSAlert, NSTextField, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
 )
 from Foundation import (
     NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString,
@@ -37,6 +37,7 @@ from i18n import (
     LANGUAGE_KO,
     LANGUAGE_OVERRIDES,
     chonk_stage,
+    diagnosis_personality_descriptor,
     resolve_language,
     tr,
 )
@@ -118,6 +119,57 @@ def diagnosis_notification_text(result, language=LANGUAGE_KO):
     return "\n".join(lines) or tr(language, "diagnosis_empty")
 
 
+def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO):
+    """진단 JSON을 결과창에서 읽기 쉬운 제목·본문·동작으로 바꾼다."""
+    if result.get("source") == "openai":
+        title = tr(
+            language,
+            "diagnosis_result_openai_title",
+            personality=diagnosis_personality_descriptor(
+                personality_label, language
+            ),
+        )
+        source = None
+    else:
+        title = tr(language, "diagnosis_result_fallback_title")
+        reason_key = {
+            "missing_api_key": "fallback_missing_api_key",
+            "api_error": "fallback_api_error",
+            "worker_error": "fallback_worker_error",
+        }.get(result.get("fallback_reason"), "fallback_unknown")
+        source = tr(
+            language,
+            "diagnosis_source_fallback",
+            reason=tr(language, reason_key),
+        )
+
+    why = [str(line).strip() for line in result.get("why_slow", []) if str(line).strip()]
+    causes = "\n".join(f"• {line}" for line in why) or tr(language, "diagnosis_empty")
+    advice = str(result.get("one_line_advice", "")).strip() or tr(
+        language, "diagnosis_empty"
+    )
+    reclaimable = str(result.get("estimated_reclaimable", "0 B"))
+    body = "\n\n".join(
+        part
+        for part in (
+            source,
+            causes,
+            f"{tr(language, 'diagnosis_advice_heading')}\n{advice}",
+            tr(language, "diagnosis_reclaimable", size=reclaimable),
+        )
+        if part
+    )
+    cleanup_count = sum(
+        len(recommendation.get("items", []))
+        for recommendation in result.get("cleanup_recommendations", [])
+    )
+    return {
+        "title": title,
+        "body": body,
+        "can_review_cleanup": cleanup_count > 0,
+    }
+
+
 def _diagnosis_worker(personality, custom_personality, language, callback):
     """API/측정을 작업 스레드에서 수행하고 callback만 메인 큐로 보낸다."""
     try:
@@ -132,6 +184,7 @@ def _diagnosis_worker(personality, custom_personality, language, callback):
             "one_line_advice": tr(language, "retry_later"),
             "cleanup_recommendations": [],
             "source": "fallback",
+            "fallback_reason": "worker_error",
         }
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
@@ -276,6 +329,9 @@ class CatController(NSObject):
         self.detail = []
         self._diagnosis_running = False
         self._diagnosis_thread = None
+        self._active_diagnosis_context = None
+        self._last_diagnosis = None
+        self._last_diagnosis_context = None
         return self
 
     def start(self):
@@ -377,11 +433,27 @@ class CatController(NSObject):
         selected = tr(self.language, f"language_{self.language}")
         self._notify(tr(self.language, "language_changed_title"), tr(self.language, "language_changed_body", language=selected))
 
+    def showLastDiagnosis_(self, sender):
+        result = getattr(self, "_last_diagnosis", None)
+        context = getattr(self, "_last_diagnosis_context", None)
+        if result is not None and context is not None:
+            self._show_diagnosis_result(result, context, allow_cleanup=False)
+
     def diagnose_(self, sender):
         if self._diagnosis_running:
             self._notify(tr(self.language, "diagnosis_already_title"), tr(self.language, "diagnosis_already_body"))
             return
         personality, custom = config_personality(self.cfg)
+        personality_display = (
+            tr(self.language, "personality_custom_label")
+            if personality == CUSTOM_PERSONALITY
+            else preset_label(personality, self.language)
+        )
+        self._active_diagnosis_context = {
+            "personality": personality,
+            "personality_label": personality_display,
+            "language": self.language,
+        }
         self._diagnosis_running = True
         self._notify(tr(self.language, "diagnosis_running_title"), tr(self.language, "diagnosis_running_body"))
         self._diagnosis_thread = threading.Thread(
@@ -395,17 +467,66 @@ class CatController(NSObject):
     @objc.python_method
     def _finish_diagnosis(self, result):
         self._diagnosis_running = False
-        body = diagnosis_notification_text(result, self.language)
-        title = tr(self.language, "diagnosis_result_title")
+        context = getattr(self, "_active_diagnosis_context", None)
+        if context is None:
+            cfg = getattr(self, "cfg", DEFAULT)
+            personality, _ = config_personality(cfg)
+            language = getattr(self, "language", LANGUAGE_KO)
+            context = {
+                "personality": personality,
+                "personality_label": (
+                    tr(language, "personality_custom_label")
+                    if personality == CUSTOM_PERSONALITY
+                    else preset_label(personality, language)
+                ),
+                "language": language,
+            }
+        self._active_diagnosis_context = None
+        self._last_diagnosis = result
+        self._last_diagnosis_context = dict(context)
+
+        language = context["language"]
+        body = diagnosis_notification_text(result, language)
+        title = diagnosis_result_content(
+            result,
+            personality_label=context["personality_label"],
+            language=language,
+        )["title"]
         if not self._notify(title, body):
             self._show_information_alert(title, body)
 
         recommendations = result.get("cleanup_recommendations", [])
-        if recommendations and self._confirm_cleanup_review(recommendations):
+        wants_cleanup = self._show_diagnosis_result(
+            result, self._last_diagnosis_context, allow_cleanup=True
+        )
+        if (
+            wants_cleanup
+            and recommendations
+            and self._confirm_cleanup_review(recommendations)
+        ):
             summary = process_cleanup_recommendations(
                 recommendations, self._confirm_cleanup_item
             )
             self._show_cleanup_summary(summary)
+
+    @objc.python_method
+    def _show_diagnosis_result(self, result, context, allow_cleanup):
+        language = context["language"]
+        content = diagnosis_result_content(
+            result,
+            personality_label=context["personality_label"],
+            language=language,
+        )
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(content["title"])
+        alert.setInformativeText_(content["body"])
+        alert.addButtonWithTitle_(tr(language, "close"))
+        can_review = allow_cleanup and content["can_review_cleanup"]
+        if can_review:
+            alert.addButtonWithTitle_(tr(language, "review_items"))
+        NSApp.activateIgnoringOtherApps_(True)
+        response = alert.runModal()
+        return can_review and response == NSAlertSecondButtonReturn
 
     @objc.python_method
     def _notify(self, title, body):
@@ -486,16 +607,28 @@ class CatController(NSObject):
             menu.addItem_(it)
         menu.addItem_(NSMenuItem.separatorItem())
 
-        diagnose_title = tr(
-            self.language,
-            "menu_diagnosing" if self._diagnosis_running else "menu_diagnose",
-        )
+        has_last_diagnosis = getattr(self, "_last_diagnosis", None) is not None
+        if self._diagnosis_running:
+            diagnose_key = "menu_diagnosing"
+        elif has_last_diagnosis:
+            diagnose_key = "menu_diagnose_again"
+        else:
+            diagnose_key = "menu_diagnose"
+        diagnose_title = tr(self.language, diagnose_key)
         di = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             diagnose_title, b"diagnose:", ""
         )
         di.setTarget_(self)
         di.setEnabled_(not self._diagnosis_running)
         menu.addItem_(di)
+        if has_last_diagnosis and not self._diagnosis_running:
+            last_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                tr(self.language, "menu_last_diagnosis"),
+                b"showLastDiagnosis:",
+                "",
+            )
+            last_item.setTarget_(self)
+            menu.addItem_(last_item)
         menu.addItem_(NSMenuItem.separatorItem())
 
         theme_menu = NSMenu.alloc().init()

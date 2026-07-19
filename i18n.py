@@ -42,18 +42,28 @@ _STRINGS = {
         "custom_empty_title": "성격을 저장하지 않았어요",
         "custom_empty_body": "한 문장 이상 입력해 주세요.",
         "custom_saved_title": "커스텀 성격 저장",
+        "personality_custom_label": "직접 입력",
         "diagnosis_already_title": "🧠 이미 진단 중이에요",
         "diagnosis_already_body": "뚱냥이가 숫자를 살펴보고 있습니다.",
-        "diagnosis_running_title": "🧠 왜 느린지 보는 중",
-        "diagnosis_running_body": "고양이가 디스크와 메모리를 살펴보고 있어요.",
-        "diagnosis_result_title": "🧠 뚱냥이 진단",
+        "diagnosis_running_title": "🐾 살펴보는 중…",
+        "diagnosis_running_body": "뚱냥이가 얼마나 배부른지 살펴보고 있어요.",
+        "diagnosis_source_fallback": "⚠️ 오프라인 진단 · 성격 미적용 · {reason}",
+        "diagnosis_result_openai_title": "{personality} 뚱냥이가 배부른 이유예요.",
+        "diagnosis_result_fallback_title": "뚱냥이가 배부른 이유예요.",
+        "fallback_missing_api_key": "API 키 없음",
+        "fallback_api_error": "API 연결 실패",
+        "fallback_worker_error": "진단 처리 실패",
+        "fallback_unknown": "알 수 없는 오류",
+        "diagnosis_advice_heading": "🐾 한 문장 조언",
+        "diagnosis_reclaimable": "예상 확보 용량: {size}",
+        "close": "닫기",
         "confirm": "확인",
         "cleanup_review_title": "안전한 정리 후보를 볼까요?",
         "cleanup_review_body": (
             "화이트리스트 항목 {count}개를 하나씩 확인합니다. "
             "동의한 항목만 macOS 휴지통으로 이동하며 영구 삭제하지 않습니다."
         ),
-        "review_items": "항목별 검토",
+        "review_items": "정리 후보 검토",
         "later": "나중에",
         "unknown_size": "크기 알 수 없음",
         "cleanup_candidate": "정리 후보",
@@ -68,8 +78,10 @@ _STRINGS = {
         "summary_none": "변경한 항목이 없습니다.",
         "summary_reclaim_note": " 공간은 휴지통을 직접 비운 뒤 확보됩니다.",
         "cleanup_result_title": "🧹 정리 결과",
-        "menu_diagnosing": "🧠 진단 중…",
-        "menu_diagnose": "🧠 왜 느려?",
+        "menu_diagnosing": "🐾 살펴보는 중…",
+        "menu_diagnose": "🐾 배불러?",
+        "menu_diagnose_again": "🐾 다시 살펴보기",
+        "menu_last_diagnosis": "📋 마지막 진단 보기",
         "menu_theme": "테마",
         "menu_size": "크기",
         "menu_personality": "성격",
@@ -114,18 +126,28 @@ _STRINGS = {
         "custom_empty_title": "Personality not saved",
         "custom_empty_body": "Please enter at least one sentence.",
         "custom_saved_title": "Custom personality saved",
+        "personality_custom_label": "Custom",
         "diagnosis_already_title": "🧠 Diagnosis already running",
         "diagnosis_already_body": "The cat is still inspecting the numbers.",
-        "diagnosis_running_title": "🧠 Finding the slowdown",
-        "diagnosis_running_body": "The cat is checking disk and memory usage.",
-        "diagnosis_result_title": "🧠 Memory Cat diagnosis",
+        "diagnosis_running_title": "🐾 Checking…",
+        "diagnosis_running_body": "Memory Cat is checking how full things feel.",
+        "diagnosis_source_fallback": "⚠️ Offline diagnosis · Personality not applied · {reason}",
+        "diagnosis_result_openai_title": "Here’s why your {personality} Memory Cat feels full.",
+        "diagnosis_result_fallback_title": "Here’s why Memory Cat feels full.",
+        "fallback_missing_api_key": "API key missing",
+        "fallback_api_error": "API connection failed",
+        "fallback_worker_error": "Diagnosis processing failed",
+        "fallback_unknown": "Unknown error",
+        "diagnosis_advice_heading": "🐾 One-line advice",
+        "diagnosis_reclaimable": "Estimated reclaimable space: {size}",
+        "close": "Close",
         "confirm": "OK",
         "cleanup_review_title": "Review safe cleanup candidates?",
         "cleanup_review_body": (
             "Review {count} allowlisted item(s), one at a time. Only approved items "
             "will move to the macOS Trash; nothing is permanently deleted."
         ),
-        "review_items": "Review items",
+        "review_items": "Review cleanup candidates",
         "later": "Later",
         "unknown_size": "Unknown size",
         "cleanup_candidate": "Cleanup candidate",
@@ -140,8 +162,10 @@ _STRINGS = {
         "summary_none": "No items were changed.",
         "summary_reclaim_note": " Space is reclaimed only after you empty the Trash yourself.",
         "cleanup_result_title": "🧹 Cleanup result",
-        "menu_diagnosing": "🧠 Diagnosing…",
-        "menu_diagnose": "🧠 Why is it slow?",
+        "menu_diagnosing": "🐾 Checking…",
+        "menu_diagnose": "🐾 Feeling full?",
+        "menu_diagnose_again": "🐾 Check again",
+        "menu_last_diagnosis": "📋 View last diagnosis",
         "menu_theme": "Theme",
         "menu_size": "Size",
         "menu_personality": "Personality",
@@ -162,6 +186,21 @@ _STRINGS = {
         "size_medium": "Medium",
         "size_large": "Large",
         "size_king": "King-size",
+    },
+}
+
+_DIAGNOSIS_PERSONALITY_DESCRIPTORS = {
+    LANGUAGE_KO: {
+        "냉소적": "냉소적인",
+        "따뜻함": "따뜻한",
+        "무뚝뚝": "무뚝뚝한",
+        "직접 입력": "나만의",
+    },
+    LANGUAGE_EN: {
+        "Sassy Butler Cat": "sassy",
+        "Warm Auntie Cat": "warm",
+        "Stoic Samurai Cat": "stoic",
+        "Custom": "custom",
     },
 }
 
@@ -196,10 +235,17 @@ def resolve_language(
     return detect_system_language(preferred_languages)
 
 
-def tr(language: str, key: str, **values: object) -> str:
-    lang = canonical_language(language)
+def tr(locale: str, key: str, **values: object) -> str:
+    lang = canonical_language(locale)
     text = _STRINGS[lang][key]
     return text.format(**values) if values else text
+
+
+def diagnosis_personality_descriptor(label: str, language: str) -> str:
+    """진단 제목에서 성격 이름이 자연스러운 관형어가 되게 한다."""
+    lang = canonical_language(language)
+    default = "나만의" if lang == LANGUAGE_KO else "custom"
+    return _DIAGNOSIS_PERSONALITY_DESCRIPTORS[lang].get(label, default)
 
 
 def chonk_stage(percent: float, language: str) -> str:
