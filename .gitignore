@@ -22,5 +22,6 @@ source/
 
 # 미리보기 / 잡파일
 **/_preview.png
+**/_raw*.png
 frames_preview.png
 .DS_Store

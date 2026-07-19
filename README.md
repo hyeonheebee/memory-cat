@@ -58,9 +58,13 @@ pythonw windows\windows_cat.pyw
 
 # 이미지 -> 테마 (흰 배경 자동 제거 + 정렬 + 단계화)
 ./.venv/bin/python import_theme.py 내고양이.png 내테마이름
+
+# 반려동물 사진 1장 -> GPT Image가 6단계 시트를 만들고 테마로 자동 변환
+# OPENAI_API_KEY는 프로젝트 루트의 .env에 저장
+./.venv/bin/python vision_theme.py 실제사진.jpg 내반려동물 --quality medium
 ```
 
-앱을 다시 실행하면 우클릭 **테마** 메뉴에 `내테마이름`이 자동으로 생깁니다.
+우클릭 **테마** 메뉴를 다시 열면 `내테마이름`이 자동으로 생깁니다.
 (테마는 `frames/<이름>/` 폴더를 자동 인식해요.)
 
 코드로 그리는 테마는 `python generate_frames.py`로 다시 뽑을 수 있습니다.
@@ -77,6 +81,7 @@ windows/            Windows 앱 (PySide6)
 metrics.py          디스크/메모리 측정 (공통)
 generate_frames.py  코드 테마 프레임 생성
 import_theme.py     이미지 -> 테마 변환
+vision_theme.py     반려동물 사진 -> GPT Image 커스텀 테마 생성
 frames/<theme>/     테마별 프레임 PNG
 ```
 
