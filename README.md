@@ -7,6 +7,8 @@
 
 - 디스크가 찰수록 고양이가 통통해지고 살짝 튐 (램 사용량도 함께 표시)
 - 드래그로 이동 / 우클릭으로 상세·테마·크기 변경
+- 우클릭 **🧠 왜 느려?**로 디스크·메모리 AI 진단과 확인형 안전 정리
+- 성격 프리셋 3종 또는 직접 입력한 말투로 진단 메시지 변경
 - **테마 4종** 기본 제공 + **이미지만 있으면 나만의 테마 추가**
 - 설정은 자동 저장, 로그인 시 자동 실행
 
@@ -69,6 +71,8 @@ pythonw windows\windows_cat.pyw
 
 ```
 desktop_cat.py      macOS 앱 (PyObjC)
+brain.py            GPT 기반 성능 진단 + 안전한 휴지통 이동
+personality.py      뚱냥이 성격 프리셋/커스텀 프롬프트 컴파일러
 windows/            Windows 앱 (PySide6)
 metrics.py          디스크/메모리 측정 (공통)
 generate_frames.py  코드 테마 프레임 생성

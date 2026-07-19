@@ -3,13 +3,14 @@
 
 항상 위에 떠 있는 작은 고양이. 디스크(하드 용량)가 차오를수록
 애기냥 -> 돼지냥으로 빵빵해지며 살짝 통통 튄다. 라벨에 디스크/램 표시.
-우클릭: 상세 + 테마 + 크기 + 새로고침/종료. 설정은 config.json 에 저장.
+우클릭: AI 진단 + 성격 + 테마 + 크기 + 새로고침/종료. 설정은 config.json 에 저장.
 
 테마는 frames/<이름>/ 폴더를 자동 인식한다. 새 테마 추가:
   python import_theme.py 내이미지.png 테마이름   (가로 N단계 시트)
 """
 import json
 import os
+import threading
 
 import objc
 from AppKit import (
@@ -21,10 +22,22 @@ from AppKit import (
     NSWindowCollectionBehaviorStationary,
     NSCompositingOperationSourceOver, NSCompositingOperationCopy,
     NSRectFillUsingOperation, NSApp,
+    NSAlert, NSTextField, NSAlertFirstButtonReturn,
 )
-from Foundation import NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString
+from Foundation import (
+    NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString,
+    NSOperationQueue, NSUserNotification, NSUserNotificationCenter,
+)
 
 import metrics as mc
+from brain import diagnose as run_diagnosis, safe_trash
+from personality import (
+    CUSTOM_PERSONALITY,
+    DEFAULT_PERSONALITY,
+    config_personality,
+    normalize_custom_personality,
+    preset_names,
+)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMES_BASE = os.path.join(HERE, "frames")
@@ -36,23 +49,87 @@ CATBOTTOM = 46.0
 THEME_LABELS = {"cute": "귀여운", "simple": "단순한", "madness": "광기", "derpy": "경각심"}
 THEME_ORDER = ["cute", "simple", "madness", "derpy"]
 SIZES = {"작게": 78.0, "보통": 104.0, "크게": 138.0, "왕": 176.0}
-DEFAULT = {"theme": "cute", "size": "보통"}
+DEFAULT = {
+    "theme": "cute",
+    "size": "보통",
+    "personality": DEFAULT_PERSONALITY,
+    "custom_personality": "",
+}
 
 
-def load_config():
+def load_config(path=CONFIG):
     try:
-        c = json.load(open(CONFIG))
-        return {"theme": c.get("theme", DEFAULT["theme"]),
-                "size": c.get("size", DEFAULT["size"])}
+        with open(path, encoding="utf-8") as handle:
+            loaded = json.load(handle)
     except Exception:
-        return dict(DEFAULT)
+        loaded = {}
+
+    cfg = dict(DEFAULT)
+    if isinstance(loaded, dict):
+        cfg["theme"] = loaded.get("theme", DEFAULT["theme"])
+        size = loaded.get("size", DEFAULT["size"])
+        cfg["size"] = size if size in SIZES else DEFAULT["size"]
+        selection, custom = config_personality(loaded)
+        cfg["personality"] = selection
+        cfg["custom_personality"] = custom
+    return cfg
 
 
-def save_config(cfg):
+def save_config(cfg, path=CONFIG):
     try:
-        json.dump(cfg, open(CONFIG, "w"), ensure_ascii=False)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(cfg, handle, ensure_ascii=False)
+        return True
     except Exception:
-        pass
+        return False
+
+
+def diagnosis_notification_text(result):
+    """진단 JSON을 macOS 알림에 들어갈 짧은 텍스트로 만든다."""
+    why = [str(line).strip() for line in result.get("why_slow", []) if str(line).strip()]
+    advice = str(result.get("one_line_advice", "")).strip()
+    lines = [f"• {line}" for line in why[:3]]
+    if advice:
+        lines.append(f"🐾 {advice}")
+    return "\n".join(lines) or "진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
+
+
+def _diagnosis_worker(personality, custom_personality, callback):
+    """API/측정을 작업 스레드에서 수행하고 callback만 메인 큐로 보낸다."""
+    try:
+        result = run_diagnosis(
+            personality=personality,
+            custom_personality=custom_personality,
+        )
+    except Exception:
+        result = {
+            "why_slow": ["진단 데이터를 읽는 중 문제가 생겼습니다."],
+            "one_line_advice": "잠시 후 다시 시도해 주세요.",
+            "cleanup_recommendations": [],
+            "source": "fallback",
+        }
+    NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
+
+
+def process_cleanup_recommendations(recommendations, confirm_item, trash_func=None):
+    """각 항목을 확인받은 뒤에만 safe_trash를 호출한다."""
+    trash_func = safe_trash if trash_func is None else trash_func
+    summary = {"moved": 0, "already_in_trash": 0, "skipped": 0, "failed": 0}
+    for recommendation in recommendations:
+        for item in recommendation.get("items", []):
+            path = item.get("path")
+            if not path or not confirm_item(recommendation, item):
+                summary["skipped"] += 1
+                continue
+            try:
+                trash_func(path)
+                if recommendation.get("category") == "trash":
+                    summary["already_in_trash"] += 1
+                else:
+                    summary["moved"] += 1
+            except Exception:
+                summary["failed"] += 1
+    return summary
 
 
 def discover_themes():
@@ -165,6 +242,8 @@ class CatController(NSObject):
         self.phase = 0.0
         self.score = 0.0
         self.detail = []
+        self._diagnosis_running = False
+        self._diagnosis_thread = None
         return self
 
     def start(self):
@@ -228,12 +307,151 @@ class CatController(NSObject):
         save_config(self.cfg)
         self.applyLayout()
 
+    def setPersonality_(self, sender):
+        self.cfg["personality"] = sender.representedObject()
+        save_config(self.cfg)
+        self._notify("뚱냥이 성격 변경", f"이제 {self.cfg['personality']} 말투로 진단할게요.")
+
+    def setCustomPersonality_(self, sender):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("뚱냥이 성격을 직접 알려 주세요")
+        alert.setInformativeText_("예: 다정하지만 핵심만 말하고, 말끝에 냥을 붙여줘")
+        alert.addButtonWithTitle_("저장")
+        alert.addButtonWithTitle_("취소")
+        field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 380, 28))
+        field.setStringValue_(self.cfg.get("custom_personality", ""))
+        alert.setAccessoryView_(field)
+        NSApp.activateIgnoringOtherApps_(True)
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+
+        custom = normalize_custom_personality(field.stringValue())
+        if not custom:
+            self._notify("성격을 저장하지 않았어요", "한 문장 이상 입력해 주세요.")
+            return
+        self.cfg["personality"] = CUSTOM_PERSONALITY
+        self.cfg["custom_personality"] = custom
+        save_config(self.cfg)
+        self._notify("커스텀 성격 저장", custom)
+
+    def diagnose_(self, sender):
+        if self._diagnosis_running:
+            self._notify("🧠 이미 진단 중이에요", "뚱냥이가 숫자를 살펴보고 있습니다.")
+            return
+        personality, custom = config_personality(self.cfg)
+        self._diagnosis_running = True
+        self._notify("🧠 왜 느린지 보는 중", "고양이가 디스크와 메모리를 살펴보고 있어요.")
+        self._diagnosis_thread = threading.Thread(
+            target=_diagnosis_worker,
+            args=(personality, custom, self._finish_diagnosis),
+            name="memory-cat-diagnosis",
+            daemon=True,
+        )
+        self._diagnosis_thread.start()
+
+    @objc.python_method
+    def _finish_diagnosis(self, result):
+        self._diagnosis_running = False
+        body = diagnosis_notification_text(result)
+        if not self._notify("🧠 뚱냥이 진단", body):
+            self._show_information_alert("🧠 뚱냥이 진단", body)
+
+        recommendations = result.get("cleanup_recommendations", [])
+        if recommendations and self._confirm_cleanup_review(recommendations):
+            summary = process_cleanup_recommendations(
+                recommendations, self._confirm_cleanup_item
+            )
+            self._show_cleanup_summary(summary)
+
+    @objc.python_method
+    def _notify(self, title, body):
+        try:
+            notification = NSUserNotification.alloc().init()
+            notification.setTitle_(title)
+            notification.setInformativeText_(body)
+            NSUserNotificationCenter.defaultUserNotificationCenter().deliverNotification_(
+                notification
+            )
+            return True
+        except Exception:
+            return False
+
+    @objc.python_method
+    def _show_information_alert(self, title, body):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.setInformativeText_(body)
+        alert.addButtonWithTitle_("확인")
+        NSApp.activateIgnoringOtherApps_(True)
+        alert.runModal()
+
+    @objc.python_method
+    def _confirm_cleanup_review(self, recommendations):
+        count = sum(len(item.get("items", [])) for item in recommendations)
+        if count == 0:
+            return False
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("안전한 정리 후보를 볼까요?")
+        alert.setInformativeText_(
+            f"화이트리스트 항목 {count}개를 하나씩 확인합니다. "
+            "동의한 항목만 macOS 휴지통으로 이동하며 영구 삭제하지 않습니다."
+        )
+        alert.addButtonWithTitle_("항목별 검토")
+        alert.addButtonWithTitle_("나중에")
+        NSApp.activateIgnoringOtherApps_(True)
+        return alert.runModal() == NSAlertFirstButtonReturn
+
+    @objc.python_method
+    def _confirm_cleanup_item(self, recommendation, item):
+        category = recommendation.get("category")
+        path = item.get("path", "")
+        size = item.get("size", "크기 알 수 없음")
+        reason = recommendation.get("reason", "")
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(f"{recommendation.get('label', '정리 후보')} · {size}")
+        if category == "trash":
+            action_note = "이미 휴지통 안에 있어 확인만 하며, 영구 삭제하지 않습니다."
+            primary = "확인"
+        else:
+            action_note = "이 항목을 macOS 휴지통으로 이동할까요?"
+            primary = "휴지통으로 이동"
+        alert.setInformativeText_(f"{path}\n\n{reason}\n{action_note}")
+        alert.addButtonWithTitle_(primary)
+        alert.addButtonWithTitle_("건너뛰기")
+        NSApp.activateIgnoringOtherApps_(True)
+        return alert.runModal() == NSAlertFirstButtonReturn
+
+    @objc.python_method
+    def _show_cleanup_summary(self, summary):
+        parts = []
+        if summary["moved"]:
+            parts.append(f"{summary['moved']}개를 휴지통으로 이동")
+        if summary["already_in_trash"]:
+            parts.append(f"휴지통 안 {summary['already_in_trash']}개 확인")
+        if summary["skipped"]:
+            parts.append(f"{summary['skipped']}개 건너뜀")
+        if summary["failed"]:
+            parts.append(f"{summary['failed']}개 이동 실패")
+        body = " · ".join(parts) or "변경한 항목이 없습니다."
+        if summary["moved"]:
+            body += " 공간은 휴지통을 직접 비운 뒤 확보됩니다."
+        self._notify("🧹 정리 결과", body)
+
     def popUpMenu_(self, event):
         menu = NSMenu.alloc().init()
         for line in self.detail:
             it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(line, None, "")
             it.setEnabled_(False)
             menu.addItem_(it)
+        menu.addItem_(NSMenuItem.separatorItem())
+
+        diagnose_title = "🧠 진단 중…" if self._diagnosis_running else "🧠 왜 느려?"
+        di = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            diagnose_title, b"diagnose:", ""
+        )
+        di.setTarget_(self)
+        di.setEnabled_(not self._diagnosis_running)
+        menu.addItem_(di)
         menu.addItem_(NSMenuItem.separatorItem())
 
         theme_menu = NSMenu.alloc().init()
@@ -259,6 +477,27 @@ class CatController(NSObject):
         si = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("크기", None, "")
         si.setSubmenu_(size_menu)
         menu.addItem_(si)
+
+        personality_menu = NSMenu.alloc().init()
+        for name in preset_names():
+            it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                name, b"setPersonality:", ""
+            )
+            it.setTarget_(self)
+            it.setRepresentedObject_(name)
+            if name == self.cfg["personality"]:
+                it.setState_(1)
+            personality_menu.addItem_(it)
+        custom_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "직접 입력…", b"setCustomPersonality:", ""
+        )
+        custom_item.setTarget_(self)
+        if self.cfg["personality"] == CUSTOM_PERSONALITY:
+            custom_item.setState_(1)
+        personality_menu.addItem_(custom_item)
+        pi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("성격", None, "")
+        pi.setSubmenu_(personality_menu)
+        menu.addItem_(pi)
 
         menu.addItem_(NSMenuItem.separatorItem())
         r = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("새로고침", b"refresh:", "")

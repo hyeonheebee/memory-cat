@@ -17,6 +17,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 from metrics import disk_usage, human_gb, pressure_score, top_memory_apps
+from personality import DEFAULT_PERSONALITY, compile_personality
 
 
 MODEL = "gpt-5.6-luna"
@@ -63,7 +64,7 @@ _CATEGORY_INFO: Dict[str, Dict[str, str]] = {
     },
 }
 
-_SYSTEM_PROMPT = """\
+_BASE_SYSTEM_PROMPT = """\
 당신은 macOS 성능 진단 도우미입니다. 입력으로 주어진 디스크, RAM, 스왑,
 상위 메모리 앱 수치만 근거로 한국어로 간결하게 진단하세요.
 
@@ -77,6 +78,25 @@ _SYSTEM_PROMPT = """\
 - one_line_advice는 한 문장으로 씁니다.
 - 용량 숫자는 로컬 코드가 계산하므로 추측하지 않습니다.
 """
+
+# 기본 호출도 항상 명시적인 성격 톤을 가진다. 개별 호출은 아래 함수에서
+# 같은 베이스 프롬프트에 선택된 성격을 다시 컴파일한다.
+_SYSTEM_PROMPT = (
+    f"{_BASE_SYSTEM_PROMPT}\n\n{compile_personality(DEFAULT_PERSONALITY)}"
+)
+
+
+def system_prompt_for(
+    personality: Optional[str] = None,
+    custom_personality: Optional[str] = None,
+) -> str:
+    """진단 안전 규칙과 선택한 뚱냥이 성격을 하나의 시스템 프롬프트로 만든다."""
+    if personality is None and custom_personality is None:
+        return _SYSTEM_PROMPT
+    return (
+        f"{_BASE_SYSTEM_PROMPT}\n\n"
+        f"{compile_personality(personality, custom_personality)}"
+    )
 
 
 class _AIRecommendation(BaseModel):
@@ -384,6 +404,8 @@ def _load_api_key() -> Optional[str]:
 
 def diagnose(
     metrics_snapshot: Optional[Mapping[str, Any]] = None,
+    personality: Optional[str] = None,
+    custom_personality: Optional[str] = None,
 ) -> Dict[str, Any]:
     """성능 원인과 안전한 정리 추천을 JSON 직렬화 가능한 dict로 반환한다.
 
@@ -403,7 +425,7 @@ def diagnose(
         client = OpenAI(api_key=api_key, timeout=20.0, max_retries=1)
         response = client.responses.parse(
             model=MODEL,
-            instructions=_SYSTEM_PROMPT,
+            instructions=system_prompt_for(personality, custom_personality),
             input=json.dumps(
                 {
                     "metrics": snapshot,

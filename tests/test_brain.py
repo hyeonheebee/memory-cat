@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import brain
+from personality import CUSTOM_PERSONALITY
 
 
 class BrainTests(unittest.TestCase):
@@ -137,7 +138,11 @@ class BrainTests(unittest.TestCase):
             ),
             patch.object(brain, "OpenAI", return_value=fake_client),
         ):
-            result = brain.diagnose(self.snapshot)
+            result = brain.diagnose(
+                self.snapshot,
+                personality=CUSTOM_PERSONALITY,
+                custom_personality="말끝에 냥을 붙이고 짧게 말해줘",
+            )
 
         self.assertEqual(result["source"], "openai")
         self.assertEqual(
@@ -150,6 +155,9 @@ class BrainTests(unittest.TestCase):
             fake_client.responses.parse.call_args.kwargs["text"],
             {"verbosity": "low"},
         )
+        instructions = fake_client.responses.parse.call_args.kwargs["instructions"]
+        self.assertIn("말끝에 냥을 붙이고 짧게 말해줘", instructions)
+        self.assertIn("삭제 화이트리스트", instructions)
 
     def test_safe_trash_rejects_non_whitelisted_path(self):
         with tempfile.NamedTemporaryFile() as handle:
