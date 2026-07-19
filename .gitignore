@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 
+# 비밀키 (절대 커밋 금지)
+.env
+
 # 런타임 생성물 (사용자별)
 config.json
 *.log
