@@ -47,6 +47,30 @@ class I18nTests(unittest.TestCase):
                     labels,
                 )
 
+    def test_pet_theme_menu_and_consent_are_localized(self):
+        expected = {
+            "ko": (
+                "내 반려동물로 테마 만들기…",
+                "테마 만드는 중…",
+                "선택한 사진이 테마 생성을 위해 OpenAI로 전송됩니다",
+            ),
+            "en": (
+                "Make a theme from my pet…",
+                "Making theme…",
+                "Your photo will be sent to OpenAI to generate the theme",
+            ),
+        }
+        for language, labels in expected.items():
+            with self.subTest(language=language):
+                self.assertEqual(
+                    (
+                        i18n.tr(language, "menu_pet_theme"),
+                        i18n.tr(language, "menu_pet_theme_running"),
+                        i18n.tr(language, "pet_theme_consent_body"),
+                    ),
+                    labels,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

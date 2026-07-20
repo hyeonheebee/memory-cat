@@ -10,6 +10,94 @@ from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
 
 
 class DesktopCatTests(unittest.TestCase):
+    def test_next_pet_theme_name_increments_existing_theme_folders(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            frames_dir = Path(temp_dir)
+            self.assertEqual(
+                desktop_cat.next_pet_theme_name(frames_dir), "mypet"
+            )
+            (frames_dir / "mypet").mkdir()
+            self.assertEqual(
+                desktop_cat.next_pet_theme_name(frames_dir), "mypet2"
+            )
+            (frames_dir / "mypet2").mkdir()
+            self.assertEqual(
+                desktop_cat.next_pet_theme_name(frames_dir), "mypet3"
+            )
+
+    def test_pet_theme_worker_returns_build_result_on_main_queue(self):
+        callback = Mock()
+        queue = Mock()
+        queue.addOperationWithBlock_.side_effect = lambda block: block()
+        queue_provider = Mock()
+        queue_provider.mainQueue.return_value = queue
+        generated = {"detected_stages": 6, "output_path": "/frames/mypet"}
+        with (
+            patch.object(
+                desktop_cat, "build_pet_theme", return_value=generated
+            ) as build,
+            patch.object(desktop_cat, "NSOperationQueue", queue_provider),
+        ):
+            desktop_cat._pet_theme_worker(
+                "/photos/pet.jpg", "mypet", callback
+            )
+
+        build.assert_called_once_with("/photos/pet.jpg", "mypet", "medium")
+        queue.addOperationWithBlock_.assert_called_once()
+        callback.assert_called_once_with(
+            {
+                "theme_name": "mypet",
+                "detected_stages": 6,
+                "output_path": "/frames/mypet",
+            }
+        )
+
+    def test_pet_theme_worker_returns_readable_generation_error(self):
+        callback = Mock()
+        queue = Mock()
+        queue.addOperationWithBlock_.side_effect = lambda block: block()
+        queue_provider = Mock()
+        queue_provider.mainQueue.return_value = queue
+        with (
+            patch.object(
+                desktop_cat,
+                "build_pet_theme",
+                side_effect=desktop_cat.ThemeGenerationError("API request failed"),
+            ),
+            patch.object(desktop_cat, "NSOperationQueue", queue_provider),
+        ):
+            desktop_cat._pet_theme_worker("/photos/pet.jpg", "mypet", callback)
+
+        callback.assert_called_once_with(
+            {"theme_name": "mypet", "error": "API request failed"}
+        )
+
+    def test_finishing_pet_theme_applies_and_saves_it_immediately(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT)
+        controller.language = "ko"
+        controller._pet_theme_running = True
+        controller._notify = Mock(return_value=True)
+        controller.refresh_ = Mock()
+
+        with patch.object(desktop_cat, "save_config", return_value=True) as save:
+            controller._finish_pet_theme(
+                {
+                    "theme_name": "mypet2",
+                    "detected_stages": 6,
+                    "output_path": "/frames/mypet2",
+                }
+            )
+
+        self.assertFalse(controller._pet_theme_running)
+        self.assertEqual(controller.cfg["theme"], "mypet2")
+        save.assert_called_once_with(controller.cfg)
+        controller.refresh_.assert_called_once_with(None)
+        controller._notify.assert_called_once_with(
+            "반려동물 테마 완성",
+            "6단계를 감지해 mypet2 테마를 바로 적용했어요.",
+        )
+
     def test_old_config_gets_default_personality(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -291,6 +379,14 @@ class DesktopCatTests(unittest.TestCase):
 
         menu_class.popUpContextMenu_withEvent_forView_.assert_called_once_with(
             menus[0], event, controller.view
+        )
+
+        menu_calls = (
+            item_class.alloc.return_value.initWithTitle_action_keyEquivalent_.call_args_list
+        )
+        self.assertIn(
+            ("Make a theme from my pet…", b"makePetTheme:"),
+            [(call.args[0], call.args[1]) for call in menu_calls],
         )
 
     def test_finishing_diagnosis_stores_start_context_and_close_skips_cleanup(self):

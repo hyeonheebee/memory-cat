@@ -23,6 +23,7 @@ from AppKit import (
     NSCompositingOperationSourceOver, NSCompositingOperationCopy,
     NSRectFillUsingOperation, NSApp,
     NSAlert, NSTextField, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
+    NSOpenPanel, NSModalResponseOK,
 )
 from Foundation import (
     NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString,
@@ -49,6 +50,7 @@ from personality import (
     preset_label,
     preset_names,
 )
+from vision_theme import ThemeGenerationError, build_theme as build_pet_theme
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMES_BASE = os.path.join(HERE, "frames")
@@ -189,6 +191,18 @@ def _diagnosis_worker(personality, custom_personality, language, callback):
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
+def _pet_theme_worker(photo_path, theme_name, callback):
+    """Build a pet theme off the UI thread and return on the main queue."""
+    try:
+        result = dict(build_pet_theme(photo_path, theme_name, "medium"))
+        result["theme_name"] = theme_name
+    except ThemeGenerationError as exc:
+        result = {"theme_name": theme_name, "error": str(exc)}
+    except Exception as exc:
+        result = {"theme_name": theme_name, "error": str(exc)}
+    NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
+
+
 def process_cleanup_recommendations(recommendations, confirm_item, trash_func=None):
     """각 항목을 확인받은 뒤에만 safe_trash를 호출한다."""
     trash_func = safe_trash if trash_func is None else trash_func
@@ -220,6 +234,17 @@ def discover_themes():
                 found.append(n)
     return ([t for t in THEME_ORDER if t in found]
             + [t for t in found if t not in THEME_ORDER])
+
+
+def next_pet_theme_name(frames_base=None):
+    """Return mypet, mypet2, ... without overwriting an existing path."""
+    root = FRAMES_BASE if frames_base is None else os.fspath(frames_base)
+    candidate = "mypet"
+    suffix = 2
+    while os.path.exists(os.path.join(root, candidate)):
+        candidate = f"mypet{suffix}"
+        suffix += 1
+    return candidate
 
 
 def theme_label(key, language=LANGUAGE_KO):
@@ -332,6 +357,8 @@ class CatController(NSObject):
         self._active_diagnosis_context = None
         self._last_diagnosis = None
         self._last_diagnosis_context = None
+        self._pet_theme_running = False
+        self._pet_theme_thread = None
         return self
 
     def start(self):
@@ -391,6 +418,66 @@ class CatController(NSObject):
         self.cfg["theme"] = sender.representedObject()
         save_config(self.cfg)
         self.refresh_(None)
+
+    def makePetTheme_(self, sender):
+        if getattr(self, "_pet_theme_running", False):
+            return
+
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(True)
+        panel.setCanChooseDirectories_(False)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setAllowedFileTypes_(["png", "jpg", "jpeg", "heic"])
+        NSApp.activateIgnoringOtherApps_(True)
+        if panel.runModal() != NSModalResponseOK:
+            return
+
+        selected_url = panel.URL()
+        photo_path = selected_url.path() if selected_url is not None else None
+        if not photo_path:
+            return
+
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(tr(self.language, "pet_theme_consent_title"))
+        alert.setInformativeText_(tr(self.language, "pet_theme_consent_body"))
+        alert.addButtonWithTitle_(tr(self.language, "pet_theme_continue"))
+        alert.addButtonWithTitle_(tr(self.language, "cancel"))
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+
+        theme_name = next_pet_theme_name()
+        self._pet_theme_running = True
+        self._pet_theme_thread = threading.Thread(
+            target=_pet_theme_worker,
+            args=(photo_path, theme_name, self._finish_pet_theme),
+            name="memory-cat-pet-theme",
+            daemon=True,
+        )
+        self._pet_theme_thread.start()
+
+    @objc.python_method
+    def _finish_pet_theme(self, result):
+        self._pet_theme_running = False
+        error = result.get("error")
+        if error:
+            title = tr(self.language, "pet_theme_error_title")
+            if not self._notify(title, error):
+                self._show_information_alert(title, error)
+            return
+
+        theme_name = result["theme_name"]
+        self.cfg["theme"] = theme_name
+        save_config(self.cfg)
+        self.refresh_(None)
+        title = tr(self.language, "pet_theme_complete_title")
+        body = tr(
+            self.language,
+            "pet_theme_complete_body",
+            count=result.get("detected_stages", 0),
+            theme=theme_name,
+        )
+        if not self._notify(title, body):
+            self._show_information_alert(title, body)
 
     def setSize_(self, sender):
         self.cfg["size"] = sender.representedObject()
@@ -642,6 +729,17 @@ class CatController(NSObject):
         ti = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_theme"), None, "")
         ti.setSubmenu_(theme_menu)
         menu.addItem_(ti)
+
+        pet_theme_running = getattr(self, "_pet_theme_running", False)
+        pet_theme_key = (
+            "menu_pet_theme_running" if pet_theme_running else "menu_pet_theme"
+        )
+        pet_theme_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            tr(self.language, pet_theme_key), b"makePetTheme:", ""
+        )
+        pet_theme_item.setTarget_(self)
+        pet_theme_item.setEnabled_(not pet_theme_running)
+        menu.addItem_(pet_theme_item)
 
         size_menu = NSMenu.alloc().init()
         for label in SIZES:
