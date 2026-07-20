@@ -65,7 +65,7 @@ class VisionThemeTests(unittest.TestCase):
         self.assertEqual(kwargs["model"], "gpt-image-2")
         self.assertEqual(kwargs["size"], "1536x1024")
         self.assertEqual(kwargs["quality"], "medium")
-        self.assertEqual(kwargs["response_format"], "b64_json")
+        self.assertNotIn("response_format", kwargs)
         self.assertEqual(Path(kwargs["image"].name), photo)
         self.assertIn("THIS exact pet", kwargs["prompt"])
         self.assertIn("no text, no labels, no watermark, no borders", kwargs["prompt"])

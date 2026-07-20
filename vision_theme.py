@@ -83,7 +83,6 @@ def generate_sheet(photo_path, retry_prompt=False) -> Image.Image:
                 prompt=prompt,
                 size=IMAGE_SIZE,
                 quality=_GENERATION_QUALITY.get(),
-                response_format="b64_json",
             )
         data = response.data or []
         encoded = data[0].b64_json if data else None
