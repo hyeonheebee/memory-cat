@@ -8,6 +8,7 @@ __pycache__/
 
 # 런타임 생성물 (사용자별)
 config.json
+demo_config.json
 *.log
 cat.log
 

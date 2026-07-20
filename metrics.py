@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """메모리/디스크 측정 공유 모듈 (플랫폼 공통, GUI 의존 없음)."""
+import math
+import os
+
 import psutil
 
 
@@ -9,12 +12,33 @@ def human_gb(n):
 
 def disk_usage():
     """하드 용량. macOS APFS는 데이터 볼륨이 사용자가 보는 값."""
+    usage = None
     for path in ("/System/Volumes/Data", "/"):
         try:
-            return psutil.disk_usage(path)
+            usage = psutil.disk_usage(path)
+            break
         except Exception:
             continue
-    return psutil.disk_usage("/")
+    if usage is None:
+        usage = psutil.disk_usage("/")
+
+    raw_percent = os.environ.get("MEMORY_CAT_DEMO_DISK_PERCENT")
+    if raw_percent is None:
+        return usage
+    try:
+        percent = float(raw_percent)
+    except (TypeError, ValueError):
+        return usage
+    if not math.isfinite(percent):
+        return usage
+
+    percent = min(100.0, max(0.0, percent))
+    used = int(round(usage.total * percent / 100.0))
+    return usage._replace(
+        used=used,
+        free=usage.total - used,
+        percent=percent,
+    )
 
 
 def pressure_score():

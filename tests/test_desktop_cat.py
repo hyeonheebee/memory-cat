@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, mock_open, patch
 
 import desktop_cat
 from i18n import LANGUAGE_AUTO, LANGUAGE_EN
@@ -10,6 +10,55 @@ from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
 
 
 class DesktopCatTests(unittest.TestCase):
+    def test_config_env_override_is_used_for_default_reads_and_writes(self):
+        override = "/tmp/memory-cat-demo-config.json"
+        opened = mock_open(read_data='{"theme": "simple"}')
+        with (
+            patch.dict(
+                "os.environ", {"MEMORY_CAT_CONFIG": override}, clear=False
+            ),
+            patch("builtins.open", opened),
+        ):
+            loaded = desktop_cat.load_config()
+            self.assertTrue(desktop_cat.save_config(loaded))
+
+        self.assertEqual(loaded["theme"], "simple")
+        self.assertEqual(
+            opened.call_args_list,
+            [
+                call(override, encoding="utf-8"),
+                call(override, "w", encoding="utf-8"),
+            ],
+        )
+
+    def test_config_defaults_to_existing_path_when_override_is_unset(self):
+        opened = mock_open(read_data="{}")
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(desktop_cat, "CONFIG", "/tmp/default-config.json"),
+            patch("builtins.open", opened),
+        ):
+            desktop_cat.load_config()
+
+        opened.assert_called_once_with(
+            "/tmp/default-config.json", encoding="utf-8"
+        )
+
+    def test_empty_config_override_is_ignored(self):
+        opened = mock_open()
+        with (
+            patch.dict(
+                "os.environ", {"MEMORY_CAT_CONFIG": ""}, clear=False
+            ),
+            patch.object(desktop_cat, "CONFIG", "/tmp/default-config.json"),
+            patch("builtins.open", opened),
+        ):
+            self.assertTrue(desktop_cat.save_config(desktop_cat.DEFAULT))
+
+        opened.assert_called_once_with(
+            "/tmp/default-config.json", "w", encoding="utf-8"
+        )
+
     def test_disk_full_prompt_fires_once_per_session_at_92_percent(self):
         controller = desktop_cat.CatController.alloc().init()
         controller._disk_full_prompt_shown = False

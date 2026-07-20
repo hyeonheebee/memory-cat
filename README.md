@@ -85,6 +85,11 @@ vision_theme.py     반려동물 사진 -> GPT Image 커스텀 테마 생성
 frames/<theme>/     테마별 프레임 PNG
 ```
 
+## 개발자용 데모·테스트 설정
+
+- `MEMORY_CAT_CONFIG=demo_config.json`: 데모·테스트 시 실사용 설정 대신 별도 config 파일을 읽고 씁니다.
+- `MEMORY_CAT_DEMO_DISK_PERCENT=92`: 데모·테스트 시 실측 디스크 대신 지정한 사용률(0~100으로 제한)을 표시·진단에 사용합니다.
+
 ## 만든이 / License
 
 심현희 ([@hyeonheebee](https://github.com/hyeonheebee)) + Claude 🐾 · [MIT](LICENSE)

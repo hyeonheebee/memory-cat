@@ -83,7 +83,14 @@ DEFAULT = {
 }
 
 
-def load_config(path=CONFIG):
+def config_path():
+    """Return the runtime config path, honoring the demo override."""
+    return os.environ.get("MEMORY_CAT_CONFIG") or CONFIG
+
+
+def load_config(path=None):
+    if path is None:
+        path = config_path()
     try:
         with open(path, encoding="utf-8") as handle:
             loaded = json.load(handle)
@@ -103,7 +110,9 @@ def load_config(path=CONFIG):
     return cfg
 
 
-def save_config(cfg, path=CONFIG):
+def save_config(cfg, path=None):
+    if path is None:
+        path = config_path()
     try:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(cfg, handle, ensure_ascii=False)
