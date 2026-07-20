@@ -56,6 +56,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMES_BASE = os.path.join(HERE, "frames")
 CONFIG = os.path.join(HERE, "config.json")
 REFRESH_SEC = 4.0
+DISK_FULL_PROMPT_PERCENT = 92.0
 NSStatusWindowLevel = 25
 CATBOTTOM = 46.0
 
@@ -359,6 +360,14 @@ class CatController(NSObject):
         self._last_diagnosis_context = None
         self._pet_theme_running = False
         self._pet_theme_thread = None
+        self._disk_full_prompt_shown = False
+        self._notification_center = (
+            NSUserNotificationCenter.defaultUserNotificationCenter()
+        )
+        try:
+            self._notification_center.setDelegate_(self)
+        except Exception:
+            pass
         return self
 
     def start(self):
@@ -388,6 +397,7 @@ class CatController(NSObject):
         score, vm, sw = mc.pressure_score()
         dpct = disk.percent
         self.score = dpct
+        self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
         n = frame_count(theme)
         idx = int(round(dpct / 100 * (n - 1)))
@@ -552,6 +562,52 @@ class CatController(NSObject):
         self._diagnosis_thread.start()
 
     @objc.python_method
+    def _maybe_prompt_disk_full(self, disk_percent):
+        if getattr(self, "_disk_full_prompt_shown", False):
+            return False
+        if disk_percent < DISK_FULL_PROMPT_PERCENT:
+            return False
+        self._disk_full_prompt_shown = True
+        self._show_disk_full_prompt()
+        return True
+
+    @objc.python_method
+    def _show_disk_full_prompt(self):
+        notification = NSUserNotification.alloc().init()
+        notification.setTitle_(tr(self.language, "disk_full_prompt_title"))
+        notification.setInformativeText_(
+            tr(self.language, "disk_full_prompt_body")
+        )
+        notification.setHasActionButton_(True)
+        notification.setActionButtonTitle_(
+            tr(self.language, "disk_full_prompt_action")
+        )
+        notification.setUserInfo_({"memory_cat_action": "diagnose"})
+        center = getattr(self, "_notification_center", None)
+        if center is None:
+            center = NSUserNotificationCenter.defaultUserNotificationCenter()
+            self._notification_center = center
+        try:
+            center.setDelegate_(self)
+        except Exception:
+            pass
+        center.deliverNotification_(notification)
+
+    def userNotificationCenter_didActivateNotification_(
+        self, center, notification
+    ):
+        user_info = dict(notification.userInfo() or {})
+        if user_info.get("memory_cat_action") != "diagnose":
+            return
+        center.removeDeliveredNotification_(notification)
+        self.diagnose_(None)
+
+    def userNotificationCenter_shouldPresentNotification_(
+        self, center, notification
+    ):
+        return True
+
+    @objc.python_method
     def _finish_diagnosis(self, result):
         self._diagnosis_running = False
         context = getattr(self, "_active_diagnosis_context", None)
@@ -621,9 +677,11 @@ class CatController(NSObject):
             notification = NSUserNotification.alloc().init()
             notification.setTitle_(title)
             notification.setInformativeText_(body)
-            NSUserNotificationCenter.defaultUserNotificationCenter().deliverNotification_(
-                notification
-            )
+            center = getattr(self, "_notification_center", None)
+            if center is None:
+                center = NSUserNotificationCenter.defaultUserNotificationCenter()
+                self._notification_center = center
+            center.deliverNotification_(notification)
             return True
         except Exception:
             return False

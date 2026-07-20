@@ -10,6 +10,35 @@ from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
 
 
 class DesktopCatTests(unittest.TestCase):
+    def test_disk_full_prompt_fires_once_per_session_at_92_percent(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller._disk_full_prompt_shown = False
+        controller._show_disk_full_prompt = Mock()
+        controller.diagnose_ = Mock()
+
+        self.assertFalse(controller._maybe_prompt_disk_full(91.9))
+        self.assertTrue(controller._maybe_prompt_disk_full(92.0))
+        self.assertFalse(controller._maybe_prompt_disk_full(99.0))
+
+        controller._show_disk_full_prompt.assert_called_once_with()
+        controller.diagnose_.assert_not_called()
+
+    def test_clicking_disk_full_notification_starts_existing_diagnosis_flow(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.diagnose_ = Mock()
+        center = Mock()
+        notification = Mock()
+        notification.userInfo.return_value = {
+            "memory_cat_action": "diagnose"
+        }
+
+        controller.userNotificationCenter_didActivateNotification_(
+            center, notification
+        )
+
+        center.removeDeliveredNotification_.assert_called_once_with(notification)
+        controller.diagnose_.assert_called_once_with(None)
+
     def test_next_pet_theme_name_increments_existing_theme_folders(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             frames_dir = Path(temp_dir)

@@ -71,6 +71,16 @@ class I18nTests(unittest.TestCase):
                     labels,
                 )
 
+    def test_disk_full_prompt_is_friendly_in_both_languages(self):
+        self.assertEqual(
+            i18n.tr("ko", "disk_full_prompt_body"),
+            "배불러… 진단해볼까?",
+        )
+        self.assertEqual(
+            i18n.tr("en", "disk_full_prompt_body"),
+            "I'm so full… want a checkup?",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
