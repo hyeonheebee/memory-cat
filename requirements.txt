@@ -1,3 +1,8 @@
 # macOS 앱 실행에 필요 (desktop_cat.py)
 psutil
 pyobjc-framework-Cocoa
+
+# AI 성능 진단 (brain.py)
+openai>=2.46,<3
+pydantic>=2,<3
+python-dotenv>=1.2,<2

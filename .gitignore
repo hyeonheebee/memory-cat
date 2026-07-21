@@ -3,8 +3,12 @@
 __pycache__/
 *.pyc
 
+# 비밀키 (절대 커밋 금지)
+.env
+
 # 런타임 생성물 (사용자별)
 config.json
+demo_config.json
 *.log
 cat.log
 
@@ -19,5 +23,6 @@ source/
 
 # 미리보기 / 잡파일
 **/_preview.png
+**/_raw*.png
 frames_preview.png
 .DS_Store

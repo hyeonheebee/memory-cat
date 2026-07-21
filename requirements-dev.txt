@@ -1,3 +1,4 @@
-# 테마 프레임 생성/변환 도구용 (generate_frames.py, import_theme.py)
+# 테마 프레임 생성/변환 및 테스트용 (generate_frames.py, import_theme.py, vision_theme.py)
 Pillow
 numpy
+pytest

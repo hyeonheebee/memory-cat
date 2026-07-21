@@ -69,6 +69,31 @@ def fit_square(crop, bottom=True):
     return canvas
 
 
+def save_theme_frames(stages, out, smooth=False):
+    """정규화된 단계 이미지를 40프레임과 미리보기로 저장한다."""
+    if not stages:
+        raise ValueError("저장할 반려동물 단계를 찾지 못했습니다.")
+    os.makedirs(out, exist_ok=True)
+    ns = len(stages)
+    for idx in range(N_OUT):
+        p = idx / (N_OUT - 1) * (ns - 1)        # 0 ~ ns-1 연속 위치
+        lo = int(math.floor(p))
+        hi = min(lo + 1, ns - 1)
+        w = p - lo
+        if smooth and w > 0 and lo != hi:
+            frame = Image.blend(stages[lo], stages[hi], w)   # 크로스페이드
+        else:
+            frame = stages[round(p)]                          # 가까운 단계 (잔상 없음)
+        frame.save(os.path.join(out, f"cat_{idx:02d}.png"))
+
+    pad = 8
+    strip = Image.new("RGBA", (ns * (FINAL + pad) + pad, FINAL + 2 * pad),
+                      (235, 235, 235, 255))
+    for i, im in enumerate(stages):
+        strip.paste(im, (pad + i * (FINAL + pad), pad), im)
+    strip.save(os.path.join(out, "_preview.png"))
+
+
 def main():
     if len(sys.argv) < 3:
         print("사용: import_theme.py <이미지> <테마이름> [--center]")
@@ -95,26 +120,8 @@ def main():
 
     smooth = "--smooth" in sys.argv   # 자세 비슷할 때만 권장 (다르면 잔상)
     out = os.path.join(HERE, "frames", theme)
-    os.makedirs(out, exist_ok=True)
-    ns = len(stages)
-    for idx in range(N_OUT):
-        p = idx / (N_OUT - 1) * (ns - 1)        # 0 ~ ns-1 연속 위치
-        lo = int(math.floor(p))
-        hi = min(lo + 1, ns - 1)
-        w = p - lo
-        if smooth and w > 0 and lo != hi:
-            frame = Image.blend(stages[lo], stages[hi], w)   # 크로스페이드
-        else:
-            frame = stages[round(p)]                          # 가까운 단계 (잔상 없음)
-        frame.save(os.path.join(out, f"cat_{idx:02d}.png"))
-
-    pad = 8
-    strip = Image.new("RGBA", (ns * (FINAL + pad) + pad, FINAL + 2 * pad),
-                      (235, 235, 235, 255))
-    for i, im in enumerate(stages):
-        strip.paste(im, (pad + i * (FINAL + pad), pad), im)
-    strip.save(os.path.join(out, "_preview.png"))
-    print(f"[{theme}] {ns}단계 -> {N_OUT}프레임(크로스페이드) 저장: {out}")
+    save_theme_frames(stages, out, smooth=smooth)
+    print(f"[{theme}] {len(stages)}단계 -> {N_OUT}프레임(크로스페이드) 저장: {out}")
 
 
 if __name__ == "__main__":

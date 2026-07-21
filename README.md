@@ -1,16 +1,16 @@
-# 메모리 뚱냥이 🐱 (Memory Tubby Cat)
+# Chonky Cat 🐱
 
-A tiny desktop cat that gets chubbier as your disk fills up.  
-디스크 용량이 찰수록 점점 통통해지는 데스크톱 고양이 위젯입니다.
+*메모리 뚱냥이 — an OpenAI Build Week project*
 
-Think RunCat, but for disk usage.  
-The fatter the cat, the fuller your drive.
+> Your disk usage, visualized as a cat that gets chonkier as your drive fills up.
 
-메모리 뚱냥이는 바탕화면 위에 둥둥 떠 있는 작은 고양이입니다.  
-디스크가 여유로우면 작은 애기냥, 디스크가 거의 꽉 차면 빵빵한 돼지냥이 됩니다.
+Chonky Cat is a desktop pet for macOS, with a lightweight Windows version. It
+turns an invisible system metric into something you can understand at a glance:
+the fuller your drive gets, the rounder your cat becomes.
 
-macOS와 Windows를 지원합니다.
-이미지 커스텀이 가능합니다. 
+The killer demo feature makes that cat personal. Give Chonky Cat one photo of
+your pet, and **gpt-image-2** creates a six-stage chonk progression that the app
+automatically converts into a custom 40-frame desktop theme.
 
 ## Screenshots
 
@@ -18,156 +18,185 @@ macOS와 Windows를 지원합니다.
   <tr>
     <td align="center">
       <img src="./cute.png" width="260"><br>
-      <sub>디스크가 꽉 차면 통통해지는 기본 냥이</sub>
+      <sub>The default cat gets rounder as disk usage rises</sub>
     </td>
     <td align="center">
       <img src="./simple.png" width="260"><br>
-      <sub>테마별로 다른 뚱냥이</sub>
+      <sub>Built-in themes give each chonk a different style</sub>
     </td>
   </tr>
   <tr>
     <td align="center" colspan="2">
       <img src="./context-menu.png" width="400"><br>
-      <sub>우클릭으로 디스크, RAM, 메모리 많이 쓰는 앱, 테마와 크기를 확인할 수 있습니다</sub>
+      <sub>Disk, RAM, top memory apps, themes, size, and settings on right-click</sub>
     </td>
   </tr>
 </table>
 
+## Highlights
 
-## 만든 이유
+- **One pet photo → one custom animated theme:** gpt-image-2 preserves your
+  pet's distinctive colors, markings, face, and ears while generating a
+  six-stage horizontal sprite sheet. Chonky Cat segments it and builds the full
+  40-frame theme automatically.
+- **The complete chonk chart:** disk usage moves your cat through **A fine boi →
+  He chomnk → A heckin' chonker → HEFTYCHONK → MEGACHONKER → OH LAWD HE
+  COMIN**.
+- **“🐾 Feeling full?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
+  computer feels slow, recommends safe cleanup targets, estimates reclaimable
+  space, and gives one concise piece of advice. The Korean menu label is
+  “🐾 배불러?”.
+- **Safety-first cleanup:** only allowlisted browser caches, Trash contents,
+  downloads older than 30 days, and Xcode DerivedData can be suggested. Every
+  item requires confirmation and is moved through macOS Trash—never permanently
+  deleted.
+- **A cat with a personality:** choose a sassy, warm, or stoic voice, or describe
+  a custom personality in natural language. The selected voice shapes the
+  diagnosis.
+- **English and Korean:** macOS language is detected automatically, with a
+  manual language override in the context menu.
+- **Useful at a glance:** disk, RAM, swap, and top memory-consuming apps appear
+  in the right-click menu. The cat can be dragged, resized, and rethemed.
 
-요즘 Claude Code와 Hermes 같은 AI 도구를 열심히 써보다 보니, 어느 순간 디스크 용량이 생각보다 빨리 줄어드는 걸 느낀다는 친구의 제보가 있었습니다.
+## Runtime models
 
-클로드 데스크톱앱을 사용하면 가상환경, 패키지, 캐시, 데스크톱 앱 파일들이 조용히 쌓이는 구조라고 하던데 이걸 평소에 눈에 잘 띄게 관리하면 더 잘 관리하게 되지않을까? 싶었습니다.
+- Performance diagnosis: **GPT-5.6** (`gpt-5.6-luna`)
+- Custom pet theme generation: **gpt-image-2**
 
-예전에 유행하던 GPU 활용도에 따라 고양이가 달리는 데스크 시스템이 생각났고, 오마주처럼 디스크가 찰수록 고양이가 같이 통통해지면 재밌겠다! 싶었어요. 
-고양이는 누구나 좋아하고(?) 특히, 이 위젯을 만드는데 아이디어를 준 친구가 고양이를 좋아하거든요. 
+## Built-in themes
 
-그래서 만든 작은 시스템 모니터이자 데스크톱 펫입니다.
-
-
-## Features
-
-- 디스크 사용량에 따라 고양이가 애기냥 → 통통냥 → 돼지냥으로 변합니다
-- RAM 사용량도 함께 볼 수 있습니다
-- 메모리 많이 쓰는 앱을 확인할 수 있습니다
-- 바탕화면 위에 둥둥 떠 있고, 드래그로 위치를 옮길 수 있습니다
-- 우클릭으로 상세 사용량, 메모리 많이 쓰는 앱, 테마, 크기를 확인하고 바꿀 수 있습니다
-- 이미지 한 장으로 나만의 테마를 추가할 수 있습니다
-- 설정을 자동 저장합니다
-- 로그인 시 자동 실행할 수 있습니다
-- macOS와 Windows를 지원합니다
-
-## Themes
-
-기본 테마는 귀여운 것부터 약간 이상한 것까지 4종을 제공합니다.
-
-| 테마 | 설명 |
+| Theme | Description |
 |---|---|
-| 귀여운 | 3D 토이 느낌의 뚱냥이. 뚱뚱할수록 눈이 게슴츠레해집니다 |
-| 단순한 | 심플한 일러스트 스타일의 뚱냥이 |
-| 광기 | 큰 반짝이 눈을 가진 치비냥. 약간 이상하지만 귀엽습니다 |
-| 경각심 | 금방이라도 쓰러질것같은 지친냥. 이름처럼 경각심을 줍니다 |
+| Cute | A soft 3D-toy cat whose eyes get sleepier as it gets rounder |
+| Simple | A clean, minimal illustrated chonk |
+| Madness | A sparkly, wide-eyed chibi cat |
+| Wake-up call | An intentionally derpy reminder to check your drive |
 
+## Install on macOS
 
----
-
-## Installation — macOS
 ```bash
 git clone https://github.com/hyeonheebee/memory-cat.git
 cd memory-cat
-./install_mac.command        
+./install_mac.command        # You can also double-click this file
 ```
-`install_mac.command`는 더블클릭해서 실행해도 됩니다.
-Python 3.9 이상이 설치되어 있으면, 가상환경을 만들고 필요한 의존성을 설치한 뒤 앱을 실행합니다.
 
-삭제하려면 아래 명령어를 실행하세요.
+The installer requires Python 3.9 or later. It creates `.venv`, installs the
+dependencies, launches Chonky Cat, and configures it to start at login.
+
+To remove it, run:
+
 ```bash
 ./uninstall_mac.command
 ```
----
 
-## Installation — Windows
+Store `OPENAI_API_KEY` in a `.env` file at the project root to enable GPT-5.6
+diagnosis and custom pet theme generation.
 
-Windows에서는 `windows/` 폴더의 `README.txt`를 참고해주세요.
-간단히 실행하려면:
+## Install on Windows
+
+See [`windows/README.txt`](windows/README.txt) for the full instructions. In
+short:
+
 ```bat
-git clone https://github.com/hyeonheebee/memory-cat.git
-cd memory-cat
 pip install pyside6 psutil
 pythonw windows\windows_cat.pyw
 ```
 
-Python 없이 `.exe`로 사용하고 싶다면:
-```bat
-`windows\build_exe.bat`
-```
-로 `.exe`를 만들 수 있어요.
+To build a standalone executable, run `windows\build_exe.bat` after installing
+its listed build dependencies.
 
+## Make your own theme 🎨
 
----
+### From one pet photo with gpt-image-2
 
-## 나만의 테마 만들기 🎨
+On macOS, right-click the cat and choose **Make a theme from my pet…**. After
+you select a photo and approve sending it to OpenAI, the app generates, imports,
+and immediately applies the new theme in a background thread.
 
-가로로 N단계가 나열된 고양이 이미지 한 장만 있으면 나만의 테마를 만들 수 있습니다.
-예를 들면 이런 이미지입니다.
+The same pipeline is available from the command line:
 
-> 같은 고양이가 6단계로 점점 통통해지는 이미지  
-> 흰 배경  
-> 한 줄로 나열된 형태
-
-ChatGPT나 이미지 생성 도구로 이런 식의 이미지를 만든 뒤 사용할 수 있습니다.
-
-[1] 개발용 의존성을 먼저 설치합니다.
 ```bash
-# (가상환경 기준) 이미지 변환 도구 의존성
+# Install the image-processing dependencies in the project virtual environment
 ./.venv/bin/python -m pip install -r requirements-dev.txt
+
+# Keep OPENAI_API_KEY in the project root .env file
+./.venv/bin/python vision_theme.py my-pet.jpg my-pet --quality medium
 ```
 
-[2]이미지를 테마로 변환합니다.
+`vision_theme.py` asks gpt-image-2 for six clearly separated versions of the
+same pet, from slim to extremely round. It then reuses the existing import
+pipeline to produce `frames/my-pet/cat_00.png` through `cat_39.png`, plus preview
+and raw debug images.
+
+### From an existing sprite sheet
+
+If you already have a horizontal image with multiple stages from slim to round,
+import it directly:
+
 ```bash
-# 이미지 -> 테마 (흰 배경 자동 제거 + 정렬 + 단계화)
-./.venv/bin/python import_theme.py 내고양이.png 내테마이름
+./.venv/bin/python import_theme.py my-sprite-sheet.png my-theme
 ```
 
-앱을 다시 실행하면 우클릭 테마 메뉴에 `내 테마이름`이 자동으로 나타납니다.
-테마는 아래 폴더를 자동으로 인식합니다
-```bash
-frames/<테마이름>/
-```
-
-코드로 그리는 기본 테마 프레임은 아래 명령어로 다시 만들 수 있습니다.
-```bash
-python generate_frames.py
-```
----
+Themes under `frames/<name>/` are discovered automatically. Reopen the
+right-click **Theme** menu to select a newly imported theme. Code-generated
+built-in themes can be rebuilt with `python generate_frames.py`.
 
 ## Project structure
+
+```text
+desktop_cat.py      macOS desktop app and menus (PyObjC)
+brain.py            GPT-5.6 performance diagnosis and safe Trash workflow
+personality.py      personality presets and custom prompt compiler
+i18n.py             English/Korean UI strings and chonk-stage names
+metrics.py          shared disk and memory measurements
+vision_theme.py     one pet photo -> gpt-image-2 custom theme
+import_theme.py     sprite sheet segmentation and frame generation
+generate_frames.py  built-in theme generator
+windows/            lightweight Windows app (PySide6)
+frames/<theme>/     generated PNG frames for each theme
+tests/              mocked, regression, and optional live API tests
 ```
-desktop_cat.py       macOS app, built with PyObjC
-windows/             Windows app, built with PySide6
-metrics.py           shared disk and memory metrics
-generate_frames.py   generates built-in theme frames
-import_theme.py      converts an image into a custom theme
-frames/<theme>/      PNG frames for each theme
+
+## Developer demo and test overrides
+
+- `MEMORY_CAT_CONFIG=demo_config.json`: use a separate config file for demos or
+  tests so personal settings are not read or modified.
+- `MEMORY_CAT_DEMO_DISK_PERCENT=92`: replace measured disk usage with a demo or
+  test value, clamped to 0–100; displayed and diagnostic values stay consistent.
+
+Example:
+
+```bash
+MEMORY_CAT_CONFIG=demo_config.json \
+MEMORY_CAT_DEMO_DISK_PERCENT=92 \
+.venv/bin/python desktop_cat.py
 ```
 
-## Privacy / 개인정보
+## How I collaborated with Codex
 
-메모리 뚱냥이는 어떤 데이터도 외부로 보내지 않습니다.
+All application code in this project was written by **Codex** (GPT-5.6-Codex) in a
+single continuous session in the ChatGPT desktop app, working directly on this
+repository. My workflow for every feature:
 
-- 네트워크 요청 없음
-- 텔레메트리 없음
-- 분석/추적 없음
-- 디스크와 메모리 사용량은 내 컴퓨터 안에서만 확인합니다
+1. **Spec first** — I wrote a detailed spec for each module (goals, design
+   decisions, safety constraints, test requirements, done criteria) and handed
+   it to Codex as one prompt.
+2. **Codex implements** — Codex wrote the code, tests, and commits: the GPT-5.6
+   diagnosis engine (`brain.py`), the safety-first trash pipeline (`safe_trash`
+   with an allowlist + macOS Trash only), i18n, the personality system, and the
+   killer feature — `vision_theme.py`, which turns one photo of your pet into a
+   40-frame chonk-progression theme via gpt-image-2.
+3. **Verify against the real API** — mocked tests all passed, but my review
+   partner (Claude, which I used for planning, code review, and demo prep —
+   never for the code itself) ran a live API call and caught a real bug:
+   gpt-image-2 rejects the `response_format` parameter. I reported it back to
+   Codex with the error, Codex verified it against the API reference and shipped
+   the fix with a regression test (`assertNotIn("response_format", kwargs)`).
 
-## Notes
-이 프로젝트는 재미로 시작한 작은 데스크톱 위젯입니다.
+Models used at runtime: **GPT-5.6** (`gpt-5.6-luna`) powers the cat's
+personality-driven performance diagnosis; **gpt-image-2** generates the custom
+pet sprite sheets.
 
-설치 환경에 따라 예상하지 못한 이슈가 있을 수 있습니다.  
-써보다가 고양이가 이상하게 굴거나, 너무 빨리 살찌거나, 실행이 잘 안 되면 이슈로 알려주세요. 
-[피드백 제보 링크](https://forms.gle/yeboaGjzpfzaqWAJA)
+## Author and license
 
-## 만든이 / License
-
-심현희 ([@hyeonheebee](https://github.com/hyeonheebee)) + Claude 🐾 · [MIT](LICENSE)
+Built by Hyeonhee Shim (@hyeonheebee). Code by Codex; planning, review, and demo by Claude. MIT License.
