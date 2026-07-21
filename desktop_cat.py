@@ -54,6 +54,7 @@ from vision_theme import ThemeGenerationError, build_theme as build_pet_theme
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMES_BASE = os.path.join(HERE, "frames")
+ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
 CONFIG = os.path.join(HERE, "config.json")
 REFRESH_SEC = 4.0
 DISK_FULL_PROMPT_PERCENT = 92.0
@@ -81,6 +82,18 @@ DEFAULT = {
     "custom_personality": "",
     "language": LANGUAGE_AUTO,
 }
+
+
+def new_cat_alert():
+    """Create an NSAlert with the bundled cat icon when it can be loaded."""
+    alert = NSAlert.alloc().init()
+    try:
+        icon = NSImage.alloc().initWithContentsOfFile_(ALERT_ICON_PATH)
+        if icon is not None:
+            alert.setIcon_(icon)
+    except Exception:
+        pass
+    return alert
 
 
 def config_path():
@@ -456,7 +469,7 @@ class CatController(NSObject):
         if not photo_path:
             return
 
-        alert = NSAlert.alloc().init()
+        alert = new_cat_alert()
         alert.setMessageText_(tr(self.language, "pet_theme_consent_title"))
         alert.setInformativeText_(tr(self.language, "pet_theme_consent_body"))
         alert.addButtonWithTitle_(tr(self.language, "pet_theme_continue"))
@@ -510,7 +523,7 @@ class CatController(NSObject):
         self._notify(tr(self.language, "personality_changed_title"), tr(self.language, "personality_changed_body", personality=label))
 
     def setCustomPersonality_(self, sender):
-        alert = NSAlert.alloc().init()
+        alert = new_cat_alert()
         alert.setMessageText_(tr(self.language, "custom_title"))
         alert.setInformativeText_(tr(self.language, "custom_hint"))
         alert.addButtonWithTitle_(tr(self.language, "save"))
@@ -669,7 +682,7 @@ class CatController(NSObject):
             personality_label=context["personality_label"],
             language=language,
         )
-        alert = NSAlert.alloc().init()
+        alert = new_cat_alert()
         alert.setMessageText_(content["title"])
         alert.setInformativeText_(content["body"])
         alert.addButtonWithTitle_(tr(language, "close"))
@@ -697,7 +710,7 @@ class CatController(NSObject):
 
     @objc.python_method
     def _show_information_alert(self, title, body):
-        alert = NSAlert.alloc().init()
+        alert = new_cat_alert()
         alert.setMessageText_(title)
         alert.setInformativeText_(body)
         alert.addButtonWithTitle_(tr(self.language, "confirm"))
@@ -709,7 +722,7 @@ class CatController(NSObject):
         count = sum(len(item.get("items", [])) for item in recommendations)
         if count == 0:
             return False
-        alert = NSAlert.alloc().init()
+        alert = new_cat_alert()
         alert.setMessageText_(tr(self.language, "cleanup_review_title"))
         alert.setInformativeText_(tr(self.language, "cleanup_review_body", count=count))
         alert.addButtonWithTitle_(tr(self.language, "review_items"))
@@ -723,7 +736,7 @@ class CatController(NSObject):
         path = item.get("path", "")
         size = item.get("size", tr(self.language, "unknown_size"))
         reason = recommendation.get("reason", "")
-        alert = NSAlert.alloc().init()
+        alert = new_cat_alert()
         alert.setMessageText_(f"{recommendation.get('label', tr(self.language, 'cleanup_candidate'))} · {size}")
         if category == "trash":
             action_note = tr(self.language, "trash_review_note")

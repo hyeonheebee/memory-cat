@@ -33,6 +33,13 @@ automatically converts into a custom 40-frame desktop theme.
   </tr>
 </table>
 
+<p align="center">
+  <img src="./docs/screenshots/01-desktop-pet.png" alt="Chonky Cat on the desktop" width="48%">
+  <img src="./docs/screenshots/02-diagnosis.png" alt="GPT-5.6 diagnosis result" width="48%">
+  <img src="./docs/screenshots/03-photo-to-sprite.png" alt="Pet photo to chonk sprite sheet" width="48%">
+  <img src="./docs/screenshots/04-safe-cleanup.png" alt="Safe cleanup confirmation" width="48%">
+</p>
+
 ## Highlights
 
 - **One pet photo → one custom animated theme:** gpt-image-2 preserves your

@@ -10,6 +10,44 @@ from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
 
 
 class DesktopCatTests(unittest.TestCase):
+    def test_new_cat_alert_uses_bundled_cat_frame_as_its_icon(self):
+        alert = Mock()
+        alert_class = Mock()
+        alert_class.alloc.return_value.init.return_value = alert
+        icon = Mock()
+        image_class = Mock()
+        image_class.alloc.return_value.initWithContentsOfFile_.return_value = icon
+
+        with (
+            patch.object(desktop_cat, "NSAlert", alert_class),
+            patch.object(desktop_cat, "NSImage", image_class),
+        ):
+            created = desktop_cat.new_cat_alert()
+
+        self.assertIs(created, alert)
+        image_class.alloc.return_value.initWithContentsOfFile_.assert_called_once_with(
+            desktop_cat.ALERT_ICON_PATH
+        )
+        alert.setIcon_.assert_called_once_with(icon)
+
+    def test_new_cat_alert_still_returns_alert_when_icon_loading_fails(self):
+        alert = Mock()
+        alert_class = Mock()
+        alert_class.alloc.return_value.init.return_value = alert
+        image_class = Mock()
+        image_class.alloc.return_value.initWithContentsOfFile_.side_effect = OSError(
+            "missing icon"
+        )
+
+        with (
+            patch.object(desktop_cat, "NSAlert", alert_class),
+            patch.object(desktop_cat, "NSImage", image_class),
+        ):
+            created = desktop_cat.new_cat_alert()
+
+        self.assertIs(created, alert)
+        alert.setIcon_.assert_not_called()
+
     def test_config_env_override_is_used_for_default_reads_and_writes(self):
         override = "/tmp/memory-cat-demo-config.json"
         opened = mock_open(read_data='{"theme": "simple"}')
