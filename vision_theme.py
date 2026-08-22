@@ -25,23 +25,43 @@ IMAGE_SIZE = "1536x1024"
 DEFAULT_QUALITY = "medium"
 QUALITY_CHOICES = ("low", "medium", "high")
 FRAMES_DIR = Path(__file__).with_name("frames")
-MIN_DETECTED_STAGES = 4
-MAX_DETECTED_STAGES = 8
+MIN_DETECTED_STAGES = 6
+MAX_DETECTED_STAGES = 6
 
 SHEET_PROMPT = """\
 Use the attached photo as the identity reference and create a horizontal sprite sheet.
 Preserve the distinctive fur color, markings, face, and ear shape of THIS exact pet.
-Depict the same cat or dog six times from left to right in a charming sticker/cartoon style.
-Keep all six full-body characters in the same pose, scale family, viewing angle, and art style.
-Make the body grow progressively fatter from left to right: character 1 is slim, character 2
-is slightly plump, character 3 is chubby, character 4 is very chubby, character 5 is round,
-and character 6 is extremely round. Use a pure white background and clear white space between
-every character. Show exactly one horizontal row. no text, no labels, no watermark, no borders.
+Depict the same pet six times from left to right as a soft 3D toy figurine: smooth matte
+vinyl surface, large simplified rounded forms, NO individual fur strands and no fine line
+hatching, soft studio lighting with gentle rim light and soft shading on the body itself.
+Chibi proportions: oversized round head, very large glossy dark eyes with two white
+catchlights, tiny rounded paws, short stubby legs, small soft blush on the cheeks.
+Keep the same character identity, three-quarter front-facing angle, and art style in all six.
+Make the body grow fatter AND the pose grow lazier from left to right:
+1 slim, sitting upright and tall, bright wide open eyes;
+2 slightly plump, sitting, soft closed smile;
+3 chubby, sitting low with legs tucked in, relaxed eyes;
+4 very chubby, crouching down, half-closed sleepy eyes;
+5 round, lying down as a flat loaf with front paws tucked, eyes nearly shut;
+6 extremely round, melting flat and wide on the ground like a pancake, eyes fully closed in
+a happy curve.
+Each character must be clearly bigger and lower to the ground than the previous one, so the
+silhouette changes from tall and narrow to short and wide.
+Give every character a soft contour slightly darker than the background so the silhouette
+stays readable even for white or cream fur.
+Draw the characters large so they fill most of the image height.
+Use a pure white background. Leave a wide empty white gap between neighboring
+characters, at least half a character wide, so that no two characters ever touch or overlap.
+Show exactly one horizontal row of exactly six characters, evenly spaced. no text, no labels, no watermark, no borders, no cast
+shadow on the ground, nothing connecting two characters.
 """
 
 RETRY_PROMPT = """\
-exactly 6 clearly separated cats with wide white gaps between them. Keep every character fully
-separate with no touching, overlap, props, shadows connecting characters, or extra figures.
+exactly 6 clearly separated characters in one horizontal row, with wide pure white gaps
+between them. Keep every character fully separate: no touching, no overlap, no props, no
+ground shadow, no reflection, no extra figures, no partial characters cropped at the left or
+right edge. The background must be uniform pure white #FFFFFF with no gradient, no texture,
+and no off-white tint anywhere.
 """
 
 _GENERATION_QUALITY = ContextVar(
