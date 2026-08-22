@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, call, mock_open, patch
 
+import i18n
 import desktop_cat
 from i18n import LANGUAGE_AUTO, LANGUAGE_EN
 from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
@@ -607,8 +608,9 @@ class DesktopCatTests(unittest.TestCase):
             (call.args[0], call.args[1])
             for call in item_class.alloc.return_value.initWithTitle_action_keyEquivalent_.call_args_list
         ]
-        self.assertIn(("🐾 다시 살펴보기", b"diagnose:"), title_actions)
-        self.assertIn(("📋 마지막 진단 보기", b"showLastDiagnosis:"), title_actions)
+        # 라벨 문구를 여기에 다시 적으면 i18n만 바꿨을 때 조용히 깨진다.
+        self.assertIn((i18n.tr("ko", "menu_diagnose_again"), b"diagnose:"), title_actions)
+        self.assertIn((i18n.tr("ko", "menu_last_diagnosis"), b"showLastDiagnosis:"), title_actions)
 
         controller._show_diagnosis_result = Mock(return_value=False)
         controller.showLastDiagnosis_(None)

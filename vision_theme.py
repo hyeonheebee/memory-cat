@@ -64,6 +64,13 @@ right edge. The background must be uniform pure white #FFFFFF with no gradient, 
 and no off-white tint anywhere.
 """
 
+def _expected_stages() -> str:
+    """기대 단계 수를 상수에서 만들어 낸다. 메시지에 숫자를 따로 적으면 상수와 어긋난다."""
+    if MIN_DETECTED_STAGES == MAX_DETECTED_STAGES:
+        return f"exactly {MIN_DETECTED_STAGES}"
+    return f"{MIN_DETECTED_STAGES} to {MAX_DETECTED_STAGES}"
+
+
 _GENERATION_QUALITY = ContextVar(
     "vision_theme_generation_quality", default=DEFAULT_QUALITY
 )
@@ -229,7 +236,7 @@ def build_theme(photo_path, theme_name, quality=DEFAULT_QUALITY) -> dict:
     counts = ", ".join(str(count) for count in detected_counts)
     raise ThemeGenerationError(
         "Sprite segmentation failed after one retry: "
-        f"detected {counts} stage(s), expected 4 to 8. "
+        f"detected {counts} stage(s), expected {_expected_stages()}. "
         f"Raw image(s) were saved in {target}."
     )
 

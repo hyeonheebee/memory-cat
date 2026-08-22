@@ -62,13 +62,14 @@ class VisionThemeTests(unittest.TestCase):
             api_key="test-key", timeout=180.0, max_retries=1
         )
         kwargs = client.images.edit.call_args.kwargs
-        self.assertEqual(kwargs["model"], "gpt-image-2")
-        self.assertEqual(kwargs["size"], "1536x1024")
-        self.assertEqual(kwargs["quality"], "medium")
+        # 문구나 모델명을 여기에 다시 적으면 소스만 바꿨을 때 조용히 깨진다.
+        # 확인하려는 것은 "설정한 값이 그대로 전달되는가" 이지 값 자체가 아니다.
+        self.assertEqual(kwargs["model"], vision_theme.MODEL)
+        self.assertEqual(kwargs["size"], vision_theme.IMAGE_SIZE)
+        self.assertEqual(kwargs["quality"], vision_theme.DEFAULT_QUALITY)
         self.assertNotIn("response_format", kwargs)
         self.assertEqual(Path(kwargs["image"].name), photo)
-        self.assertIn("THIS exact pet", kwargs["prompt"])
-        self.assertIn("no text, no labels, no watermark, no borders", kwargs["prompt"])
+        self.assertEqual(kwargs["prompt"], vision_theme.SHEET_PROMPT)
 
     def test_generate_sheet_without_api_key_fails_without_a_local_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -187,6 +188,46 @@ class VisionThemeTests(unittest.TestCase):
             self.assertTrue((output / "_raw_attempt1.png").is_file())
             self.assertFalse((output / "_preview.png").exists())
             self.assertEqual(list(output.glob("cat_*.png")), [])
+
+    def test_sheets_outside_the_expected_stage_count_are_rejected(self):
+        """6단계 시트만 통과시킨다. 5개면 두 마리가 붙은 것이고, 7개면 한 마리가 쪼개진 것이다."""
+        for stages in (vision_theme.MIN_DETECTED_STAGES - 1,
+                       vision_theme.MAX_DETECTED_STAGES + 1):
+            with self.subTest(stages=stages), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                photo = root / "pet.jpg"
+                Image.new("RGB", (64, 64), "brown").save(photo)
+                with (
+                    patch.object(vision_theme, "FRAMES_DIR", root / "frames"),
+                    patch.object(
+                        vision_theme,
+                        "generate_sheet",
+                        side_effect=[_synthetic_sheet(stages), _synthetic_sheet(stages)],
+                    ),
+                ):
+                    with self.assertRaises(vision_theme.ThemeGenerationError):
+                        vision_theme.build_theme(photo, f"stages-{stages}", "medium")
+
+    def test_failure_message_reports_the_configured_stage_count(self):
+        """기대 단계 수를 문장에 따로 적으면 상수와 어긋난다. 메시지가 상수에서 나오는지 본다."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            photo = root / "pet.jpg"
+            Image.new("RGB", (64, 64), "brown").save(photo)
+            with (
+                patch.object(vision_theme, "FRAMES_DIR", root / "frames"),
+                patch.object(
+                    vision_theme,
+                    "generate_sheet",
+                    side_effect=[_synthetic_sheet(3), _synthetic_sheet(3)],
+                ),
+            ):
+                with self.assertRaises(vision_theme.ThemeGenerationError) as ctx:
+                    vision_theme.build_theme(photo, "message-check", "medium")
+
+        message = str(ctx.exception)
+        self.assertIn(str(vision_theme.MIN_DETECTED_STAGES), message)
+        self.assertIn(str(vision_theme.MAX_DETECTED_STAGES), message)
 
     def test_retry_reaches_openai_with_stronger_prompt_and_selected_quality(self):
         responses = [
