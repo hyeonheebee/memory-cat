@@ -216,11 +216,11 @@ class VisionThemeTests(unittest.TestCase):
         self.assertEqual(client.images.edit.call_count, 2)
         first, second = client.images.edit.call_args_list
         self.assertEqual(first.kwargs["quality"], "high")
-        self.assertNotIn("exactly 6 clearly separated cats", first.kwargs["prompt"])
-        self.assertIn(
-            "exactly 6 clearly separated cats with wide white gaps between them",
-            second.kwargs["prompt"],
-        )
+        # 프롬프트 문구를 손봐도 깨지지 않도록 상수를 직접 참조한다.
+        # 검증하려는 것은 "재시도할 때만 강화 프롬프트가 덧붙는다" 이지 문구 자체가 아니다.
+        retry_text = vision_theme.RETRY_PROMPT.strip()
+        self.assertNotIn(retry_text, first.kwargs["prompt"])
+        self.assertIn(retry_text, second.kwargs["prompt"])
 
     def test_cli_reports_generation_errors_as_one_readable_line(self):
         stderr = StringIO()
