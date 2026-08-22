@@ -26,3 +26,12 @@ source/
 **/_raw*.png
 frames_preview.png
 .DS_Store
+
+# 사용자가 생성한 커스텀 펫 테마는 커밋하지 않는다.
+# (특정 반려동물을 식별할 수 있는 이미지 + 런타임 산출물이므로)
+# 기본 제공 테마 4종만 추적한다.
+frames/*/
+!frames/cute/
+!frames/simple/
+!frames/madness/
+!frames/derpy/
