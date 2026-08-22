@@ -53,10 +53,10 @@ automatically converts into a custom 40-frame desktop theme.
 - **The complete chonk chart:** disk usage moves your cat through **A fine boi →
   He chomnk → A heckin' chonker → HEFTYCHONK → MEGACHONKER → OH LAWD HE
   COMIN**.
-- **“🐾 Feeling full?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
+- **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
   computer feels slow, recommends safe cleanup targets, estimates reclaimable
   space, and gives one concise piece of advice. The Korean menu label is
-  “🐾 배불러?”.
+  “🐾 뭘 먹은 거야?”.
 - **Safety-first cleanup:** only allowlisted browser caches, Trash contents,
   downloads older than 30 days, and Xcode DerivedData can be suggested. Every
   item requires confirmation and is moved through macOS Trash—never permanently
@@ -81,7 +81,7 @@ reporting in the codebase.
 
 Two features reach the network, and only when you click them yourself:
 
-- **🐾 Feeling full? diagnosis** sends the usage numbers, the names of the apps
+- **🐾 What did you eat? diagnosis** sends the usage numbers, the names of the apps
   using the most memory, and per-category cleanup totals. **File names and paths
   are never sent** — the payload is assembled without them, and a test enforces
   it. The request also sets `store=False`.
@@ -143,7 +143,7 @@ diagnosis and custom pet theme generation.
 
 > **What the Windows build includes.** The disk-driven cat, RAM and swap
 > readouts, top memory consumers, and theme and size switching. The AI features
-> are macOS only: the 🐾 Feeling full? diagnosis, custom pet themes, safe
+> are macOS only: the 🐾 What did you eat? diagnosis, custom pet themes, safe
 > cleanup, personalities, and the language toggle. In exchange the Windows
 > build has no OpenAI dependency and makes no network requests at all.
 

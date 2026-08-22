@@ -32,8 +32,8 @@ class I18nTests(unittest.TestCase):
 
     def test_diagnosis_menu_uses_friendly_cat_wording_in_both_languages(self):
         expected = {
-            "ko": ("🐾 배불러?", "🐾 살펴보는 중…", "🐾 다시 살펴보기", "📋 마지막 진단 보기"),
-            "en": ("🐾 Feeling full?", "🐾 Checking…", "🐾 Check again", "📋 View last diagnosis"),
+            "ko": ("🐾 뭘 먹은 거야?", "🐾 살펴보는 중…", "🐾 다시 살펴보기", "📋 마지막 진단 보기"),
+            "en": ("🐾 What did you eat?", "🐾 Checking…", "🐾 Check again", "📋 View last diagnosis"),
         }
         for language, labels in expected.items():
             with self.subTest(language=language):
