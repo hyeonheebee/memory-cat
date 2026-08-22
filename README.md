@@ -32,7 +32,7 @@ automatically converts into a custom 40-frame desktop theme.
   <tr>
     <td align="center" colspan="2">
       <img src="./context-menu.png" width="400"><br>
-      <sub>Disk, RAM, swap, top memory apps, the diagnosis, themes, personality, and language — all on right-click</sub>
+      <sub>The chonk stage, disk, RAM, swap, top memory apps, the diagnosis, themes, personality, and language — all on right-click</sub>
     </td>
   </tr>
 </table>
