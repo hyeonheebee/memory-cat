@@ -1,4 +1,4 @@
-# Chonky Cat 🐱
+# Memory Cat 🐱
 
 *메모리 뚱냥이 — an OpenAI Build Week project*
 
@@ -8,11 +8,11 @@
   <img src="./docs/chonk-loop.gif" alt="A cat getting rounder as the disk fills up" width="300">
 </p>
 
-Chonky Cat is a desktop pet for macOS, with a lightweight Windows version. It
+Memory Cat is a desktop pet for macOS, with a lightweight Windows version. It
 turns an invisible system metric into something you can understand at a glance:
 the fuller your drive gets, the rounder your cat becomes.
 
-The killer demo feature makes that cat personal. Give Chonky Cat one photo of
+The killer demo feature makes that cat personal. Give Memory Cat one photo of
 your pet, and **gpt-image-2** creates a six-stage chonk progression that the app
 automatically converts into a custom 40-frame desktop theme.
 
@@ -32,13 +32,13 @@ automatically converts into a custom 40-frame desktop theme.
   <tr>
     <td align="center" colspan="2">
       <img src="./context-menu.png" width="400"><br>
-      <sub>Disk, RAM, top memory apps, themes, size, and settings on right-click</sub>
+      <sub>The chonk stage, disk, RAM, swap, top memory apps, the diagnosis, themes, personality, and language — all on right-click</sub>
     </td>
   </tr>
 </table>
 
 <p align="center">
-  <img src="./docs/screenshots/01-desktop-pet.png" alt="Chonky Cat on the desktop" width="48%">
+  <img src="./docs/screenshots/01-desktop-pet.png" alt="Memory Cat on the desktop" width="48%">
   <img src="./docs/screenshots/02-diagnosis.png" alt="GPT-5.6 diagnosis result" width="48%">
   <img src="./docs/screenshots/03-photo-to-sprite.png" alt="Pet photo to chonk sprite sheet" width="48%">
   <img src="./docs/screenshots/04-safe-cleanup.png" alt="Safe cleanup confirmation" width="48%">
@@ -48,15 +48,15 @@ automatically converts into a custom 40-frame desktop theme.
 
 - **One pet photo → one custom animated theme:** gpt-image-2 preserves your
   pet's distinctive colors, markings, face, and ears while generating a
-  six-stage horizontal sprite sheet. Chonky Cat segments it and builds the full
+  six-stage horizontal sprite sheet. Memory Cat segments it and builds the full
   40-frame theme automatically.
 - **The complete chonk chart:** disk usage moves your cat through **A fine boi →
   He chomnk → A heckin' chonker → HEFTYCHONK → MEGACHONKER → OH LAWD HE
   COMIN**.
-- **“🐾 Feeling full?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
+- **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
   computer feels slow, recommends safe cleanup targets, estimates reclaimable
   space, and gives one concise piece of advice. The Korean menu label is
-  “🐾 배불러?”.
+  “🐾 뭘 먹은 거야?”.
 - **Safety-first cleanup:** only allowlisted browser caches, Trash contents,
   downloads older than 30 days, and Xcode DerivedData can be suggested. Every
   item requires confirmation and is moved through macOS Trash—never permanently
@@ -74,17 +74,19 @@ The AI-powered items above are macOS only. See
 
 ## Privacy
 
-Chonky Cat does not phone home. Disk, RAM, and swap numbers are measured and
-drawn entirely on your machine, and nothing is collected, logged, or sent
-anywhere in the background. There is no analytics, telemetry, or crash
-reporting in the codebase.
+Memory Cat does not phone home. Disk, RAM, and swap numbers are measured and
+drawn entirely on your machine, and nothing is collected or sent anywhere in
+the background. There is no analytics, telemetry, or crash reporting in the
+codebase. (The macOS installer does route the app's own stdout and stderr to a
+local `cat.log` beside the app, which never leaves your machine.)
 
 Two features reach the network, and only when you click them yourself:
 
-- **🐾 Feeling full? diagnosis** sends the usage numbers, the names of the apps
-  using the most memory, and per-category cleanup totals. **File names and paths
-  are never sent** — the payload is assembled without them, and a test enforces
-  it. The request also sets `store=False`.
+- **🐾 What did you eat? diagnosis** sends the usage numbers, the names of the apps
+  using the most memory, and per-category cleanup totals. If you wrote your own
+  personality description, that text is sent as well, since it shapes the reply.
+  **File names and paths are never sent** — the payload is assembled without
+  them, and a test enforces it. The request also sets `store=False`.
 - **Make a theme from my pet…** uploads the photo you pick. A consent dialog
   naming OpenAI appears first, and nothing is uploaded until you approve it.
 
@@ -121,7 +123,7 @@ cd memory-cat
 ```
 
 The installer requires Python 3.9 or later. It creates `.venv`, installs the
-dependencies, launches Chonky Cat, and configures it to start at login.
+dependencies, launches Memory Cat, and configures it to start at login.
 
 To remove it, run:
 
@@ -143,7 +145,7 @@ diagnosis and custom pet theme generation.
 
 > **What the Windows build includes.** The disk-driven cat, RAM and swap
 > readouts, top memory consumers, and theme and size switching. The AI features
-> are macOS only: the 🐾 Feeling full? diagnosis, custom pet themes, safe
+> are macOS only: the 🐾 What did you eat? diagnosis, custom pet themes, safe
 > cleanup, personalities, and the language toggle. In exchange the Windows
 > build has no OpenAI dependency and makes no network requests at all.
 
@@ -155,8 +157,9 @@ pip install pyside6 psutil
 pythonw windows\windows_cat.pyw
 ```
 
-To build a standalone executable, run `windows\build_exe.bat` after installing
-its listed build dependencies.
+To build a standalone executable, run `build_exe.bat` **from inside the
+`windows` folder** (it resolves `frames` and the script by relative path), after
+installing its listed build dependencies.
 
 ## Make your own theme 🎨
 
