@@ -75,16 +75,18 @@ The AI-powered items above are macOS only. See
 ## Privacy
 
 Chonky Cat does not phone home. Disk, RAM, and swap numbers are measured and
-drawn entirely on your machine, and nothing is collected, logged, or sent
-anywhere in the background. There is no analytics, telemetry, or crash
-reporting in the codebase.
+drawn entirely on your machine, and nothing is collected or sent anywhere in
+the background. There is no analytics, telemetry, or crash reporting in the
+codebase. (The macOS installer does route the app's own stdout and stderr to a
+local `cat.log` beside the app, which never leaves your machine.)
 
 Two features reach the network, and only when you click them yourself:
 
 - **🐾 What did you eat? diagnosis** sends the usage numbers, the names of the apps
-  using the most memory, and per-category cleanup totals. **File names and paths
-  are never sent** — the payload is assembled without them, and a test enforces
-  it. The request also sets `store=False`.
+  using the most memory, and per-category cleanup totals. If you wrote your own
+  personality description, that text is sent as well, since it shapes the reply.
+  **File names and paths are never sent** — the payload is assembled without
+  them, and a test enforces it. The request also sets `store=False`.
 - **Make a theme from my pet…** uploads the photo you pick. A consent dialog
   naming OpenAI appears first, and nothing is uploaded until you approve it.
 
@@ -155,8 +157,9 @@ pip install pyside6 psutil
 pythonw windows\windows_cat.pyw
 ```
 
-To build a standalone executable, run `windows\build_exe.bat` after installing
-its listed build dependencies.
+To build a standalone executable, run `build_exe.bat` **from inside the
+`windows` folder** (it resolves `frames` and the script by relative path), after
+installing its listed build dependencies.
 
 ## Make your own theme 🎨
 
