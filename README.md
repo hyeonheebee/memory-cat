@@ -69,6 +69,9 @@ automatically converts into a custom 40-frame desktop theme.
 - **Useful at a glance:** disk, RAM, swap, and top memory-consuming apps appear
   in the right-click menu. The cat can be dragged, resized, and rethemed.
 
+The AI-powered items above are macOS only. See
+[Install on Windows](#install-on-windows) for what the Windows build covers.
+
 ## Privacy
 
 Chonky Cat does not phone home. Disk, RAM, and swap numbers are measured and
@@ -137,6 +140,12 @@ Store `OPENAI_API_KEY` in a `.env` file at the project root to enable GPT-5.6
 diagnosis and custom pet theme generation.
 
 ## Install on Windows
+
+> **What the Windows build includes.** The disk-driven cat, RAM and swap
+> readouts, top memory consumers, and theme and size switching. The AI features
+> are macOS only: the 🐾 Feeling full? diagnosis, custom pet themes, safe
+> cleanup, personalities, and the language toggle. In exchange the Windows
+> build has no OpenAI dependency and makes no network requests at all.
 
 See [`windows/README.txt`](windows/README.txt) for the full instructions. In
 short:
