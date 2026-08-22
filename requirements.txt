@@ -6,3 +6,8 @@ pyobjc-framework-Cocoa
 openai>=2.46,<3
 pydantic>=2,<3
 python-dotenv>=1.2,<2
+
+# 커스텀 펫 테마 생성 (vision_theme.py, import_theme.py)
+# desktop_cat.py가 로드 시 vision_theme을 import하므로 앱 실행에도 필수
+Pillow>=10,<13
+numpy<3

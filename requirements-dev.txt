@@ -1,4 +1,2 @@
-# 테마 프레임 생성/변환 및 테스트용 (generate_frames.py, import_theme.py, vision_theme.py)
-Pillow
-numpy
+# 테스트 전용. 앱 실행에 필요한 패키지는 requirements.txt 에 있음
 pytest

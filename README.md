@@ -123,8 +123,9 @@ and immediately applies the new theme in a background thread.
 The same pipeline is available from the command line:
 
 ```bash
-# Install the image-processing dependencies in the project virtual environment
-./.venv/bin/python -m pip install -r requirements-dev.txt
+# The image-processing dependencies ship with requirements.txt, which
+# install_mac.command already installs. For a manual virtual environment:
+./.venv/bin/python -m pip install -r requirements.txt
 
 # Keep OPENAI_API_KEY in the project root .env file
 ./.venv/bin/python vision_theme.py my-pet.jpg my-pet --quality medium
