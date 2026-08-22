@@ -4,6 +4,10 @@
 
 > Your disk usage, visualized as a cat that gets chonkier as your drive fills up.
 
+<p align="center">
+  <img src="./docs/chonk-loop.gif" alt="A cat getting rounder as the disk fills up" width="300">
+</p>
+
 Chonky Cat is a desktop pet for macOS, with a lightweight Windows version. It
 turns an invisible system metric into something you can understand at a glance:
 the fuller your drive gets, the rounder your cat becomes.
@@ -65,6 +69,32 @@ automatically converts into a custom 40-frame desktop theme.
 - **Useful at a glance:** disk, RAM, swap, and top memory-consuming apps appear
   in the right-click menu. The cat can be dragged, resized, and rethemed.
 
+## Privacy
+
+Chonky Cat does not phone home. Disk, RAM, and swap numbers are measured and
+drawn entirely on your machine, and nothing is collected, logged, or sent
+anywhere in the background. There is no analytics, telemetry, or crash
+reporting in the codebase.
+
+Two features reach the network, and only when you click them yourself:
+
+- **🐾 Feeling full? diagnosis** sends the usage numbers, the names of the apps
+  using the most memory, and per-category cleanup totals. **File names and paths
+  are never sent** — the payload is assembled without them, and a test enforces
+  it. The request also sets `store=False`.
+- **Make a theme from my pet…** uploads the photo you pick. A consent dialog
+  naming OpenAI appears first, and nothing is uploaded until you approve it.
+
+Both features need your own `OPENAI_API_KEY`. **Without a key the app still
+works**: the diagnosis falls back to a local, rules-based explanation and only
+custom theme generation is unavailable.
+
+Cleanup can only ever touch four allowlisted locations — browser caches, the
+Trash, downloads older than 30 days, and Xcode DerivedData. That list is fixed
+in code and the model cannot extend it. Every item is confirmed individually
+with its full path shown, and items are moved to the macOS Trash rather than
+deleted.
+
 ## Runtime models
 
 - Performance diagnosis: **GPT-5.6** (`gpt-5.6-luna`)
@@ -94,6 +124,13 @@ To remove it, run:
 
 ```bash
 ./uninstall_mac.command
+```
+
+After pulling a new version, restart the app so the updated code is loaded —
+a running instance keeps the modules it imported at launch:
+
+```bash
+pkill -f desktop_cat.py && ./.venv/bin/python desktop_cat.py &
 ```
 
 Store `OPENAI_API_KEY` in a `.env` file at the project root to enable GPT-5.6
