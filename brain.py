@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel
 
+import apppaths
 from i18n import LANGUAGE_EN, LANGUAGE_KO, canonical_language, chonk_stage
 from metrics import disk_usage, human_gb, pressure_score, top_memory_apps
 from personality import DEFAULT_PERSONALITY, compile_personality
@@ -502,7 +503,10 @@ def _assemble_result(
 
 
 def _load_api_key() -> Optional[str]:
-    load_dotenv(Path(__file__).with_name(".env"), override=False)
+    # 설치된 앱은 사용자 폴더의 .env 를, 저장소에서 바로 돌릴 때는 소스 옆의
+    # .env 를 읽는다. override=False 라서 먼저 읽힌 쪽이 이긴다.
+    for candidate in apppaths.dotenv_candidates():
+        load_dotenv(candidate, override=False)
     return os.getenv("OPENAI_API_KEY")
 
 

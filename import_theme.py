@@ -6,7 +6,8 @@
 가로로 늘어선 N단계 고양이 시트를 받아서:
   1) 흰 배경을 가장자리부터 flood-fill 로 투명 처리 (안쪽 흰 배는 보존)
   2) 단계별로 잘라 정사각형 캔버스에 정렬 (기본: 바닥 정렬)
-  3) 11단계(cat_00~10)로 매핑해 frames/<테마>/ 에 저장
+  3) 11단계(cat_00~10)로 매핑해
+     ~/Library/Application Support/Memory Cat/frames/<테마>/ 에 저장
 """
 import math
 import os
@@ -14,6 +15,8 @@ import sys
 
 import numpy as np
 from PIL import Image, ImageDraw
+
+import apppaths
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FINAL = 240
@@ -119,7 +122,9 @@ def main():
         sys.exit(1)
 
     smooth = "--smooth" in sys.argv   # 자세 비슷할 때만 권장 (다르면 잔상)
-    out = os.path.join(HERE, "frames", theme)
+    # 직접 만든 테마는 앱 번들이 아니라 사용자 폴더에 쌓인다. 앱을 다시 깔아도
+    # 살아남고, 저장소를 지워도 남는다.
+    out = os.path.join(apppaths.user_frames_dir(), theme)
     save_theme_frames(stages, out, smooth=smooth)
     print(f"[{theme}] {len(stages)}단계 -> {N_OUT}프레임(크로스페이드) 저장: {out}")
 

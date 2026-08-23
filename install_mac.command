@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
+SRC="$(pwd)"
+
+LABEL="com.memorycat.desktop"
+# 테스트에서 설치 위치를 갈아끼울 수 있게 열어 둔 구멍. 평소엔 ~/Applications.
+APPS_DIR="${MEMORY_CAT_APPS_DIR:-$HOME/Applications}"
+APP="$APPS_DIR/Memory Cat.app"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/Memory Cat/cat.log"
+
 echo "🐱 메모리 뚱냥이 설치 중..."
 
 # 개발자 도구가 없는 Mac 에서 /usr/bin/python3 는 실제 인터프리터가 아니라
@@ -18,33 +27,69 @@ if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2
     exit 1
 fi
 
-python3 -m venv .venv
-./.venv/bin/python -m pip install -q --upgrade pip
-./.venv/bin/python -m pip install -q -r requirements.txt
-
-PY="$(pwd)/.venv/bin/python"
-APP="$(pwd)/desktop_cat.py"
-LABEL="com.memorycat.desktop"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-mkdir -p "$HOME/Library/LaunchAgents"
-
-cat > "$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>$LABEL</string>
-    <key>ProgramArguments</key>
-    <array><string>$PY</string><string>$APP</string></array>
-    <key>WorkingDirectory</key><string>$(pwd)</string>
-    <key>RunAtLoad</key><true/>
-    <key>StandardOutPath</key><string>$(pwd)/cat.log</string>
-    <key>StandardErrorPath</key><string>$(pwd)/cat.log</string>
-</dict>
-</plist>
-EOF
-
+# 앱을 통째로 다시 만드니까, 돌고 있으면 먼저 내린다.
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "✅ 완료! 화면 어딘가에 고양이가 떴어요. 드래그로 옮기고 우클릭해보세요."
-echo "   제거하려면 uninstall_mac.command 를 실행하세요."
+
+case "$APP" in
+    *.app) ;;
+    *)
+        echo "❌ 설치 경로가 .app 으로 끝나지 않습니다: $APP"
+        exit 1
+        ;;
+esac
+rm -rf "$APP"
+mkdir -p "$APPS_DIR" "$APP/Contents/Resources"
+
+# 가상환경은 번들 안에 둔다. 앱 하나만 지우면 런타임까지 같이 사라진다.
+python3 -m venv "$APP/Contents/Resources/venv"
+VENVPY="$APP/Contents/Resources/venv/bin/python"
+
+# 이 순서는 바꾸면 안 된다. macOS 기본 python3 의 venv 에 딸려오는 pip 21.2.4 는
+# pyobjc-core 휠을 찾지 못해 소스 빌드로 넘어가고 "Cannot locate a working
+# compiler" 로 죽는다. pip 를 먼저 올려야 휠이 잡힌다.
+"$VENVPY" -m pip install -q --upgrade pip
+"$VENVPY" -m pip install -q -r requirements.txt
+
+# 번들 조립 + LaunchAgent plist 생성. plist 는 plistlib 이 구조적으로 쓴다.
+# (예전처럼 셸 변수를 XML 히어독에 끼워 넣으면 경로에 & 가 있을 때 깨진다.)
+"$VENVPY" "$SRC/macos/build_app.py" \
+    --source "$SRC" \
+    --app "$APP" \
+    --launch-agent "$PLIST" \
+    --log "$LOG"
+
+if ! plutil -lint "$APP/Contents/Info.plist" >/dev/null; then
+    echo "❌ 번들 Info.plist 가 깨졌습니다. 설치를 멈춥니다."
+    exit 1
+fi
+if ! plutil -lint "$PLIST" >/dev/null; then
+    echo "❌ LaunchAgent plist 가 깨졌습니다. 설치를 멈춥니다."
+    exit 1
+fi
+
+if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/tmp/memorycat-bootstrap.$$; then
+    rm -f "/tmp/memorycat-bootstrap.$$"
+    echo "✅ 완료! 화면 어딘가에 고양이가 떴어요. 드래그로 옮기고 우클릭해보세요."
+else
+    # 여기서 조용히 죽으면 사용자는 설치가 됐는지조차 알 수 없다.
+    # macOS 13+ 의 백그라운드 항목 승인 대기(Bootstrap failed: 5)가 흔한 원인.
+    echo ""
+    echo "⚠️  앱은 설치했지만 로그인 자동 실행 등록에 실패했습니다."
+    echo "    이유:"
+    sed 's/^/      /' "/tmp/memorycat-bootstrap.$$" 2>/dev/null || true
+    rm -f "/tmp/memorycat-bootstrap.$$"
+    echo ""
+    echo "    ▸ 시스템 설정 > 일반 > 로그인 항목에서 'Memory Cat' 을 허용한 뒤"
+    echo "      이 설치 파일을 다시 실행해 보세요."
+    echo "    ▸ 지금 바로 실행하려면:"
+    echo "        open -a \"$APP\""
+    echo ""
+fi
+
+echo ""
+echo "   앱:          $APP"
+echo "   설정·내 테마: $HOME/Library/Application Support/Memory Cat"
+echo "   로그:        $LOG"
+echo "   제거:        uninstall_mac.command"
+echo "                (저장소를 지웠다면 아래 파일을 실행하세요)"
+echo "                \"$APP/Contents/Resources/uninstall_mac.command\""

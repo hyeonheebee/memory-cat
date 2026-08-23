@@ -78,7 +78,8 @@ Memory Cat does not phone home. Disk, RAM, and swap numbers are measured and
 drawn entirely on your machine, and nothing is collected or sent anywhere in
 the background. There is no analytics, telemetry, or crash reporting in the
 codebase. (The macOS installer does route the app's own stdout and stderr to a
-local `cat.log` beside the app, which never leaves your machine.)
+local `cat.log` under `~/Library/Logs/Memory Cat/`, which never leaves your
+machine.)
 
 Two features reach the network, and only when you click them yourself:
 
@@ -122,28 +123,63 @@ cd memory-cat
 ./install_mac.command        # You can also double-click this file
 ```
 
-The installer requires Python 3.9 or later. It creates `.venv`, installs the
-dependencies, launches Memory Cat, and configures it to start at login.
+The installer requires Python 3.9 or later. It builds a real application
+bundle at `~/Applications/Memory Cat.app`, installs the dependencies into a
+virtual environment inside that bundle, launches Memory Cat, and configures it
+to start at login.
+
+Because everything the app needs lives in the bundle, **you can delete the
+cloned repository afterwards** and Memory Cat keeps working.
 
 On a Mac that has never had developer tools installed, `python3` is only a stub
 that prompts you to install them. Run `xcode-select --install` first, then run
 the installer again. The installer checks for this and tells you what to do.
 
-To remove it, run:
+### Where your files live
+
+| What | Where |
+| --- | --- |
+| The app | `~/Applications/Memory Cat.app` |
+| Settings (`config.json`) | `~/Library/Application Support/Memory Cat/` |
+| Themes you generated | `~/Library/Application Support/Memory Cat/frames/` |
+| `OPENAI_API_KEY` (`.env`) | `~/Library/Application Support/Memory Cat/` |
+| Log | `~/Library/Logs/Memory Cat/cat.log` |
+| Login item | `~/Library/LaunchAgents/com.memorycat.desktop.plist` |
+
+The four built-in themes ship inside the bundle and are replaced on every
+install. Anything you made stays in Application Support and is never
+overwritten.
+
+**Upgrading from an older install?** The installer copies your existing
+`config.json`, `.env`, and any custom `frames/<name>/` folders out of the
+repository and into Application Support on first run. It copies rather than
+moves, so the originals in your clone are left untouched, and it never
+overwrites a file that is already there.
+
+### Removing it
 
 ```bash
 ./uninstall_mac.command
 ```
 
-After pulling a new version, restart the app so the updated code is loaded —
-a running instance keeps the modules it imported at launch:
+If you already deleted the repository, the same script is kept inside the app:
 
 ```bash
-pkill -f desktop_cat.py && ./.venv/bin/python desktop_cat.py &
+"$HOME/Applications/Memory Cat.app/Contents/Resources/uninstall_mac.command"
 ```
 
-Store `OPENAI_API_KEY` in a `.env` file at the project root to enable GPT-5.6
-diagnosis and custom pet theme generation.
+Either way it stops the app, removes the login item and the bundle, and leaves
+your settings and custom themes alone. It prints the one command that deletes
+those too, if that is what you want.
+
+### Updating
+
+Pull, then run `./install_mac.command` again. It stops the running app,
+rebuilds the bundle, and restarts it.
+
+Store `OPENAI_API_KEY` in `~/Library/Application Support/Memory Cat/.env` to
+enable GPT-5.6 diagnosis and custom pet theme generation. When you run from a
+clone for development, a `.env` in the project root still works.
 
 ## Install on Windows
 
@@ -196,8 +232,10 @@ and immediately applies the new theme in a background thread.
 The same pipeline is available from the command line:
 
 ```bash
-# The image-processing dependencies ship with requirements.txt, which
-# install_mac.command already installs. For a manual virtual environment:
+# install_mac.command builds its virtual environment inside the app bundle.
+# For a development environment in the clone, make your own:
+python3 -m venv .venv
+./.venv/bin/python -m pip install --upgrade pip   # stock pip cannot resolve pyobjc-core
 ./.venv/bin/python -m pip install -r requirements.txt
 
 # Keep OPENAI_API_KEY in the project root .env file
@@ -206,8 +244,9 @@ The same pipeline is available from the command line:
 
 `vision_theme.py` asks gpt-image-2 for six clearly separated versions of the
 same pet, from slim to extremely round. It then reuses the existing import
-pipeline to produce `frames/my-pet/cat_00.png` through `cat_39.png`, plus preview
-and raw debug images.
+pipeline to produce `cat_00.png` through `cat_39.png` under
+`~/Library/Application Support/Memory Cat/frames/my-pet/`, plus preview and raw
+debug images. Set `MEMORY_CAT_HOME` to write somewhere else.
 
 ### From an existing sprite sheet
 
@@ -218,14 +257,19 @@ import it directly:
 ./.venv/bin/python import_theme.py my-sprite-sheet.png my-theme
 ```
 
-Themes under `frames/<name>/` are discovered automatically. Reopen the
-right-click **Theme** menu to select a newly imported theme. Code-generated
-built-in themes can be rebuilt with `python generate_frames.py`.
+Themes are discovered automatically from two places: the four built-in themes
+inside the app bundle, and your own themes in
+`~/Library/Application Support/Memory Cat/frames/<name>/`. Newly generated
+themes always go to the second one, so reinstalling the app never deletes them.
+Reopen the right-click **Theme** menu to select a newly imported theme.
+Code-generated built-in themes can be rebuilt with `python generate_frames.py`.
 
 ## Project structure
 
 ```text
 desktop_cat.py      macOS desktop app and menus (PyObjC)
+apppaths.py         where bundled assets end and user data begins
+macos/build_app.py  assembles Memory Cat.app and the LaunchAgent plist
 brain.py            GPT-5.6 performance diagnosis and safe Trash workflow
 personality.py      personality presets and custom prompt compiler
 i18n.py             English/Korean UI strings and chonk-stage names
@@ -244,6 +288,11 @@ tests/              mocked, regression, and optional live API tests
   tests so personal settings are not read or modified.
 - `MEMORY_CAT_DEMO_DISK_PERCENT=92`: replace measured disk usage with a demo or
   test value, clamped to 0–100; displayed and diagnostic values stay consistent.
+- `MEMORY_CAT_HOME=/tmp/cat-home`: relocate everything under
+  `~/Library/Application Support/Memory Cat/` — settings, custom themes, and
+  `.env` — so a test run cannot touch your real data.
+- `MEMORY_CAT_APPS_DIR=/tmp/apps`: install the bundle somewhere other than
+  `~/Applications`. Used by `install_mac.command` and `uninstall_mac.command`.
 
 Example:
 

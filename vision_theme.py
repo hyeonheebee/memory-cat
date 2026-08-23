@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from PIL import Image
 
+import apppaths
 from import_theme import cut_background, fit_square, save_theme_frames, segments
 
 
@@ -25,7 +26,9 @@ MODEL = "gpt-image-2"
 IMAGE_SIZE = "1536x1024"
 DEFAULT_QUALITY = "medium"
 QUALITY_CHOICES = ("low", "medium", "high")
-FRAMES_DIR = Path(__file__).with_name("frames")
+# 새로 만든 테마는 언제나 사용자 폴더에 쌓인다. 설치된 앱 번들 안은 건드리지
+# 않는다(다시 설치하면 지워지고, 나중에 코드서명을 하면 쓸 수도 없다).
+FRAMES_DIR = apppaths.user_frames_dir()
 # 이미지 API 가 직접 받는 포맷. HEIC 는 여기 없어서 변환이 필요하다.
 API_IMAGE_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
 MIN_DETECTED_STAGES = 6
@@ -162,11 +165,13 @@ def generate_sheet(photo_path, retry_prompt=False) -> Image.Image:
     if not photo.is_file():
         raise ThemeGenerationError(f"Pet photo not found: {photo}")
 
-    load_dotenv(Path(__file__).with_name(".env"), override=False)
+    for candidate in apppaths.dotenv_candidates():
+        load_dotenv(candidate, override=False)
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ThemeGenerationError(
-            "OPENAI_API_KEY is missing; add it to the project's .env file."
+            "OPENAI_API_KEY is missing; add it to "
+            f"{apppaths.user_data_dir() / '.env'}."
         )
 
     prompt = SHEET_PROMPT
