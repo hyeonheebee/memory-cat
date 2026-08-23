@@ -1260,6 +1260,59 @@ class RevealTests(unittest.TestCase):
         self.assertTrue(acknowledged)
         controller.window.orderFrontRegardless.assert_called_once_with()
 
+    def test_pet_theme_asks_for_a_key_before_asking_for_a_photo(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        controller._pet_theme_running = False
+        controller._show_information_alert = Mock()
+        panel_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value=None),
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+        ):
+            controller.makePetTheme_(None)
+
+        # 사진 선택기를 아예 열지 않는다 -- 고르고 나서 실패하면 헛수고다.
+        panel_class.openPanel.assert_not_called()
+        title, body = controller._show_information_alert.call_args.args
+        self.assertEqual(title, "API 키가 필요해요")
+        self.assertIn("OPENAI_API_KEY=sk-...", body)
+        self.assertIn(".env", body)
+
+    def test_diagnosis_tells_you_where_to_put_the_key_when_it_is_missing(self):
+        content = desktop_cat.diagnosis_result_content(
+            {
+                "source": "fallback",
+                "fallback_reason": "missing_api_key",
+                "why_slow": ["디스크가 꽉 찼어요"],
+                "one_line_advice": "정리해보세요",
+                "estimated_reclaimable": "10 GB",
+            },
+            personality_label=DEFAULT_PERSONALITY,
+            language="ko",
+        )
+
+        self.assertIn("OPENAI_API_KEY=sk-...", content["body"])
+        self.assertIn(".env", content["body"])
+
+    def test_other_fallbacks_do_not_nag_about_the_key(self):
+        # 키가 있는데 API 가 실패한 경우다. 키 안내는 도움이 안 되고 방해만 된다.
+        for reason in ("api_error", "worker_error"):
+            with self.subTest(reason=reason):
+                content = desktop_cat.diagnosis_result_content(
+                    {
+                        "source": "fallback",
+                        "fallback_reason": reason,
+                        "why_slow": ["디스크가 꽉 찼어요"],
+                        "one_line_advice": "정리해보세요",
+                        "estimated_reclaimable": "10 GB",
+                    },
+                    personality_label=DEFAULT_PERSONALITY,
+                    language="ko",
+                )
+                self.assertNotIn("OPENAI_API_KEY=sk-...", content["body"])
+
 
 if __name__ == "__main__":
     unittest.main()
