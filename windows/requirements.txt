@@ -1,5 +1,9 @@
-# Windows 버전(windows_cat.pyw) 실행에 필요한 패키지.
-# 상한은 다음 메이저 버전 차단용 — 자동 시작에 등록해 두고 쓰는 앱이라
-# 예고 없는 메이저 업그레이드로 깨지면 안 된다.
+# Packages needed to run the Windows build (windows_cat.pyw).
+# Upper bounds block the next major: this app gets registered to start
+# automatically, so an unannounced major upgrade must not break it.
+#
+# Keep this file ASCII. pip decodes requirements files with the system
+# encoding when there is no BOM, so Korean comments here fail with
+# UnicodeDecodeError (cp949) on a Korean-language Windows install.
 PySide6>=6.5,<7
 psutil>=5.9,<8
