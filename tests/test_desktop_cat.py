@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, call, mock_open, patch
 
 import i18n
@@ -648,6 +649,44 @@ class DesktopCatTests(unittest.TestCase):
         self.assertEqual(
             summary,
             {"moved": 1, "already_in_trash": 1, "skipped": 1, "failed": 0},
+        )
+
+    def test_refresh_swallows_measurement_failure_so_the_timer_survives(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller._refresh_once = Mock(side_effect=OSError("swap unavailable"))
+
+        # NSTimer 콜백에서 예외가 새어 나가면 run loop 가 끝나 앱이 종료된다.
+        controller.refresh_(None)
+
+        controller._refresh_once.assert_called_once_with()
+
+    def test_refresh_uses_the_swap_tolerant_measurement(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT)
+        controller.language = "ko"
+        controller.view = Mock()
+        controller._maybe_prompt_disk_full = Mock()
+        disk = SimpleNamespace(
+            total=100, used=50, free=50, percent=50.0
+        )
+        vm = SimpleNamespace(total=8, used=4, percent=50.0)
+        sw = SimpleNamespace(total=0, used=0, percent=0.0)
+
+        with (
+            patch.object(desktop_cat.mc, "disk_usage", return_value=disk),
+            patch.object(
+                desktop_cat.mc, "safe_pressure_score", return_value=(30.0, vm, sw)
+            ) as measure,
+            patch.object(desktop_cat.mc, "top_memory_apps", return_value=[]),
+            patch.object(desktop_cat, "NSImage"),
+        ):
+            controller.refresh_(None)
+
+        measure.assert_called_once_with()
+        self.assertEqual(controller.score, 50.0)
+        # 스왑을 못 읽은 경우 스왑 줄은 넣지 않는다.
+        self.assertNotIn(
+            "스왑", "".join(controller.detail)
         )
 
 

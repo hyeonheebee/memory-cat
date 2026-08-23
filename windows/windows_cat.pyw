@@ -13,6 +13,7 @@ import json
 import math
 import os
 import sys
+from types import SimpleNamespace
 
 import psutil
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -155,9 +156,21 @@ class Cat(QtWidgets.QWidget):
 
     # ---------------------------------------------------------- data
     def refresh(self):
+        # QTimer 슬롯에서 예외가 새어 나가면 PySide6 버전에 따라 앱이 그대로
+        # 종료된다. 한 틱이 실패해도 삼키고 다음 틱을 기다린다.
+        try:
+            self._refresh_once()
+        except Exception:
+            pass
+
+    def _refresh_once(self):
         disk = disk_usage()
         vm = psutil.virtual_memory()
-        sw = psutil.swap_memory()
+        try:
+            sw = psutil.swap_memory()
+        except OSError:
+            # 일부 환경은 swap_memory() 만 실패한다. 스왑을 0 으로 두고 계속한다.
+            sw = SimpleNamespace(total=0, used=0, percent=0.0)
         dpct = disk.percent
         self.score = dpct
         theme = self.cfg["theme"]
