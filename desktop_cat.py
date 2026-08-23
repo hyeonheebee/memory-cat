@@ -10,9 +10,12 @@
 테마 목록을 만든다. 새 테마 추가:
   python import_theme.py 내이미지.png 테마이름   (가로 N단계 시트)
 """
+import errno
+import fcntl
 import json
 import os
 import threading
+import time
 
 import objc
 from AppKit import (
@@ -31,6 +34,7 @@ from AppKit import (
 from Foundation import (
     NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString,
     NSOperationQueue, NSUserNotification, NSUserNotificationCenter,
+    NSDistributedNotificationCenter, NSRunLoop, NSDate, NSDefaultRunLoopMode,
 )
 
 import apppaths
@@ -65,12 +69,20 @@ ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
 CONFIG = str(apppaths.config_file())
 REFRESH_SEC = 4.0
 DISK_FULL_NOTIFICATION_ID = "memory-cat-disk-full"
+CLEANUP_SUMMARY_NOTIFICATION_ID = "memory-cat-cleanup-summary"
 # 알림이 배달 목록에 반영되는 데 걸리는 시간을 넉넉히 잡은 값.
 NOTIFICATION_VERIFY_SEC = 1.0
 # 아이폰 기본값인 heic 포함. 이미지 API 는 heic 를 받지 않으므로
 # vision_theme.api_ready_photo 가 업로드 직전에 변환한다.
 PET_PHOTO_TYPES = ["png", "jpg", "jpeg", "webp", "heic", "heif"]
 DISK_FULL_PROMPT_PERCENT = 92.0
+#: 뚱냥이 한 마리만 뜨게 하는 잠금 파일. 사용자 데이터 폴더 안에 산다.
+INSTANCE_LOCK_NAME = "memory-cat.lock"
+#: 두 번째 실행이 "앞으로 나와" 하고 부르는 신호와, 살아 있다는 응답.
+REVEAL_NOTIFICATION = "com.memorycat.desktop.reveal"
+REVEAL_ACK_NOTIFICATION = "com.memorycat.desktop.reveal-ack"
+#: 응답을 이만큼 기다린다. 넘기면 먼저 뜬 뚱냥이가 멈춰 있다고 본다.
+REVEAL_ACK_TIMEOUT_SEC = 2.0
 NSStatusWindowLevel = 25
 CATBOTTOM = 46.0
 # 항목 검토 중 "정리 중단"을 고른 신호. bool 이 아니라서 기존 콜백과 섞이지 않는다.
@@ -151,6 +163,121 @@ def save_config(cfg, path=None):
         return True
     except Exception:
         return False
+
+
+def instance_lock_path():
+    """잠금 파일 경로. 설정과 같은 사용자 데이터 폴더 안."""
+    return str(apppaths.user_data_dir() / INSTANCE_LOCK_NAME)
+
+
+#: 잠금은 열린 파일을 붙잡고 있어야 유지된다. 파이썬이 거둬가지 않게 여기에 둔다.
+_instance_lock_handle = None
+
+
+def acquire_instance_lock(path=None):
+    """뚱냥이가 이 컴퓨터에 한 마리만 뜨도록 잠금을 건다.
+
+    ``(handle, busy)`` 를 돌려준다. ``handle`` 이 있으면 내가 유일한
+    뚱냥이다. ``busy`` 가 True 면 이미 다른 뚱냥이가 살아 있다.
+    둘 다 비어 있으면 잠금 자체를 걸 수 없는 환경이라는 뜻이고, 이때는
+    **막지 않는다**. 두 마리가 뜨는 것보다 한 마리도 안 뜨는 쪽이 나쁘다.
+
+    ``flock`` 은 파일이 아니라 **열린 fd** 에 걸리는 잠금이라, 프로세스가
+    어떻게 죽든(정상 종료·크래시·강제 종료·``kill -9``) 커널이 알아서
+    풀어 준다. PID 파일처럼 죽은 잠금이 남아 앱을 영영 못 켜게 만드는 일이
+    없다. ``launchctl kickstart -k`` 나 ``KeepAlive`` 재시작도 앞 프로세스가
+    끝난 뒤에 새 프로세스를 띄우므로 그대로 통과한다.
+    """
+    if path is None:
+        apppaths.ensure_user_data_dir()
+        path = instance_lock_path()
+    try:
+        handle = open(path, "a+")
+    except OSError:
+        return None, False
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+            return None, True
+        # 잠금을 지원하지 않는 파일 시스템 등. 확신이 없으면 켜 준다.
+        return None, False
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{os.getpid()}\n")
+        handle.flush()
+    except OSError:
+        pass  # PID 는 로그 볼 때 참고용일 뿐, 잠금 자체와는 상관없다.
+    return handle, False
+
+
+def hold_instance_lock(handle):
+    """잠금 파일을 프로세스가 끝날 때까지 붙잡아 둔다."""
+    global _instance_lock_handle
+    _instance_lock_handle = handle
+    return handle
+
+
+class RevealAckWaiter(NSObject):
+    """두 번째 실행이 "나 살아 있어" 응답을 기다리는 동안 쓰는 수신기."""
+
+    def init(self):
+        self = objc.super(RevealAckWaiter, self).init()
+        if self is None:
+            return None
+        self._acknowledged = False
+        return self
+
+    def revealAcknowledged_(self, notification):
+        self._acknowledged = True
+
+    @objc.python_method
+    def acknowledged(self):
+        return self._acknowledged
+
+
+def request_reveal(timeout=REVEAL_ACK_TIMEOUT_SEC):
+    """이미 떠 있는 뚱냥이에게 앞으로 나오라고 부르고 응답을 기다린다.
+
+    응답이 오면 True. 시간 안에 아무 말이 없으면 False — 먼저 뜬 쪽이
+    멈춰 있거나 막 끝나는 중이라는 뜻이다.
+    """
+    center = NSDistributedNotificationCenter.defaultCenter()
+    waiter = RevealAckWaiter.alloc().init()
+    try:
+        center.addObserver_selector_name_object_(
+            waiter, b"revealAcknowledged:", REVEAL_ACK_NOTIFICATION, None)
+        center.postNotificationName_object_(REVEAL_NOTIFICATION, None)
+    except Exception:
+        return False
+    try:
+        loop = NSRunLoop.currentRunLoop()
+        deadline = time.monotonic() + timeout
+        while not waiter.acknowledged() and time.monotonic() < deadline:
+            loop.runMode_beforeDate_(
+                NSDefaultRunLoopMode,
+                NSDate.dateWithTimeIntervalSinceNow_(0.05),
+            )
+        return waiter.acknowledged()
+    finally:
+        try:
+            center.removeObserver_(waiter)
+        except Exception:
+            pass
+
+
+def show_already_running_alert(language=None):
+    """부른 뚱냥이가 대답을 안 할 때만 뜨는 안내창."""
+    if language is None:
+        language = resolve_language(load_config()["language"])
+    alert = new_cat_alert()
+    alert.setMessageText_(tr(language, "already_running_title"))
+    alert.setInformativeText_(tr(language, "already_running_body"))
+    alert.addButtonWithTitle_(tr(language, "confirm"))
+    NSApp.activateIgnoringOtherApps_(True)
+    alert.runModal()
 
 
 def diagnosis_notification_text(result, language=LANGUAGE_KO):
@@ -447,6 +574,7 @@ class CatController(NSObject):
         self._pet_theme_running = False
         self._pet_theme_thread = None
         self._disk_full_prompt_shown = False
+        self._cleanup_summary_message = None
         self._notification_center = (
             NSUserNotificationCenter.defaultUserNotificationCenter()
         )
@@ -458,10 +586,71 @@ class CatController(NSObject):
 
     def start(self):
         self.applyLayout()
+        self.listenForRevealRequests()
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             REFRESH_SEC, self, b"refresh:", None, True)
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.06, self, b"animate:", None, True)
+
+    def listenForRevealRequests(self):
+        """앱을 두 번째로 연 사람이 보내는 "앞으로 나와" 신호를 받는다."""
+        center = NSDistributedNotificationCenter.defaultCenter()
+        try:
+            center.addObserver_selector_name_object_(
+                self, b"revealRequested:", REVEAL_NOTIFICATION, None)
+        except Exception:
+            return
+        self._distributed_center = center
+
+    def revealRequested_(self, notification):
+        """고양이를 사용자 눈앞으로 데려오고, 살아 있다고 답장한다.
+
+        답장이 있어야 두 번째 프로세스가 "이미 잘 돌아가고 있구나" 하고
+        조용히 물러난다. 고양이를 못 옮기더라도 답장은 반드시 보낸다.
+        """
+        try:
+            self.revealCat()
+        except Exception:
+            pass  # 콜백에서 예외가 새면 run loop 가 끝난다. 답장이 더 급하다.
+        center = getattr(self, "_distributed_center", None)
+        if center is None:
+            center = NSDistributedNotificationCenter.defaultCenter()
+        try:
+            center.postNotificationName_object_(REVEAL_ACK_NOTIFICATION, None)
+        except Exception:
+            pass
+
+    def revealCat(self):
+        """창을 화면 안쪽으로 되돌리고 맨 앞에 세운다.
+
+        두 번 연 사람은 고양이가 보고 싶은 것이다. 창이 화면 밖으로
+        끌려 나갔거나 다른 창에 가려 있어도 다시 보이게 만든다.
+        """
+        window = getattr(self, "window", None)
+        if window is None:
+            return
+        try:
+            frame = window.frame()
+            visible = NSScreen.mainScreen().visibleFrame()
+            x = max(
+                visible.origin.x,
+                min(
+                    frame.origin.x,
+                    visible.origin.x + visible.size.width - frame.size.width,
+                ),
+            )
+            y = max(
+                visible.origin.y,
+                min(
+                    frame.origin.y,
+                    visible.origin.y + visible.size.height - frame.size.height,
+                ),
+            )
+            if (x, y) != (frame.origin.x, frame.origin.y):
+                window.setFrameOrigin_(NSMakePoint(x, y))
+        except Exception:
+            pass  # 화면 정보를 못 읽어도 맨 앞으로 올리는 건 해야 한다.
+        window.orderFrontRegardless()
 
     def applyLayout(self):
         cat = SIZES.get(self.cfg["size"], SIZES["보통"])
@@ -668,6 +857,53 @@ class CatController(NSObject):
         return True
 
     @objc.python_method
+    def _notification_center_ref(self):
+        """알림센터 핸들. 처음 쓸 때 한 번만 잡아 둔다."""
+        center = getattr(self, "_notification_center", None)
+        if center is None:
+            center = NSUserNotificationCenter.defaultUserNotificationCenter()
+            self._notification_center = center
+        return center
+
+    @objc.python_method
+    def _deliver_verified(self, notification, identifier, verify_selector):
+        """알림을 배달하고, 정말 떴는지 나중에 확인하도록 예약한다.
+
+        ``deliverNotification_`` 은 알림이 억제되거나 차단돼도 예외를 내지
+        않는다. 그래서 "보냈다"와 "보였다"가 다르다. 식별자를 붙여 두고
+        ``NOTIFICATION_VERIFY_SEC`` 뒤에 배달 목록을 훑는다(배달된 알림은
+        50ms 쯤 뒤 목록에 나타난다).
+
+        배달 자체가 실패하면 ``False`` 를 돌려준다. 그 자리에서 대체 창을
+        띄우는 건 호출부 몫이다. 예약이 걸렸으면 ``True``.
+        """
+        notification.setIdentifier_(identifier)
+        center = self._notification_center_ref()
+        try:
+            center.setDelegate_(self)
+        except Exception:
+            pass
+        try:
+            center.deliverNotification_(notification)
+        except Exception:
+            return False
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            NOTIFICATION_VERIFY_SEC, self, verify_selector, None, False)
+        return True
+
+    @objc.python_method
+    def _notification_was_delivered(self, identifier):
+        """그 식별자를 가진 알림이 실제로 배달 목록에 있는지."""
+        center = getattr(self, "_notification_center", None)
+        try:
+            delivered = list(center.deliveredNotifications() or []) if center else []
+            return any(
+                str(item.identifier() or "") == identifier for item in delivered
+            )
+        except Exception:
+            return False
+
+    @objc.python_method
     def _show_disk_full_prompt(self):
         notification = NSUserNotification.alloc().init()
         notification.setTitle_(tr(self.language, "disk_full_prompt_title"))
@@ -679,38 +915,14 @@ class CatController(NSObject):
             tr(self.language, "disk_full_prompt_action")
         )
         notification.setUserInfo_({"memory_cat_action": "diagnose"})
-        notification.setIdentifier_(DISK_FULL_NOTIFICATION_ID)
-        center = getattr(self, "_notification_center", None)
-        if center is None:
-            center = NSUserNotificationCenter.defaultUserNotificationCenter()
-            self._notification_center = center
-        try:
-            center.setDelegate_(self)
-        except Exception:
-            pass
-        try:
-            center.deliverNotification_(notification)
-        except Exception:
+        # 디스크가 꽉 찼다는 경고는 조용히 사라지면 안 된다.
+        if not self._deliver_verified(
+            notification, DISK_FULL_NOTIFICATION_ID, b"verifyDiskFullPrompt:"
+        ):
             self._show_disk_full_alert()
-            return
-
-        # deliverNotification_ 은 알림이 실제로 표시되지 않아도 예외를 내지
-        # 않는다. 배달 목록에 잠깐 뒤 나타나는지 보고, 없으면 알럿으로 알린다.
-        # 디스크가 꽉 찼다는 경고는 조용히 사라지면 안 되는 유일한 알림이다.
-        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            NOTIFICATION_VERIFY_SEC, self, b"verifyDiskFullPrompt:", None, False)
 
     def verifyDiskFullPrompt_(self, timer):
-        center = getattr(self, "_notification_center", None)
-        try:
-            delivered = list(center.deliveredNotifications() or []) if center else []
-            shown = any(
-                str(item.identifier() or "") == DISK_FULL_NOTIFICATION_ID
-                for item in delivered
-            )
-        except Exception:
-            shown = False
-        if not shown:
+        if not self._notification_was_delivered(DISK_FULL_NOTIFICATION_ID):
             self._show_disk_full_alert()
 
     @objc.python_method
@@ -880,7 +1092,31 @@ class CatController(NSObject):
         body = " · ".join(parts) or tr(self.language, "summary_none")
         if summary["moved"]:
             body += tr(self.language, "summary_reclaim_note")
-        self._notify(tr(self.language, "cleanup_result_title"), body)
+        title = tr(self.language, "cleanup_result_title")
+        # 사용자가 방금 승인한 파일 작업의 결과다. 조용히 사라지면 뭘 지웠는지
+        # 알 길이 없으므로 디스크 경고와 같은 방식으로 배달을 확인한다.
+        self._cleanup_summary_message = (title, body)
+        notification = NSUserNotification.alloc().init()
+        notification.setTitle_(title)
+        notification.setInformativeText_(body)
+        if not self._deliver_verified(
+            notification, CLEANUP_SUMMARY_NOTIFICATION_ID, b"verifyCleanupSummary:"
+        ):
+            self._show_cleanup_summary_alert()
+
+    def verifyCleanupSummary_(self, timer):
+        if not self._notification_was_delivered(CLEANUP_SUMMARY_NOTIFICATION_ID):
+            self._show_cleanup_summary_alert()
+
+    @objc.python_method
+    def _show_cleanup_summary_alert(self):
+        """알림이 뜨지 않는 환경을 위한 대체 경로. 정리 결과를 창으로 보여준다."""
+        message = getattr(self, "_cleanup_summary_message", None)
+        if message is None:
+            return
+        title, body = message
+        self._cleanup_summary_message = None
+        self._show_information_alert(title, body)
 
     def popUpMenu_(self, event):
         menu = NSMenu.alloc().init()
@@ -1007,6 +1243,21 @@ class CatController(NSObject):
 def main():
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+
+    lock, busy = acquire_instance_lock()
+    if busy:
+        # 이미 한 마리 떠 있다. 두 마리가 겹쳐 뛰면서 같은 config.json 을
+        # 서로 덮어쓰는 걸 막는다. 대신 있던 고양이를 앞으로 불러낸다.
+        if request_reveal():
+            return
+        # 대답이 없다. 그 사이 사라졌을 수도 있으니 잠금을 한 번 더 노려본다.
+        # (kickstart 재시작이 겹치는 순간 등) 여전히 잡혀 있으면 멈춰 있는
+        # 것이니, 아무 일도 안 일어난 것처럼 보이지 않게 알려 준다.
+        lock, busy = acquire_instance_lock()
+        if busy:
+            show_already_running_alert()
+            return
+    hold_instance_lock(lock)
 
     cfg = load_config()
     cat = SIZES.get(cfg["size"], SIZES["보통"])

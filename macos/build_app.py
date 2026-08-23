@@ -15,6 +15,7 @@ py2app / PyInstaller 를 쓰지 않는다. 번들이라는 게 결국 정해진 
           MemoryCat           ← 셸 런처 (CFBundleExecutable)
           MemoryCatPython     ← 프레임워크 인터프리터 사본
         Resources/
+          MemoryCat.icns      ← 앱 아이콘 (CFBundleIconFile)
           *.py                ← 앱 소스
           frames/             ← 기본 테마 4종
           venv/               ← 설치 스크립트가 미리 만들어 둔 가상환경
@@ -50,6 +51,16 @@ EXECUTABLE_NAME = "MemoryCat"
 INTERPRETER_NAME = "MemoryCatPython"
 PYTHON_HOME_FILE = "pythonhome"
 VERSION = "1.0.0"
+
+#: 번들 안에서의 아이콘 파일 이름. ``CFBundleIconFile`` 에 이 값이 그대로
+#: 들어간다. 확장자를 붙여 둔다 — 애플 문서가 허용하는 형태고(크롬도
+#: ``app.icns`` 를 쓴다), 확장자를 빼면 "Resources 안의 무엇을 가리키는가" 가
+#: 규칙에 의존하게 된다. 붙여 두면 plist 값이 곧 파일 이름이라 검증이 쉽다.
+ICON_FILE = "MemoryCat.icns"
+
+#: 저장소 안에서 아이콘이 있는 위치. 빌드할 때 굽지 않고 커밋된 걸 복사한다.
+#: 굽는 방법은 ``macos/make_icon.command`` 참고.
+ICON_SOURCE = ("macos", ICON_FILE)
 
 #: 번들에 들어가는 파이썬 모듈. 글롭 대신 명시해서 무엇이 배포되는지 드러낸다.
 APP_MODULES = (
@@ -115,14 +126,22 @@ def launcher_script() -> str:
     )
 
 
-def info_plist(version: str = VERSION) -> dict:
+def info_plist(version: str = VERSION, icon: str = ICON_FILE) -> dict:
     """번들 Info.plist 내용.
 
     ``LSUIElement`` 는 앱이 이미 호출하는
     ``setActivationPolicy_(NSApplicationActivationPolicyAccessory)`` 와 같은
     말이다. Dock 아이콘도 메뉴 막대도 없는 보조 앱이라는 뜻.
+
+    ``icon`` 이 ``None`` 이면 ``CFBundleIconFile`` 자체를 넣지 않는다. 없는
+    파일을 가리키는 키를 남기는 게 키가 아예 없는 것보다 나쁘기 때문이다.
+    Launch Services 는 그 경로를 캐시해 두고, 나중에 아이콘을 제대로 넣어도
+    깨진 상태가 남아 있을 수 있다.
+
+    ``CFBundleIconName`` 은 쓰지 않는다. 그건 에셋 카탈로그(``Assets.car``)를
+    전제로 하는 키인데 이 번들에는 카탈로그가 없다.
     """
-    return {
+    payload = {
         "CFBundleDevelopmentRegion": "ko",
         "CFBundleDisplayName": apppaths.APP_NAME,
         "CFBundleExecutable": EXECUTABLE_NAME,
@@ -141,6 +160,9 @@ def info_plist(version: str = VERSION) -> dict:
         "NSSupportsAutomaticTermination": False,
         "NSSupportsSuddenTermination": False,
     }
+    if icon:
+        payload["CFBundleIconFile"] = icon
+    return payload
 
 
 def launch_agent_plist(executable: Path, log_file: Path, working_dir: Path) -> dict:
@@ -260,13 +282,32 @@ def assemble(source: Path, app: Path, interpreter=None) -> dict:
         frames.mkdir(parents=True, exist_ok=True)
         shutil.copytree(origin, target)
 
+    warnings = []
+
+    # 아이콘은 빌드할 때 굽지 않는다. 커밋된 .icns 를 그대로 복사한다.
+    # 이유는 두 가지. (1) 굽는 데 필요한 `iconutil` 은 서브프로세스 호출이고,
+    # 이 파일은 서브프로세스를 쓰지 않는다. (2) Pillow 의 ICNS 저장은
+    # 16pt·32pt 1x 칸을 만들지 못한다. 자세한 건 macos/make_icon.command.
+    icon_origin = source.joinpath(*ICON_SOURCE)
+    icon = ICON_FILE
+    if icon_origin.is_file():
+        shutil.copy2(icon_origin, resources / ICON_FILE)
+    else:
+        # 아이콘이 없어도 앱은 돈다. 다만 없는 파일을 가리키는 키는 남기지
+        # 않는다 — 그러면 Launch Services 가 깨진 아이콘을 캐시한다.
+        icon = None
+        warnings.append(
+            f"앱 아이콘을 찾지 못했습니다: {icon_origin}. "
+            "기본 응용 프로그램 아이콘으로 표시됩니다. "
+            "macos/make_icon.command 로 다시 구울 수 있습니다."
+        )
+
     with open(contents / "Info.plist", "wb") as handle:
-        plistlib.dump(info_plist(), handle)
+        plistlib.dump(info_plist(icon=icon), handle)
 
     _write_executable(macos / EXECUTABLE_NAME, launcher_script())
 
     interpreter = interpreter or framework_interpreter()
-    warnings = []
     if interpreter is None:
         # 프레임워크 빌드가 아니면 번들 정체성을 줄 방법이 없다. 앱은 돌지만
         # 알림은 여전히 "Python" 이름으로 나간다. 조용히 넘기지 않고 알린다.
@@ -278,7 +319,7 @@ def assemble(source: Path, app: Path, interpreter=None) -> dict:
     _copy_executable(Path(interpreter), macos / INTERPRETER_NAME)
     (resources / PYTHON_HOME_FILE).write_text(sys.base_prefix, encoding="utf-8")
 
-    return {"warnings": warnings, "interpreter": str(interpreter)}
+    return {"warnings": warnings, "interpreter": str(interpreter), "icon": icon}
 
 
 def write_launch_agent(app: Path, plist_path: Path, log_file: Path,

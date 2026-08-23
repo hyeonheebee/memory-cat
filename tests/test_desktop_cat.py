@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -851,6 +852,413 @@ class DesktopCatTests(unittest.TestCase):
             alert.addButtonWithTitle_.call_args_list,
         )
         stop_button.setKeyEquivalent_.assert_called_once_with("\033")
+
+
+class CleanupSummaryDeliveryTests(unittest.TestCase):
+    """정리 결과는 사용자가 방금 승인한 파일 작업의 보고서다. 조용히 사라지면 안 된다."""
+
+    SUMMARY = {"moved": 2, "already_in_trash": 0, "skipped": 1, "failed": 0}
+
+    def _controller(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        return controller
+
+    def _expected_body(self):
+        # 문구를 여기에 다시 적으면 i18n만 바꿨을 때 조용히 깨진다.
+        return " · ".join(
+            (
+                i18n.tr("ko", "summary_moved", count=2),
+                i18n.tr("ko", "summary_skipped", count=1),
+            )
+        ) + i18n.tr("ko", "summary_reclaim_note")
+
+    def test_cleanup_summary_tags_its_notification_and_schedules_the_check(self):
+        controller = self._controller()
+        notification = Mock()
+        notification_class = Mock()
+        notification_class.alloc.return_value.init.return_value = notification
+        controller._notification_center = Mock()
+        timer_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "NSUserNotification", notification_class),
+            patch.object(desktop_cat, "NSTimer", timer_class),
+        ):
+            controller._show_cleanup_summary(dict(self.SUMMARY))
+
+        notification.setIdentifier_.assert_called_once_with(
+            desktop_cat.CLEANUP_SUMMARY_NOTIFICATION_ID
+        )
+        controller._notification_center.deliverNotification_.assert_called_once_with(
+            notification
+        )
+        timer_class.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_.assert_called_once_with(
+            desktop_cat.NOTIFICATION_VERIFY_SEC,
+            controller,
+            b"verifyCleanupSummary:",
+            None,
+            False,
+        )
+
+    def test_cleanup_summary_falls_back_to_an_alert_when_it_never_appears(self):
+        controller = self._controller()
+        controller._show_information_alert = Mock()
+        # 알림센터가 아무것도 배달하지 않은 상태 = 알림이 표시되지 않은 것.
+        controller._notification_center = Mock(
+            **{"deliveredNotifications.return_value": []}
+        )
+
+        with (
+            patch.object(desktop_cat, "NSUserNotification", Mock()),
+            patch.object(desktop_cat, "NSTimer", Mock()),
+        ):
+            controller._show_cleanup_summary(dict(self.SUMMARY))
+        controller.verifyCleanupSummary_(None)
+
+        controller._show_information_alert.assert_called_once_with(
+            i18n.tr("ko", "cleanup_result_title"), self._expected_body()
+        )
+
+    def test_cleanup_summary_stays_quiet_when_the_notification_arrived(self):
+        controller = self._controller()
+        controller._show_information_alert = Mock()
+        delivered = Mock()
+        delivered.identifier.return_value = (
+            desktop_cat.CLEANUP_SUMMARY_NOTIFICATION_ID
+        )
+        controller._notification_center = Mock(
+            **{"deliveredNotifications.return_value": [delivered]}
+        )
+
+        with (
+            patch.object(desktop_cat, "NSUserNotification", Mock()),
+            patch.object(desktop_cat, "NSTimer", Mock()),
+        ):
+            controller._show_cleanup_summary(dict(self.SUMMARY))
+        controller.verifyCleanupSummary_(None)
+
+        controller._show_information_alert.assert_not_called()
+
+    def test_cleanup_summary_opens_the_alert_at_once_when_delivery_raises(self):
+        controller = self._controller()
+        controller._show_information_alert = Mock()
+        controller._notification_center = Mock(
+            **{"deliverNotification_.side_effect": OSError("no center")}
+        )
+        timer_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "NSUserNotification", Mock()),
+            patch.object(desktop_cat, "NSTimer", timer_class),
+        ):
+            controller._show_cleanup_summary(dict(self.SUMMARY))
+
+        controller._show_information_alert.assert_called_once_with(
+            i18n.tr("ko", "cleanup_result_title"), self._expected_body()
+        )
+        timer_class.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_.assert_not_called()
+
+    def test_disk_full_warning_keeps_its_own_identifier_and_check(self):
+        # 두 알림이 같은 기계를 쓰지만 확인 콜백은 각자의 것이어야 한다.
+        controller = self._controller()
+        notification = Mock()
+        notification_class = Mock()
+        notification_class.alloc.return_value.init.return_value = notification
+        controller._notification_center = Mock()
+        timer_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "NSUserNotification", notification_class),
+            patch.object(desktop_cat, "NSTimer", timer_class),
+        ):
+            controller._show_disk_full_prompt()
+
+        notification.setIdentifier_.assert_called_once_with(
+            desktop_cat.DISK_FULL_NOTIFICATION_ID
+        )
+        timer_class.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_.assert_called_once_with(
+            desktop_cat.NOTIFICATION_VERIFY_SEC,
+            controller,
+            b"verifyDiskFullPrompt:",
+            None,
+            False,
+        )
+
+
+class InstanceLockTests(unittest.TestCase):
+    """뚱냥이는 한 마리만. 단, 잠금이 죽은 채 남아 앱을 못 켜게 만들면 안 된다."""
+
+    def _lock_path(self, temp_dir):
+        return str(Path(temp_dir) / desktop_cat.INSTANCE_LOCK_NAME)
+
+    def test_a_second_launch_cannot_take_the_lock_while_the_first_holds_it(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self._lock_path(temp_dir)
+            first, busy = desktop_cat.acquire_instance_lock(path)
+            self.addCleanup(first.close)
+
+            self.assertIsNotNone(first)
+            self.assertFalse(busy)
+            self.assertEqual(
+                desktop_cat.acquire_instance_lock(path), (None, True)
+            )
+
+    def test_the_lock_frees_itself_when_the_holder_goes_away(self):
+        # flock 은 파일이 아니라 열린 fd 에 걸린다. 프로세스가 어떻게 죽든
+        # (크래시·강제 종료 포함) 커널이 fd 를 닫으면서 잠금도 같이 풀린다.
+        # 여기서는 그 "fd 가 닫힌다"를 그대로 재현한다. PID 파일이었다면
+        # 이 시점에 죽은 잠금이 남아 다시는 못 켰을 것이다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self._lock_path(temp_dir)
+            first, _ = desktop_cat.acquire_instance_lock(path)
+            first.close()
+
+            second, busy = desktop_cat.acquire_instance_lock(path)
+            self.addCleanup(second.close)
+
+            self.assertIsNotNone(second)
+            self.assertFalse(busy)
+
+    def test_the_lock_file_records_the_holder_pid_for_the_log(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self._lock_path(temp_dir)
+            handle, _ = desktop_cat.acquire_instance_lock(path)
+            self.addCleanup(handle.close)
+
+            self.assertEqual(
+                Path(path).read_text(encoding="utf-8").strip(), str(os.getpid())
+            )
+
+    def test_a_lock_we_cannot_even_create_never_blocks_startup(self):
+        # 잠금을 못 거는 환경이면 두 마리가 뜰 수는 있어도, 한 마리도 안 뜨는
+        # 일은 없어야 한다. 못 켜지는 앱이 두 마리보다 나쁘다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = str(Path(temp_dir) / "no-such-folder" / "memory-cat.lock")
+
+            self.assertEqual(
+                desktop_cat.acquire_instance_lock(path), (None, False)
+            )
+
+    def test_the_lock_lives_next_to_the_config_in_the_user_data_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(
+                "os.environ", {"MEMORY_CAT_HOME": temp_dir}, clear=False
+            ):
+                self.assertEqual(
+                    desktop_cat.instance_lock_path(),
+                    str(Path(temp_dir) / desktop_cat.INSTANCE_LOCK_NAME),
+                )
+
+
+class SecondLaunchTests(unittest.TestCase):
+    """두 번째 실행은 새 고양이를 띄우는 대신 있던 고양이를 불러와야 한다."""
+
+    def _app(self):
+        app = Mock()
+        return app, Mock(**{"sharedApplication.return_value": app})
+
+    def _startup_patches(self):
+        """main() 이 실제 창을 열지 않도록 막는 최소한의 대역들."""
+        screen = Mock()
+        screen.mainScreen.return_value.frame.return_value = SimpleNamespace(
+            size=SimpleNamespace(width=1440.0, height=900.0)
+        )
+        return {
+            "NSScreen": screen,
+            "NSWindow": Mock(),
+            "CatView": Mock(),
+            "CatController": Mock(),
+        }
+
+    def test_second_launch_reveals_the_running_cat_instead_of_starting_another(self):
+        app, app_class = self._app()
+        parts = self._startup_patches()
+
+        with (
+            patch.object(desktop_cat, "NSApplication", app_class),
+            patch.object(
+                desktop_cat, "acquire_instance_lock", return_value=(None, True)
+            ),
+            patch.object(
+                desktop_cat, "request_reveal", return_value=True
+            ) as reveal,
+            patch.object(desktop_cat, "show_already_running_alert") as alert,
+            patch.object(desktop_cat, "NSWindow", parts["NSWindow"]),
+            patch.object(desktop_cat, "CatController", parts["CatController"]),
+        ):
+            desktop_cat.main()
+
+        reveal.assert_called_once_with()
+        parts["NSWindow"].alloc.assert_not_called()
+        parts["CatController"].alloc.assert_not_called()
+        alert.assert_not_called()
+        app.run.assert_not_called()
+
+    def test_second_launch_starts_the_cat_when_the_lock_frees_up_first(self):
+        # launchctl kickstart -k 처럼 앞 프로세스가 막 끝나는 순간과 겹쳤을 때.
+        # 여기서 물러나 버리면 로그인해도 고양이가 아예 없는 상태가 된다.
+        app, app_class = self._app()
+        parts = self._startup_patches()
+        handle = Mock()
+
+        with (
+            patch.object(desktop_cat, "NSApplication", app_class),
+            patch.object(
+                desktop_cat,
+                "acquire_instance_lock",
+                side_effect=[(None, True), (handle, False)],
+            ),
+            patch.object(desktop_cat, "request_reveal", return_value=False),
+            patch.object(desktop_cat, "show_already_running_alert") as alert,
+            patch.object(desktop_cat, "hold_instance_lock") as hold,
+            patch.object(desktop_cat, "NSScreen", parts["NSScreen"]),
+            patch.object(desktop_cat, "NSWindow", parts["NSWindow"]),
+            patch.object(desktop_cat, "CatView", parts["CatView"]),
+            patch.object(desktop_cat, "CatController", parts["CatController"]),
+        ):
+            desktop_cat.main()
+
+        alert.assert_not_called()
+        hold.assert_called_once_with(handle)
+        parts["CatController"].alloc.assert_called_once_with()
+        app.run.assert_called_once_with()
+
+    def test_second_launch_explains_itself_when_the_running_cat_never_answers(self):
+        # 조용히 사라지면 사용자는 앱이 고장 났다고 생각한다.
+        app, app_class = self._app()
+        parts = self._startup_patches()
+
+        with (
+            patch.object(desktop_cat, "NSApplication", app_class),
+            patch.object(
+                desktop_cat,
+                "acquire_instance_lock",
+                side_effect=[(None, True), (None, True)],
+            ),
+            patch.object(desktop_cat, "request_reveal", return_value=False),
+            patch.object(desktop_cat, "show_already_running_alert") as alert,
+            patch.object(desktop_cat, "NSWindow", parts["NSWindow"]),
+            patch.object(desktop_cat, "CatController", parts["CatController"]),
+        ):
+            desktop_cat.main()
+
+        alert.assert_called_once_with()
+        parts["CatController"].alloc.assert_not_called()
+        app.run.assert_not_called()
+
+    def test_first_launch_holds_the_lock_and_never_calls_for_a_reveal(self):
+        app, app_class = self._app()
+        parts = self._startup_patches()
+        handle = Mock()
+
+        with (
+            patch.object(desktop_cat, "NSApplication", app_class),
+            patch.object(
+                desktop_cat,
+                "acquire_instance_lock",
+                return_value=(handle, False),
+            ),
+            patch.object(desktop_cat, "request_reveal") as reveal,
+            patch.object(desktop_cat, "hold_instance_lock") as hold,
+            patch.object(desktop_cat, "NSScreen", parts["NSScreen"]),
+            patch.object(desktop_cat, "NSWindow", parts["NSWindow"]),
+            patch.object(desktop_cat, "CatView", parts["CatView"]),
+            patch.object(desktop_cat, "CatController", parts["CatController"]),
+        ):
+            desktop_cat.main()
+
+        reveal.assert_not_called()
+        hold.assert_called_once_with(handle)
+        app.run.assert_called_once_with()
+
+    def test_already_running_alert_speaks_the_users_language(self):
+        alert = Mock()
+
+        with (
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "NSApp", Mock()),
+        ):
+            desktop_cat.show_already_running_alert("en")
+
+        alert.setMessageText_.assert_called_once_with(
+            i18n.tr("en", "already_running_title")
+        )
+        alert.setInformativeText_.assert_called_once_with(
+            i18n.tr("en", "already_running_body")
+        )
+
+
+class RevealTests(unittest.TestCase):
+    """부름을 받은 고양이는 사용자 눈앞으로 나와야 한다."""
+
+    def _window(self, x, y):
+        window = Mock()
+        window.frame.return_value = SimpleNamespace(
+            origin=SimpleNamespace(x=x, y=y),
+            size=SimpleNamespace(width=120.0, height=160.0),
+        )
+        return window
+
+    def _screen(self):
+        screen = Mock()
+        screen.mainScreen.return_value.visibleFrame.return_value = SimpleNamespace(
+            origin=SimpleNamespace(x=0.0, y=0.0),
+            size=SimpleNamespace(width=1440.0, height=900.0),
+        )
+        return screen
+
+    def test_revealing_pulls_an_off_screen_cat_back_into_view(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.window = self._window(3000.0, -200.0)
+
+        with patch.object(desktop_cat, "NSScreen", self._screen()):
+            controller.revealCat()
+
+        point = controller.window.setFrameOrigin_.call_args.args[0]
+        self.assertEqual((point.x, point.y), (1320.0, 0.0))
+        controller.window.orderFrontRegardless.assert_called_once_with()
+
+    def test_revealing_leaves_a_visible_cat_where_the_user_put_it(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.window = self._window(400.0, 300.0)
+
+        with patch.object(desktop_cat, "NSScreen", self._screen()):
+            controller.revealCat()
+
+        controller.window.setFrameOrigin_.assert_not_called()
+        controller.window.orderFrontRegardless.assert_called_once_with()
+
+    def test_a_called_cat_answers_even_when_it_cannot_move(self):
+        # 답장이 없으면 두 번째 실행은 "멈춘 고양이"로 보고 알럿을 띄운다.
+        # 창을 못 옮기는 것과 죽은 것은 다르다.
+        controller = desktop_cat.CatController.alloc().init()
+        controller.revealCat = Mock(side_effect=RuntimeError("no window server"))
+        controller._distributed_center = Mock()
+
+        controller.revealRequested_(None)
+
+        controller._distributed_center.postNotificationName_object_.assert_called_once_with(
+            desktop_cat.REVEAL_ACK_NOTIFICATION, None
+        )
+
+    def test_the_reveal_handshake_really_travels_through_macos(self):
+        """가짜 대역이 아니라 실제 알림센터로 신호와 응답을 주고받아 본다.
+
+        가짜로만 확인하면 "코드를 썼다"만 증명된다. 이 왕복이 깨지면
+        두 번째 실행이 매번 알럿을 띄우게 되므로 진짜로 태워 본다.
+        """
+        controller = desktop_cat.CatController.alloc().init()
+        controller.window = self._window(400.0, 300.0)
+        controller.listenForRevealRequests()
+        center = desktop_cat.NSDistributedNotificationCenter.defaultCenter()
+        self.addCleanup(center.removeObserver_, controller)
+
+        with patch.object(desktop_cat, "NSScreen", self._screen()):
+            acknowledged = desktop_cat.request_reveal(timeout=5.0)
+
+        self.assertTrue(acknowledged)
+        controller.window.orderFrontRegardless.assert_called_once_with()
 
 
 if __name__ == "__main__":
