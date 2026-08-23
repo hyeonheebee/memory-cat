@@ -93,4 +93,5 @@ build_exe.bat 이 만드는 MemoryCat.exe 는 **코드 서명(code signing)이 �
   - 테마 4종        : 귀여운 / 단순한 / 광기 / 경각심
   - 크기 4종        : 작게 / 보통 / 크게 / 왕
 
-만든이: 현희 (+ Claude) 🐾
+만든이: 현희 (+ Claude, Codex) 🐾
+        (Windows 버전은 macOS 앱보다 먼저 만든 별도 구현입니다)
