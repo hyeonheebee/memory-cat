@@ -3,9 +3,11 @@
 
 항상 위에 떠 있는 작은 고양이. 디스크(하드 용량)가 차오를수록
 애기냥 -> 돼지냥으로 빵빵해지며 살짝 통통 튄다. 라벨에 디스크/램 표시.
-우클릭: AI 진단 + 성격 + 테마 + 크기 + 새로고침/종료. 설정은 config.json 에 저장.
+우클릭: AI 진단 + 성격 + 테마 + 크기 + 새로고침/종료.
 
-테마는 frames/<이름>/ 폴더를 자동 인식한다. 새 테마 추가:
+설정과 직접 만든 테마는 ``~/Library/Application Support/Memory Cat/`` 에,
+기본 테마 4종은 앱 번들 안에 있다(:mod:`apppaths` 참고). 두 곳을 모두 훑어서
+테마 목록을 만든다. 새 테마 추가:
   python import_theme.py 내이미지.png 테마이름   (가로 N단계 시트)
 """
 import json
@@ -31,6 +33,7 @@ from Foundation import (
     NSOperationQueue, NSUserNotification, NSUserNotificationCenter,
 )
 
+import apppaths
 import metrics as mc
 from brain import diagnose as run_diagnosis, safe_trash
 from i18n import (
@@ -54,9 +57,12 @@ from personality import (
 from vision_theme import ThemeGenerationError, build_theme as build_pet_theme
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FRAMES_BASE = os.path.join(HERE, "frames")
+# 기본 테마 4종은 앱(번들) 안에, 사용자가 만든 테마는 사용자 폴더에 산다.
+# 자세한 규칙은 apppaths 모듈 참고.
+FRAMES_BASE = str(apppaths.bundled_frames_dir())
+USER_FRAMES_BASE = str(apppaths.user_frames_dir())
 ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
-CONFIG = os.path.join(HERE, "config.json")
+CONFIG = str(apppaths.config_file())
 REFRESH_SEC = 4.0
 DISK_FULL_NOTIFICATION_ID = "memory-cat-disk-full"
 # 알림이 배달 목록에 반영되는 데 걸리는 시간을 넉넉히 잡은 값.
@@ -136,6 +142,10 @@ def save_config(cfg, path=None):
     if path is None:
         path = config_path()
     try:
+        # 첫 실행이면 ~/Library/Application Support/Memory Cat/ 이 아직 없다.
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(cfg, handle, ensure_ascii=False)
         return True
@@ -274,12 +284,35 @@ def process_cleanup_recommendations(recommendations, confirm_item, trash_func=No
     return summary
 
 
+def theme_roots():
+    """테마를 찾을 폴더 목록. 번들 기본 테마 + 사용자가 만든 테마."""
+    return [FRAMES_BASE, USER_FRAMES_BASE]
+
+
+def theme_dir(theme):
+    """테마 이름을 실제 폴더 경로로. 같은 이름이면 사용자 테마가 이긴다."""
+    name = str(theme)
+    for root in reversed(theme_roots()):
+        candidate = os.path.join(root, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(USER_FRAMES_BASE, name)
+
+
 def discover_themes():
-    """frames/ 안의 테마 폴더 자동 인식. 알려진 것 먼저, 나머지 알파벳순."""
+    """테마 폴더 자동 인식. 알려진 것 먼저, 나머지 알파벳순.
+
+    번들 안 기본 테마와 사용자 폴더의 커스텀 테마를 함께 본다. 두 곳에 같은
+    이름이 있으면 한 번만 나온다(그리고 :func:`theme_dir` 이 사용자 쪽을 고른다).
+    """
     found = []
-    if os.path.isdir(FRAMES_BASE):
-        for n in sorted(os.listdir(FRAMES_BASE)):
-            d = os.path.join(FRAMES_BASE, n)
+    for root in theme_roots():
+        if not os.path.isdir(root):
+            continue
+        for n in sorted(os.listdir(root)):
+            d = os.path.join(root, n)
+            if n in found or n.startswith("."):
+                continue
             if os.path.isdir(d) and os.path.exists(os.path.join(d, "cat_00.png")):
                 found.append(n)
     return ([t for t in THEME_ORDER if t in found]
@@ -287,11 +320,15 @@ def discover_themes():
 
 
 def next_pet_theme_name(frames_base=None):
-    """Return mypet, mypet2, ... without overwriting an existing path."""
-    root = FRAMES_BASE if frames_base is None else os.fspath(frames_base)
+    """Return mypet, mypet2, ... without overwriting an existing path.
+
+    ``frames_base`` 를 주지 않으면 번들과 사용자 폴더를 모두 확인한다.
+    한쪽에만 있는 이름을 재사용하면 기본 테마를 가려 버리기 때문이다.
+    """
+    roots = theme_roots() if frames_base is None else [os.fspath(frames_base)]
     candidate = "mypet"
     suffix = 2
-    while os.path.exists(os.path.join(root, candidate)):
+    while any(os.path.exists(os.path.join(root, candidate)) for root in roots):
         candidate = f"mypet{suffix}"
         suffix += 1
     return candidate
@@ -308,7 +345,7 @@ def size_label(key, language=LANGUAGE_KO):
 
 
 def frame_count(theme):
-    d = os.path.join(FRAMES_BASE, theme)
+    d = theme_dir(theme)
     try:
         return max(1, len([f for f in os.listdir(d)
                            if f.startswith("cat_") and f.endswith(".png")]))
@@ -319,7 +356,7 @@ def frame_count(theme):
 def frame_path(theme, idx):
     n = frame_count(theme)
     idx = max(0, min(n - 1, idx))
-    return os.path.join(FRAMES_BASE, theme, f"cat_{idx:02d}.png")
+    return os.path.join(theme_dir(theme), f"cat_{idx:02d}.png")
 
 
 def layout_for(cat):

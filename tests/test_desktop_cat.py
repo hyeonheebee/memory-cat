@@ -143,6 +143,83 @@ class DesktopCatTests(unittest.TestCase):
                 desktop_cat.next_pet_theme_name(frames_dir), "mypet3"
             )
 
+    def test_next_pet_theme_name_avoids_names_taken_in_either_root(self):
+        # 번들에 mypet 이 있는데 사용자 폴더가 비었다고 mypet 을 다시 쓰면
+        # 기본 테마를 가려 버린다. 두 폴더를 모두 봐야 한다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundled = Path(temp_dir) / "bundled"
+            user = Path(temp_dir) / "user"
+            bundled.mkdir()
+            user.mkdir()
+            (bundled / "mypet").mkdir()
+            with (
+                patch.object(desktop_cat, "FRAMES_BASE", str(bundled)),
+                patch.object(desktop_cat, "USER_FRAMES_BASE", str(user)),
+            ):
+                self.assertEqual(desktop_cat.next_pet_theme_name(), "mypet2")
+
+    def test_discover_themes_merges_bundled_and_user_folders(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundled = Path(temp_dir) / "bundled"
+            user = Path(temp_dir) / "user"
+            for root, names in ((bundled, ("cute", "simple")), (user, ("mypet3",))):
+                for name in names:
+                    theme = root / name
+                    theme.mkdir(parents=True)
+                    (theme / "cat_00.png").write_bytes(b"png")
+            with (
+                patch.object(desktop_cat, "FRAMES_BASE", str(bundled)),
+                patch.object(desktop_cat, "USER_FRAMES_BASE", str(user)),
+            ):
+                self.assertEqual(
+                    desktop_cat.discover_themes(), ["cute", "simple", "mypet3"]
+                )
+
+    def test_discover_themes_lists_a_shadowing_user_theme_only_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundled = Path(temp_dir) / "bundled"
+            user = Path(temp_dir) / "user"
+            for root in (bundled, user):
+                theme = root / "cute"
+                theme.mkdir(parents=True)
+                (theme / "cat_00.png").write_bytes(b"png")
+            with (
+                patch.object(desktop_cat, "FRAMES_BASE", str(bundled)),
+                patch.object(desktop_cat, "USER_FRAMES_BASE", str(user)),
+            ):
+                self.assertEqual(desktop_cat.discover_themes(), ["cute"])
+                # 같은 이름이면 사용자가 만든 쪽을 쓴다.
+                self.assertEqual(
+                    desktop_cat.frame_path("cute", 0),
+                    str(user / "cute" / "cat_00.png"),
+                )
+
+    def test_frame_path_reads_a_user_theme_from_the_user_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundled = Path(temp_dir) / "bundled"
+            user = Path(temp_dir) / "user"
+            bundled.mkdir()
+            theme = user / "mypet3"
+            theme.mkdir(parents=True)
+            for index in range(3):
+                (theme / f"cat_{index:02d}.png").write_bytes(b"png")
+            with (
+                patch.object(desktop_cat, "FRAMES_BASE", str(bundled)),
+                patch.object(desktop_cat, "USER_FRAMES_BASE", str(user)),
+            ):
+                self.assertEqual(desktop_cat.frame_count("mypet3"), 3)
+                self.assertEqual(
+                    desktop_cat.frame_path("mypet3", 9),
+                    str(theme / "cat_02.png"),
+                )
+
+    def test_save_config_creates_the_user_data_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "Application Support" / "Memory Cat" / "config.json"
+            self.assertTrue(desktop_cat.save_config({"theme": "cute"}, str(target)))
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")),
+                             {"theme": "cute"})
+
     def test_pet_theme_worker_returns_build_result_on_main_queue(self):
         callback = Mock()
         queue = Mock()
