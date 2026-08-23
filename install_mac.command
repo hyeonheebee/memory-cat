@@ -3,6 +3,21 @@ set -e
 cd "$(dirname "$0")"
 echo "🐱 메모리 뚱냥이 설치 중..."
 
+# 개발자 도구가 없는 Mac 에서 /usr/bin/python3 는 실제 인터프리터가 아니라
+# 설치를 유도하는 껍데기다. 그대로 두면 set -e 가 걸려 아무 안내 없이 끝난다.
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+    echo ""
+    echo "❌ Python 3.9 이상이 필요한데 실행할 수 있는 python3 를 찾지 못했어요."
+    echo ""
+    echo "   macOS 개발자 도구를 아직 설치하지 않았다면 먼저 실행하세요:"
+    echo "       xcode-select --install"
+    echo "   설치 창이 끝나면 이 파일을 다시 실행하면 됩니다."
+    echo ""
+    echo "   또는 https://www.python.org/downloads/ 에서 설치해도 됩니다."
+    echo ""
+    exit 1
+fi
+
 python3 -m venv .venv
 ./.venv/bin/python -m pip install -q --upgrade pip
 ./.venv/bin/python -m pip install -q -r requirements.txt

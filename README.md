@@ -125,6 +125,10 @@ cd memory-cat
 The installer requires Python 3.9 or later. It creates `.venv`, installs the
 dependencies, launches Memory Cat, and configures it to start at login.
 
+On a Mac that has never had developer tools installed, `python3` is only a stub
+that prompts you to install them. Run `xcode-select --install` first, then run
+the installer again. The installer checks for this and tells you what to do.
+
 To remove it, run:
 
 ```bash
