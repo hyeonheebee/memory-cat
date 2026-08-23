@@ -67,6 +67,16 @@ if ! plutil -lint "$PLIST" >/dev/null; then
     exit 1
 fi
 
+# 아이콘은 CFBundleIconFile 이 가리키는 파일이 Resources 안에 실제로 있을
+# 때만 붙는다. 어긋나면 Finder 가 조용히 기본 아이콘을 보여 줄 뿐 아무
+# 오류도 내지 않아서, 여기서 짚어 준다. (아이콘은 장식이니 설치는 계속한다.)
+ICON_NAME="$(plutil -extract CFBundleIconFile raw -o - "$APP/Contents/Info.plist" 2>/dev/null || true)"
+if [ -z "$ICON_NAME" ]; then
+    echo "⚠️  번들에 앱 아이콘이 없습니다. 기본 아이콘으로 표시됩니다."
+elif [ ! -f "$APP/Contents/Resources/$ICON_NAME" ]; then
+    echo "⚠️  Info.plist 가 없는 아이콘을 가리킵니다: $ICON_NAME"
+fi
+
 if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/tmp/memorycat-bootstrap.$$; then
     rm -f "/tmp/memorycat-bootstrap.$$"
     echo "✅ 완료! 화면 어딘가에 고양이가 떴어요. 드래그로 옮기고 우클릭해보세요."

@@ -95,6 +95,11 @@ _STRINGS = {
         "disk_full_prompt_title": "🐾 뚱냥이가 배불러요",
         "disk_full_prompt_body": "배불러… 진단해볼까?",
         "disk_full_prompt_action": "진단하기",
+        "already_running_title": "뚱냥이는 이미 한 마리 있어요",
+        "already_running_body": (
+            "고양이를 불러 봤는데 대답이 없네요. 화면 어딘가에 숨어 있거나 "
+            "멈춰 있을 수 있어요. 우클릭 메뉴에서 종료한 뒤 다시 열어 주세요."
+        ),
         "menu_size": "크기",
         "menu_personality": "성격",
         "menu_custom": "직접 입력…",
@@ -191,6 +196,12 @@ _STRINGS = {
         "disk_full_prompt_title": "🐾 Memory Cat is full",
         "disk_full_prompt_body": "I'm so full… want a checkup?",
         "disk_full_prompt_action": "Run checkup",
+        "already_running_title": "Memory Cat is already running",
+        "already_running_body": (
+            "The running cat did not answer. It may be hidden somewhere on "
+            "screen, or stuck. Quit it from the right-click menu and open "
+            "Memory Cat again."
+        ),
         "menu_size": "Size",
         "menu_personality": "Personality",
         "menu_custom": "Custom…",
