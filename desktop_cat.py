@@ -57,6 +57,9 @@ FRAMES_BASE = os.path.join(HERE, "frames")
 ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
 CONFIG = os.path.join(HERE, "config.json")
 REFRESH_SEC = 4.0
+# 아이폰 기본값인 heic 포함. 이미지 API 는 heic 를 받지 않으므로
+# vision_theme.api_ready_photo 가 업로드 직전에 변환한다.
+PET_PHOTO_TYPES = ["png", "jpg", "jpeg", "webp", "heic", "heif"]
 DISK_FULL_PROMPT_PERCENT = 92.0
 NSStatusWindowLevel = 25
 CATBOTTOM = 46.0
@@ -469,7 +472,7 @@ class CatController(NSObject):
         panel.setCanChooseFiles_(True)
         panel.setCanChooseDirectories_(False)
         panel.setAllowsMultipleSelection_(False)
-        panel.setAllowedFileTypes_(["png", "jpg", "jpeg", "heic"])
+        panel.setAllowedFileTypes_(PET_PHOTO_TYPES)
         NSApp.activateIgnoringOtherApps_(True)
         if panel.runModal() != NSModalResponseOK:
             return

@@ -285,6 +285,73 @@ class VisionThemeTests(unittest.TestCase):
             "Error: OpenAI request failed: network unavailable\n",
         )
 
+FIXTURES = Path(__file__).with_name("fixtures")
+
+
+class PhotoFormatTests(unittest.TestCase):
+    """아이폰 기본 포맷인 HEIC 는 이미지 API 가 받지 않으므로 변환해야 한다."""
+
+    def test_heic_photo_is_uploaded_as_jpeg(self):
+        heic = FIXTURES / "pet.heic"
+        self.assertEqual(heic.read_bytes()[4:12], b"ftypheic")
+
+        with vision_theme.api_ready_photo(heic) as upload:
+            self.assertNotEqual(upload, heic)
+            with Image.open(upload) as converted:
+                self.assertEqual(converted.format, "JPEG")
+                self.assertEqual(converted.size, (400, 300))
+            temporary = upload
+
+        # 변환본은 업로드가 끝나면 남지 않는다.
+        self.assertFalse(temporary.exists())
+
+    def test_supported_photo_is_uploaded_without_reencoding(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            png = Path(temp_dir) / "pet.png"
+            Image.new("RGB", (40, 30), "orange").save(png)
+            before = png.read_bytes()
+
+            with vision_theme.api_ready_photo(png) as upload:
+                self.assertEqual(upload, png)
+                self.assertEqual(upload.read_bytes(), before)
+
+    def test_a_heic_photo_named_jpg_is_still_converted(self):
+        # 아이폰에서 내보낸 사진은 이름만 .jpg 이고 내용은 HEIC 인 경우가 있다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            disguised = Path(temp_dir) / "pet.jpg"
+            disguised.write_bytes((FIXTURES / "pet.heic").read_bytes())
+
+            with vision_theme.api_ready_photo(disguised) as upload:
+                with Image.open(upload) as converted:
+                    self.assertEqual(converted.format, "JPEG")
+
+    def test_generate_sheet_sends_a_decodable_image_for_a_heic_photo(self):
+        uploaded = {}
+
+        def capture(**kwargs):
+            # 업로드가 끝나면 변환본은 지워지므로 호출 시점에 읽어 둔다.
+            uploaded["bytes"] = kwargs["image"].read()
+            return SimpleNamespace(
+                data=[SimpleNamespace(b64_json=_png_b64(_synthetic_sheet()))]
+            )
+
+        client = Mock()
+        client.images.edit.side_effect = capture
+
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            patch.object(vision_theme, "OpenAI", return_value=client),
+        ):
+            vision_theme.generate_sheet(FIXTURES / "pet.heic")
+
+        with Image.open(BytesIO(uploaded["bytes"])) as sent:
+            self.assertEqual(sent.format, "JPEG")
+            self.assertEqual(sent.size, (400, 300))
+
+    def test_the_photo_picker_only_offers_formats_the_app_can_handle(self):
+        self.assertIn("heic", desktop_cat.PET_PHOTO_TYPES)
+        self.assertIn("webp", desktop_cat.PET_PHOTO_TYPES)
+
 
 if __name__ == "__main__":
     unittest.main()
