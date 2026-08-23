@@ -79,7 +79,42 @@ fi
 
 if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/tmp/memorycat-bootstrap.$$; then
     rm -f "/tmp/memorycat-bootstrap.$$"
-    echo "✅ 완료! 화면 어딘가에 고양이가 떴어요. 드래그로 옮기고 우클릭해보세요."
+
+    # bootstrap 이 성공해도 launchd 가 RunAtLoad 를 무시하는 경우가 있다.
+    # 그때 "떴어요" 라고 말하면 사용자는 뜨지도 않은 고양이를 찾게 되므로,
+    # 실제로 떴는지 보고 안 떴으면 한 번 밀어 준다.
+    started=""
+    for _ in 1 2 3 4 5 6; do
+        if launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -q "state = running"; then
+            started="yes"
+            break
+        fi
+        sleep 0.5
+    done
+
+    if [ -z "$started" ]; then
+        launchctl kickstart "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+        for _ in 1 2 3 4 5 6; do
+            if launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -q "state = running"; then
+                started="yes"
+                break
+            fi
+            sleep 0.5
+        done
+    fi
+
+    if [ -n "$started" ]; then
+        echo "✅ 완료! 화면 어딘가에 고양이가 떴어요. 드래그로 옮기고 우클릭해보세요."
+    else
+        echo ""
+        echo "⚠️  앱은 설치했는데 고양이가 아직 안 떴어요."
+        echo "    ▸ 지금 바로 보려면:"
+        echo "        open -a \"$APP\""
+        echo "    ▸ 로그인할 때 자동으로 뜨게 하려면 시스템 설정 >"
+        echo "      일반 > 로그인 항목 및 확장 프로그램에서 'Memory Cat' 을 켜 주세요."
+        echo "    ▸ 그래도 안 되면 로그를 봐 주세요: $LOG"
+        echo ""
+    fi
 else
     # 여기서 조용히 죽으면 사용자는 설치가 됐는지조차 알 수 없다.
     # macOS 13+ 의 백그라운드 항목 승인 대기(Bootstrap failed: 5)가 흔한 원인.
