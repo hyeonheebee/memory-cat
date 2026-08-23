@@ -1,2 +1,5 @@
 # 테스트 전용. 앱 실행에 필요한 패키지는 requirements.txt 에 있음
-pytest
+# 상한은 다음 메이저 차단용, 하한은 검증된 최소 버전.
+# == 로 박지 않는 이유는 requirements.txt 주석 참고 (Python 3.9 지원).
+# pytest 9 는 3.9 를 지원하지 않으므로 3.9 에서는 pip 가 8.x 로 백트래킹한다.
+pytest>=8,<10

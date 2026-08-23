@@ -23,6 +23,7 @@ from AppKit import (
     NSCompositingOperationSourceOver, NSCompositingOperationCopy,
     NSRectFillUsingOperation, NSApp,
     NSAlert, NSTextField, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
+    NSAlertThirdButtonReturn,
     NSOpenPanel, NSModalResponseOK,
 )
 from Foundation import (
@@ -57,9 +58,17 @@ FRAMES_BASE = os.path.join(HERE, "frames")
 ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
 CONFIG = os.path.join(HERE, "config.json")
 REFRESH_SEC = 4.0
+DISK_FULL_NOTIFICATION_ID = "memory-cat-disk-full"
+# 알림이 배달 목록에 반영되는 데 걸리는 시간을 넉넉히 잡은 값.
+NOTIFICATION_VERIFY_SEC = 1.0
+# 아이폰 기본값인 heic 포함. 이미지 API 는 heic 를 받지 않으므로
+# vision_theme.api_ready_photo 가 업로드 직전에 변환한다.
+PET_PHOTO_TYPES = ["png", "jpg", "jpeg", "webp", "heic", "heif"]
 DISK_FULL_PROMPT_PERCENT = 92.0
 NSStatusWindowLevel = 25
 CATBOTTOM = 46.0
+# 항목 검토 중 "정리 중단"을 고른 신호. bool 이 아니라서 기존 콜백과 섞이지 않는다.
+CLEANUP_ABORT = "abort"
 
 THEME_STRING_KEYS = {
     "cute": "theme_cute",
@@ -226,24 +235,42 @@ def _pet_theme_worker(photo_path, theme_name, callback):
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
+def cleanup_queue(recommendations):
+    """검토 순서대로 (추천, 항목) 쌍을 펼친다."""
+    return [
+        (recommendation, item)
+        for recommendation in recommendations
+        for item in recommendation.get("items", [])
+    ]
+
+
 def process_cleanup_recommendations(recommendations, confirm_item, trash_func=None):
-    """각 항목을 확인받은 뒤에만 safe_trash를 호출한다."""
+    """각 항목을 확인받은 뒤에만 safe_trash를 호출한다.
+
+    ``confirm_item`` 이 ``CLEANUP_ABORT`` 를 돌려주면 남은 항목은 묻지 않고
+    전부 건너뛴 것으로 세고 즉시 끝낸다. 그 밖의 값은 예전처럼 참/거짓으로만
+    본다.
+    """
     trash_func = safe_trash if trash_func is None else trash_func
     summary = {"moved": 0, "already_in_trash": 0, "skipped": 0, "failed": 0}
-    for recommendation in recommendations:
-        for item in recommendation.get("items", []):
-            path = item.get("path")
-            if not path or not confirm_item(recommendation, item):
-                summary["skipped"] += 1
-                continue
-            try:
-                trash_func(path)
-                if recommendation.get("category") == "trash":
-                    summary["already_in_trash"] += 1
-                else:
-                    summary["moved"] += 1
-            except Exception:
-                summary["failed"] += 1
+    queue = cleanup_queue(recommendations)
+    for index, (recommendation, item) in enumerate(queue):
+        path = item.get("path")
+        decision = confirm_item(recommendation, item) if path else False
+        if decision == CLEANUP_ABORT:
+            summary["skipped"] += len(queue) - index
+            return summary
+        if not decision:
+            summary["skipped"] += 1
+            continue
+        try:
+            trash_func(path)
+            if recommendation.get("category") == "trash":
+                summary["already_in_trash"] += 1
+            else:
+                summary["moved"] += 1
+        except Exception:
+            summary["failed"] += 1
     return summary
 
 
@@ -469,7 +496,7 @@ class CatController(NSObject):
         panel.setCanChooseFiles_(True)
         panel.setCanChooseDirectories_(False)
         panel.setAllowsMultipleSelection_(False)
-        panel.setAllowedFileTypes_(["png", "jpg", "jpeg", "heic"])
+        panel.setAllowedFileTypes_(PET_PHOTO_TYPES)
         NSApp.activateIgnoringOtherApps_(True)
         if panel.runModal() != NSModalResponseOK:
             return
@@ -615,6 +642,7 @@ class CatController(NSObject):
             tr(self.language, "disk_full_prompt_action")
         )
         notification.setUserInfo_({"memory_cat_action": "diagnose"})
+        notification.setIdentifier_(DISK_FULL_NOTIFICATION_ID)
         center = getattr(self, "_notification_center", None)
         if center is None:
             center = NSUserNotificationCenter.defaultUserNotificationCenter()
@@ -623,7 +651,42 @@ class CatController(NSObject):
             center.setDelegate_(self)
         except Exception:
             pass
-        center.deliverNotification_(notification)
+        try:
+            center.deliverNotification_(notification)
+        except Exception:
+            self._show_disk_full_alert()
+            return
+
+        # deliverNotification_ 은 알림이 실제로 표시되지 않아도 예외를 내지
+        # 않는다. 배달 목록에 잠깐 뒤 나타나는지 보고, 없으면 알럿으로 알린다.
+        # 디스크가 꽉 찼다는 경고는 조용히 사라지면 안 되는 유일한 알림이다.
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            NOTIFICATION_VERIFY_SEC, self, b"verifyDiskFullPrompt:", None, False)
+
+    def verifyDiskFullPrompt_(self, timer):
+        center = getattr(self, "_notification_center", None)
+        try:
+            delivered = list(center.deliveredNotifications() or []) if center else []
+            shown = any(
+                str(item.identifier() or "") == DISK_FULL_NOTIFICATION_ID
+                for item in delivered
+            )
+        except Exception:
+            shown = False
+        if not shown:
+            self._show_disk_full_alert()
+
+    @objc.python_method
+    def _show_disk_full_alert(self):
+        """알림이 뜨지 않는 환경을 위한 대체 경로. 진단으로 바로 이어준다."""
+        alert = new_cat_alert()
+        alert.setMessageText_(tr(self.language, "disk_full_prompt_title"))
+        alert.setInformativeText_(tr(self.language, "disk_full_prompt_body"))
+        alert.addButtonWithTitle_(tr(self.language, "disk_full_prompt_action"))
+        alert.addButtonWithTitle_(tr(self.language, "close"))
+        NSApp.activateIgnoringOtherApps_(True)
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            self.diagnose_(None)
 
     def userNotificationCenter_didActivateNotification_(
         self, center, notification
@@ -757,8 +820,14 @@ class CatController(NSObject):
         alert.setInformativeText_(f"{path}\n\n{reason}\n{action_note}")
         alert.addButtonWithTitle_(primary)
         alert.addButtonWithTitle_(tr(self.language, "skip"))
+        # 항목이 최대 80개라 중간에 빠져나갈 길이 없으면 갇힌다. Esc로도 멈춘다.
+        stop_button = alert.addButtonWithTitle_(tr(self.language, "stop_cleanup"))
+        stop_button.setKeyEquivalent_("\033")
         NSApp.activateIgnoringOtherApps_(True)
-        return alert.runModal() == NSAlertFirstButtonReturn
+        response = alert.runModal()
+        if response == NSAlertThirdButtonReturn:
+            return CLEANUP_ABORT
+        return response == NSAlertFirstButtonReturn
 
     @objc.python_method
     def _show_cleanup_summary(self, summary):

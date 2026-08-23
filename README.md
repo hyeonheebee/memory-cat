@@ -157,13 +157,33 @@ See [`windows/README.txt`](windows/README.txt) for the full instructions. In
 short:
 
 ```bat
-pip install pyside6 psutil
+pip install -r windows\requirements.txt
 pythonw windows\windows_cat.pyw
 ```
 
-To build a standalone executable, run `build_exe.bat` **from inside the
-`windows` folder** (it resolves `frames` and the script by relative path), after
-installing its listed build dependencies.
+To build a standalone executable, install PyInstaller and run `build_exe.bat`.
+It works from any working directory — the script switches to its own folder
+before building, so `windows\build_exe.bat` from the repository root is fine:
+
+```bat
+pip install -r windows\requirements.txt
+pip install pyinstaller
+windows\build_exe.bat
+```
+
+> **The executable it produces is unsigned — expect security warnings.** This is
+> a personal project with no code-signing certificate, so the first launch of
+> `MemoryCat.exe` triggers a Windows SmartScreen "unknown publisher" prompt, and
+> antivirus engines sometimes flag PyInstaller `--onefile` builds as a false
+> positive (a `--onefile` binary unpacks itself into a temp folder at startup,
+> which resembles malware behaviour). That is expected here, but **please do not
+> learn to click through unsigned-binary warnings in general** — it is a
+> genuinely dangerous habit. Do not run a `MemoryCat.exe` you got from anyone
+> else; there is no way to verify it was built from this repository. If you want
+> assurance, skip the executable and run the Python script directly:
+> `windows/windows_cat.pyw` is a single readable file you can inspect before
+> running it. Building the `.exe` yourself, on your own machine, is the only
+> use it is recommended for.
 
 ## Make your own theme 🎨
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import os
 import shutil
 import sys
@@ -25,6 +26,8 @@ IMAGE_SIZE = "1536x1024"
 DEFAULT_QUALITY = "medium"
 QUALITY_CHOICES = ("low", "medium", "high")
 FRAMES_DIR = Path(__file__).with_name("frames")
+# 이미지 API 가 직접 받는 포맷. HEIC 는 여기 없어서 변환이 필요하다.
+API_IMAGE_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
 MIN_DETECTED_STAGES = 6
 MAX_DETECTED_STAGES = 6
 
@@ -84,6 +87,75 @@ def _one_line(value: object) -> str:
     return " ".join(str(value).split())
 
 
+def _is_api_ready(photo: Path) -> bool:
+    """이미지 API 가 그대로 받아주는 포맷인지 내용으로 확인한다.
+
+    확장자가 아니라 실제 포맷을 본다. 아이폰에서 내보낸 사진은 이름만
+    ``.jpg`` 이고 내용은 HEIC 인 경우가 있다.
+    """
+    try:
+        with Image.open(photo) as image:
+            return image.format in API_IMAGE_FORMATS
+    except Exception:
+        return False
+
+
+def _rewrite_as_jpeg(photo: Path, destination: Path) -> None:
+    """macOS 이미지 디코더를 빌려 HEIC 등을 JPEG 로 옮긴다.
+
+    Pillow 는 HEIC 를 열지 못하는데 아이폰 사진은 기본이 HEIC 다. macOS 는
+    ImageIO 로 이미 읽을 수 있으므로, 새 의존성을 더하지 않고 AppKit 을
+    가져다 쓴다. ``brain._trash_via_foundation`` 과 같은 지연 import 방식.
+    """
+    if sys.platform != "darwin":
+        raise ThemeGenerationError(
+            "This photo format can only be converted on macOS; "
+            "use a PNG, JPEG, or WebP file instead."
+        )
+
+    from AppKit import (
+        NSBitmapImageFileTypeJPEG,
+        NSBitmapImageRep,
+        NSImage,
+        NSImageCompressionFactor,
+    )
+
+    image = NSImage.alloc().initWithContentsOfFile_(str(photo))
+    if image is None:
+        raise ThemeGenerationError(
+            f"Could not read the photo: {photo.name}. "
+            "Try a PNG, JPEG, or WebP file."
+        )
+    representation = NSBitmapImageRep.imageRepWithData_(image.TIFFRepresentation())
+    data = None
+    if representation is not None:
+        data = representation.representationUsingType_properties_(
+            NSBitmapImageFileTypeJPEG, {NSImageCompressionFactor: 0.9}
+        )
+    if not data:
+        raise ThemeGenerationError(
+            f"Could not convert the photo: {photo.name}. "
+            "Try a PNG, JPEG, or WebP file."
+        )
+    destination.write_bytes(bytes(data))
+
+
+@contextlib.contextmanager
+def api_ready_photo(photo: Path):
+    """업로드에 쓸 경로를 넘긴다. 필요할 때만 변환본을 만든다.
+
+    이미 지원 포맷이면 원본을 그대로 올려 재인코딩 손실을 피한다.
+    """
+    if _is_api_ready(photo):
+        yield photo
+        return
+
+    with tempfile.TemporaryDirectory(prefix="memory-cat-photo-") as temp_dir:
+        converted = Path(temp_dir) / f"{photo.stem or 'photo'}.jpg"
+        _rewrite_as_jpeg(photo, converted)
+        yield converted
+
+
 def generate_sheet(photo_path, retry_prompt=False) -> Image.Image:
     """Generate one horizontal pet sprite sheet from ``photo_path``."""
     photo = Path(photo_path).expanduser()
@@ -103,7 +175,7 @@ def generate_sheet(photo_path, retry_prompt=False) -> Image.Image:
 
     try:
         client = OpenAI(api_key=api_key, timeout=180.0, max_retries=1)
-        with photo.open("rb") as photo_file:
+        with api_ready_photo(photo) as upload, upload.open("rb") as photo_file:
             response = client.images.edit(
                 model=MODEL,
                 image=photo_file,
