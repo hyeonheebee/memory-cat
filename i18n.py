@@ -51,6 +51,15 @@ _STRINGS = {
         "diagnosis_result_openai_title": "{personality} 뚱냥이가 배부른 이유예요.",
         "diagnosis_result_fallback_title": "뚱냥이가 배부른 이유예요.",
         "fallback_missing_api_key": "API 키 없음",
+        "missing_api_key_title": "API 키가 필요해요",
+        "missing_api_key_help": (
+            "🔑 AI 진단과 반려동물 테마를 켜려면\n"
+            "OpenAI API 키를 아래 파일에 넣어 주세요.\n"
+            "{path}\n\n"
+            "파일에 이렇게 한 줄만 적으면 됩니다.\n"
+            "OPENAI_API_KEY=sk-...\n\n"
+            "넣은 뒤 뚱냥이를 껐다 켜 주세요."
+        ),
         "fallback_api_error": "API 연결 실패",
         "fallback_worker_error": "진단 처리 실패",
         "fallback_unknown": "알 수 없는 오류",
@@ -152,6 +161,15 @@ _STRINGS = {
         "diagnosis_result_openai_title": "Here’s why your {personality} Memory Cat feels full.",
         "diagnosis_result_fallback_title": "Here’s why Memory Cat feels full.",
         "fallback_missing_api_key": "API key missing",
+        "missing_api_key_title": "An API key is needed",
+        "missing_api_key_help": (
+            "🔑 To turn on AI diagnosis and pet themes, put your OpenAI\n"
+            "API key in this file.\n"
+            "{path}\n\n"
+            "One line is all it needs.\n"
+            "OPENAI_API_KEY=sk-...\n\n"
+            "Then quit and reopen Memory Cat."
+        ),
         "fallback_api_error": "API connection failed",
         "fallback_worker_error": "Diagnosis processing failed",
         "fallback_unknown": "Unknown error",

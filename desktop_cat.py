@@ -39,7 +39,7 @@ from Foundation import (
 
 import apppaths
 import metrics as mc
-from brain import diagnose as run_diagnosis, safe_trash
+from brain import _load_api_key, diagnose as run_diagnosis, safe_trash
 from i18n import (
     LANGUAGE_AUTO,
     LANGUAGE_EN,
@@ -292,6 +292,7 @@ def diagnosis_notification_text(result, language=LANGUAGE_KO):
 
 def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO):
     """진단 JSON을 결과창에서 읽기 쉬운 제목·본문·동작으로 바꾼다."""
+    help_text = None
     if result.get("source") == "openai":
         title = tr(
             language,
@@ -313,6 +314,14 @@ def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO):
             "diagnosis_source_fallback",
             reason=tr(language, reason_key),
         )
+        if result.get("fallback_reason") == "missing_api_key":
+            # 키가 없어서 떨어진 경우에만 넣는다. 다른 실패 사유는 사용자가
+            # 할 수 있는 게 없어서 안내가 오히려 방해가 된다.
+            help_text = tr(
+                language,
+                "missing_api_key_help",
+                path=apppaths.user_data_dir() / ".env",
+            )
 
     why = [str(line).strip() for line in result.get("why_slow", []) if str(line).strip()]
     causes = "\n".join(f"• {line}" for line in why) or tr(language, "diagnosis_empty")
@@ -324,6 +333,7 @@ def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO):
         part
         for part in (
             source,
+            help_text,
             causes,
             f"{tr(language, 'diagnosis_advice_heading')}\n{advice}",
             tr(language, "diagnosis_reclaimable", size=reclaimable),
@@ -718,6 +728,12 @@ class CatController(NSObject):
         if getattr(self, "_pet_theme_running", False):
             return
 
+        # 사진을 다 고른 뒤에 "키가 없다"고 하면 헛수고를 시키는 것이다.
+        # 누르자마자 알려 준다.
+        if not _load_api_key():
+            self._show_missing_api_key_alert()
+            return
+
         panel = NSOpenPanel.openPanel()
         panel.setCanChooseFiles_(True)
         panel.setCanChooseDirectories_(False)
@@ -1029,6 +1045,18 @@ class CatController(NSObject):
             return True
         except Exception:
             return False
+
+    @objc.python_method
+    def _show_missing_api_key_alert(self):
+        """키가 없어 AI 기능을 못 쓸 때, 어디에 무엇을 넣으면 되는지 보여 준다."""
+        self._show_information_alert(
+            tr(self.language, "missing_api_key_title"),
+            tr(
+                self.language,
+                "missing_api_key_help",
+                path=apppaths.user_data_dir() / ".env",
+            ),
+        )
 
     @objc.python_method
     def _show_information_alert(self, title, body):
