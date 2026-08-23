@@ -415,8 +415,18 @@ class CatController(NSObject):
         self.view.setBob_(math.sin(self.phase) * (2.0 + 3.0 * self.score / 100.0))
 
     def refresh_(self, timer):
+        # NSTimer 콜백에서 예외가 새어 나가면 run loop 가 그대로 끝나 앱이
+        # 종료된다. LaunchAgent 에 KeepAlive 가 없어 재로그인 전까지 되살아나지
+        # 않으므로, 한 틱이 실패해도 삼키고 다음 틱을 기다린다.
+        try:
+            self._refresh_once()
+        except Exception:
+            pass
+
+    @objc.python_method
+    def _refresh_once(self):
         disk = mc.disk_usage()
-        score, vm, sw = mc.pressure_score()
+        score, vm, sw = mc.safe_pressure_score()
         dpct = disk.percent
         self.score = dpct
         self._maybe_prompt_disk_full(dpct)

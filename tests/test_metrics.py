@@ -1,5 +1,6 @@
 import unittest
 from collections import namedtuple
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import metrics
@@ -75,6 +76,30 @@ class MetricsTests(unittest.TestCase):
                 ):
                     usage = metrics.disk_usage()
                 self.assertIs(usage, measured)
+
+    def test_safe_pressure_score_keeps_ram_when_swap_lookup_fails(self):
+        vm = SimpleNamespace(total=8, used=4, percent=50.0)
+        with (
+            patch.object(metrics.psutil, "swap_memory", side_effect=OSError("boom")),
+            patch.object(metrics.psutil, "virtual_memory", return_value=vm),
+        ):
+            score, measured_vm, swap = metrics.safe_pressure_score()
+
+        self.assertAlmostEqual(score, 30.0)
+        self.assertIs(measured_vm, vm)
+        self.assertEqual((swap.total, swap.used, swap.percent), (0, 0, 0.0))
+
+    def test_safe_pressure_score_passes_swap_through_when_available(self):
+        vm = SimpleNamespace(total=8, used=4, percent=50.0)
+        sw = SimpleNamespace(total=2, used=1, percent=25.0)
+        with (
+            patch.object(metrics.psutil, "swap_memory", return_value=sw),
+            patch.object(metrics.psutil, "virtual_memory", return_value=vm),
+        ):
+            score, measured_vm, swap = metrics.safe_pressure_score()
+
+        self.assertAlmostEqual(score, 40.0)
+        self.assertIs(swap, sw)
 
 
 if __name__ == "__main__":
