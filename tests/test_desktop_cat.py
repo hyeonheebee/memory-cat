@@ -689,6 +689,33 @@ class DesktopCatTests(unittest.TestCase):
             "스왑", "".join(controller.detail)
         )
 
+    def test_disk_full_warning_falls_back_to_an_alert_when_it_never_appears(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        controller._show_disk_full_alert = Mock()
+        # 알림센터가 아무것도 배달하지 않은 상태 = 알림이 표시되지 않은 것.
+        controller._notification_center = Mock(
+            **{"deliveredNotifications.return_value": []}
+        )
+
+        controller.verifyDiskFullPrompt_(None)
+
+        controller._show_disk_full_alert.assert_called_once_with()
+
+    def test_disk_full_warning_stays_quiet_when_the_notification_arrived(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        controller._show_disk_full_alert = Mock()
+        delivered = Mock()
+        delivered.identifier.return_value = desktop_cat.DISK_FULL_NOTIFICATION_ID
+        controller._notification_center = Mock(
+            **{"deliveredNotifications.return_value": [delivered]}
+        )
+
+        controller.verifyDiskFullPrompt_(None)
+
+        controller._show_disk_full_alert.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

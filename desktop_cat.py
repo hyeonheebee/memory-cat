@@ -57,6 +57,9 @@ FRAMES_BASE = os.path.join(HERE, "frames")
 ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
 CONFIG = os.path.join(HERE, "config.json")
 REFRESH_SEC = 4.0
+DISK_FULL_NOTIFICATION_ID = "memory-cat-disk-full"
+# 알림이 배달 목록에 반영되는 데 걸리는 시간을 넉넉히 잡은 값.
+NOTIFICATION_VERIFY_SEC = 1.0
 # 아이폰 기본값인 heic 포함. 이미지 API 는 heic 를 받지 않으므로
 # vision_theme.api_ready_photo 가 업로드 직전에 변환한다.
 PET_PHOTO_TYPES = ["png", "jpg", "jpeg", "webp", "heic", "heif"]
@@ -618,6 +621,7 @@ class CatController(NSObject):
             tr(self.language, "disk_full_prompt_action")
         )
         notification.setUserInfo_({"memory_cat_action": "diagnose"})
+        notification.setIdentifier_(DISK_FULL_NOTIFICATION_ID)
         center = getattr(self, "_notification_center", None)
         if center is None:
             center = NSUserNotificationCenter.defaultUserNotificationCenter()
@@ -626,7 +630,42 @@ class CatController(NSObject):
             center.setDelegate_(self)
         except Exception:
             pass
-        center.deliverNotification_(notification)
+        try:
+            center.deliverNotification_(notification)
+        except Exception:
+            self._show_disk_full_alert()
+            return
+
+        # deliverNotification_ 은 알림이 실제로 표시되지 않아도 예외를 내지
+        # 않는다. 배달 목록에 잠깐 뒤 나타나는지 보고, 없으면 알럿으로 알린다.
+        # 디스크가 꽉 찼다는 경고는 조용히 사라지면 안 되는 유일한 알림이다.
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            NOTIFICATION_VERIFY_SEC, self, b"verifyDiskFullPrompt:", None, False)
+
+    def verifyDiskFullPrompt_(self, timer):
+        center = getattr(self, "_notification_center", None)
+        try:
+            delivered = list(center.deliveredNotifications() or []) if center else []
+            shown = any(
+                str(item.identifier() or "") == DISK_FULL_NOTIFICATION_ID
+                for item in delivered
+            )
+        except Exception:
+            shown = False
+        if not shown:
+            self._show_disk_full_alert()
+
+    @objc.python_method
+    def _show_disk_full_alert(self):
+        """알림이 뜨지 않는 환경을 위한 대체 경로. 진단으로 바로 이어준다."""
+        alert = new_cat_alert()
+        alert.setMessageText_(tr(self.language, "disk_full_prompt_title"))
+        alert.setInformativeText_(tr(self.language, "disk_full_prompt_body"))
+        alert.addButtonWithTitle_(tr(self.language, "disk_full_prompt_action"))
+        alert.addButtonWithTitle_(tr(self.language, "close"))
+        NSApp.activateIgnoringOtherApps_(True)
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            self.diagnose_(None)
 
     def userNotificationCenter_didActivateNotification_(
         self, center, notification

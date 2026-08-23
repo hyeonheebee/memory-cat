@@ -37,3 +37,6 @@ frames/*/
 !frames/simple/
 !frames/madness/
 !frames/derpy/
+
+# 에이전트 워크트리 (로컬 작업용)
+.claude/
