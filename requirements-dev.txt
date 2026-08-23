@@ -1,5 +1,6 @@
-# 테스트 전용. 앱 실행에 필요한 패키지는 requirements.txt 에 있음
-# 상한은 다음 메이저 차단용, 하한은 검증된 최소 버전.
-# == 로 박지 않는 이유는 requirements.txt 주석 참고 (Python 3.9 지원).
-# pytest 9 는 3.9 를 지원하지 않으므로 3.9 에서는 pip 가 8.x 로 백트래킹한다.
+# Tests only. Packages needed to run the app are in requirements.txt.
+# Upper bound blocks the next major, lower bound is the oldest verified.
+# See requirements.txt for why nothing is pinned with == (Python 3.9 support)
+# and why this file stays ASCII.
+# pytest 9 does not support 3.9, so pip backtracks to 8.x there.
 pytest>=8,<10

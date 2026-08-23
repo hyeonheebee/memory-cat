@@ -1,29 +1,33 @@
-# 버전 정책: 아래·위 경계를 모두 고정한다.
-#   - 위쪽(<N): 다음 메이저 버전을 차단한다. 이 앱은 install_mac.command 가
-#     LaunchAgent 로 등록해 "매 로그인마다 사용자 권한으로" 실행되므로,
-#     예고 없는 메이저 업그레이드가 로그인 때마다 터지는 앱이 되면 안 된다.
-#   - 아래쪽(>=N): 실제로 검증한 최소 버전.
-#   - 정확한 핀(==)은 쓰지 않는다. macOS 기본 python3 는 3.9.6 이고
-#     install_mac.command 가 바로 그 인터프리터를 쓴다. 개발 환경(3.14)에
-#     깔린 최신 버전들(pyobjc 12.2.1, numpy 2.5.0, pillow 12.2.0)은 3.9 를
-#     지원하지 않으므로, == 로 박으면 기본 맥 사용자 전원이 설치에 실패한다.
-#     범위로 두면 pip 가 3.9 에서는 3.9 를 지원하는 마지막 버전으로
-#     백트래킹한다(pyobjc 11.1 / numpy 2.0.2 / pillow 11.3.0 등).
-#   ※ 3.9 에서 백트래킹이 동작하려면 pip 자체가 최신이어야 한다.
-#     install_mac.command 의 `pip install --upgrade pip` 단계를 지우지 말 것.
+# Version policy: bound both ends.
+#   - Upper (<N) blocks the next major. install_mac.command registers this as
+#     a LaunchAgent, so it runs at every login with the user's privileges;
+#     an unannounced major upgrade must not turn that into a login-time crash.
+#   - Lower (>=N) is the oldest version actually verified.
+#   - No exact pins (==). Stock macOS python3 is 3.9.6 and install_mac.command
+#     uses that interpreter, but the versions in a 3.14 dev venv
+#     (pyobjc 12.2.1, numpy 2.5.0, pillow 12.2.0) do not support 3.9 -- pinning
+#     to them would fail the install for every stock-Mac user. Ranges let pip
+#     backtrack (3.9 resolves pyobjc 11.1 / numpy 2.0.2 / pillow 11.3.0).
+#   NOTE: that backtracking needs a current pip. Do not remove the
+#   `pip install --upgrade pip` step from install_mac.command.
+#
+# Keep this file ASCII: pip decodes requirements files with the system
+# encoding when there is no BOM, so non-ASCII comments break the install on
+# Korean Windows (cp949).
 
-# macOS 앱 실행에 필요 (desktop_cat.py)
+# Required to run the macOS app (desktop_cat.py)
 psutil>=5.9,<8
-# desktop_cat.py 가 AppKit/Foundation 심볼 27개를 이름으로 import 하므로
-# 메이저 업그레이드 한 번에 앱이 통째로 죽을 수 있다. 상한을 반드시 유지할 것.
+# desktop_cat.py imports 27 AppKit/Foundation symbols by name, so one major
+# upgrade can break the whole app. Keep the upper bound.
 pyobjc-framework-Cocoa>=10,<13
 
-# AI 성능 진단 (brain.py)
+# AI performance diagnosis (brain.py)
 openai>=2.46,<3
 pydantic>=2.9,<3
 python-dotenv>=1.2,<2
 
-# 커스텀 펫 테마 생성 (vision_theme.py, import_theme.py)
-# desktop_cat.py가 로드 시 vision_theme을 import하므로 앱 실행에도 필수
+# Custom pet themes (vision_theme.py, import_theme.py).
+# desktop_cat.py imports vision_theme at load time, so these are required to
+# run the app at all.
 Pillow>=10,<13
 numpy>=1.24,<3
