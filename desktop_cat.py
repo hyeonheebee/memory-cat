@@ -23,6 +23,7 @@ from AppKit import (
     NSCompositingOperationSourceOver, NSCompositingOperationCopy,
     NSRectFillUsingOperation, NSApp,
     NSAlert, NSTextField, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
+    NSAlertThirdButtonReturn,
     NSOpenPanel, NSModalResponseOK,
 )
 from Foundation import (
@@ -66,6 +67,8 @@ PET_PHOTO_TYPES = ["png", "jpg", "jpeg", "webp", "heic", "heif"]
 DISK_FULL_PROMPT_PERCENT = 92.0
 NSStatusWindowLevel = 25
 CATBOTTOM = 46.0
+# 항목 검토 중 "정리 중단"을 고른 신호. bool 이 아니라서 기존 콜백과 섞이지 않는다.
+CLEANUP_ABORT = "abort"
 
 THEME_STRING_KEYS = {
     "cute": "theme_cute",
@@ -232,24 +235,42 @@ def _pet_theme_worker(photo_path, theme_name, callback):
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
+def cleanup_queue(recommendations):
+    """검토 순서대로 (추천, 항목) 쌍을 펼친다."""
+    return [
+        (recommendation, item)
+        for recommendation in recommendations
+        for item in recommendation.get("items", [])
+    ]
+
+
 def process_cleanup_recommendations(recommendations, confirm_item, trash_func=None):
-    """각 항목을 확인받은 뒤에만 safe_trash를 호출한다."""
+    """각 항목을 확인받은 뒤에만 safe_trash를 호출한다.
+
+    ``confirm_item`` 이 ``CLEANUP_ABORT`` 를 돌려주면 남은 항목은 묻지 않고
+    전부 건너뛴 것으로 세고 즉시 끝낸다. 그 밖의 값은 예전처럼 참/거짓으로만
+    본다.
+    """
     trash_func = safe_trash if trash_func is None else trash_func
     summary = {"moved": 0, "already_in_trash": 0, "skipped": 0, "failed": 0}
-    for recommendation in recommendations:
-        for item in recommendation.get("items", []):
-            path = item.get("path")
-            if not path or not confirm_item(recommendation, item):
-                summary["skipped"] += 1
-                continue
-            try:
-                trash_func(path)
-                if recommendation.get("category") == "trash":
-                    summary["already_in_trash"] += 1
-                else:
-                    summary["moved"] += 1
-            except Exception:
-                summary["failed"] += 1
+    queue = cleanup_queue(recommendations)
+    for index, (recommendation, item) in enumerate(queue):
+        path = item.get("path")
+        decision = confirm_item(recommendation, item) if path else False
+        if decision == CLEANUP_ABORT:
+            summary["skipped"] += len(queue) - index
+            return summary
+        if not decision:
+            summary["skipped"] += 1
+            continue
+        try:
+            trash_func(path)
+            if recommendation.get("category") == "trash":
+                summary["already_in_trash"] += 1
+            else:
+                summary["moved"] += 1
+        except Exception:
+            summary["failed"] += 1
     return summary
 
 
@@ -799,8 +820,14 @@ class CatController(NSObject):
         alert.setInformativeText_(f"{path}\n\n{reason}\n{action_note}")
         alert.addButtonWithTitle_(primary)
         alert.addButtonWithTitle_(tr(self.language, "skip"))
+        # 항목이 최대 80개라 중간에 빠져나갈 길이 없으면 갇힌다. Esc로도 멈춘다.
+        stop_button = alert.addButtonWithTitle_(tr(self.language, "stop_cleanup"))
+        stop_button.setKeyEquivalent_("\033")
         NSApp.activateIgnoringOtherApps_(True)
-        return alert.runModal() == NSAlertFirstButtonReturn
+        response = alert.runModal()
+        if response == NSAlertThirdButtonReturn:
+            return CLEANUP_ABORT
+        return response == NSAlertFirstButtonReturn
 
     @objc.python_method
     def _show_cleanup_summary(self, summary):

@@ -716,6 +716,65 @@ class DesktopCatTests(unittest.TestCase):
 
         controller._show_disk_full_alert.assert_not_called()
 
+    def test_stopping_the_review_leaves_every_remaining_item_untouched(self):
+        recommendations = [
+            {
+                "category": "old_downloads",
+                "items": [
+                    {"path": "/Downloads/first.zip"},
+                    {"path": "/Downloads/stop-here.zip"},
+                ],
+            },
+            {"category": "trash", "items": [{"path": "/.Trash/never-asked.txt"}]},
+        ]
+        trash = Mock()
+        asked = []
+
+        def confirm(recommendation, item):
+            asked.append(item["path"])
+            if item["path"].endswith("stop-here.zip"):
+                return desktop_cat.CLEANUP_ABORT
+            return True
+
+        summary = desktop_cat.process_cleanup_recommendations(
+            recommendations, confirm, trash_func=trash
+        )
+
+        self.assertEqual(
+            asked, ["/Downloads/first.zip", "/Downloads/stop-here.zip"]
+        )
+        self.assertEqual(
+            [call.args[0] for call in trash.call_args_list],
+            ["/Downloads/first.zip"],
+        )
+        self.assertEqual(
+            summary,
+            {"moved": 1, "already_in_trash": 0, "skipped": 2, "failed": 0},
+        )
+
+    def test_cleanup_item_alert_maps_its_third_button_and_escape_to_abort(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        alert = Mock()
+        stop_button = Mock()
+        alert.addButtonWithTitle_.return_value = stop_button
+        alert.runModal.return_value = desktop_cat.NSAlertThirdButtonReturn
+
+        with (
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "NSApp", Mock()),
+        ):
+            decision = controller._confirm_cleanup_item(
+                {"category": "old_downloads"}, {"path": "/Downloads/old.zip"}
+            )
+
+        self.assertEqual(decision, desktop_cat.CLEANUP_ABORT)
+        self.assertIn(
+            call(i18n.tr("ko", "stop_cleanup")),
+            alert.addButtonWithTitle_.call_args_list,
+        )
+        stop_button.setKeyEquivalent_.assert_called_once_with("\033")
+
 
 if __name__ == "__main__":
     unittest.main()
