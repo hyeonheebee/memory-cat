@@ -18,6 +18,14 @@ from types import SimpleNamespace
 import psutil
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from i18n import (
+    LANGUAGE_AUTO,
+    LANGUAGE_OVERRIDES,
+    chonk_stage,
+    resolve_language,
+    tr,
+)
+
 # 빌드(.exe)면 frames 는 번들 안, config 는 exe 옆에 둔다
 if getattr(sys, "frozen", False):
     BASE = sys._MEIPASS
@@ -30,24 +38,48 @@ CONFIG = os.path.join(APPDIR, "config.json")
 
 REFRESH_MS = 4000
 CATBOTTOM = 46
-THEME_LABELS = {"cute": "귀여운", "simple": "단순한", "madness": "광기", "derpy": "경각심"}
+THEME_STRING_KEYS = {
+    "cute": "theme_cute",
+    "simple": "theme_simple",
+    "madness": "theme_madness",
+    "derpy": "theme_derpy",
+}
 THEME_ORDER = ["cute", "simple", "madness", "derpy"]
 SIZES = {"작게": 78, "보통": 104, "크게": 138, "왕": 176}
-DEFAULT = {"theme": "cute", "size": "보통"}
+SIZE_STRING_KEYS = {
+    "작게": "size_small",
+    "보통": "size_medium",
+    "크게": "size_large",
+    "왕": "size_king",
+}
+DEFAULT = {"theme": "cute", "size": "보통", "language": LANGUAGE_AUTO}
+
+
+def system_languages():
+    """윈도우의 표시 언어 목록. macOS 의 NSLocale 자리에 QLocale 을 쓴다."""
+    try:
+        return list(QtCore.QLocale.system().uiLanguages())
+    except Exception:
+        return []
 
 
 def load_config():
     try:
-        c = json.load(open(CONFIG, encoding="utf-8"))
+        with open(CONFIG, encoding="utf-8") as handle:
+            c = json.load(handle)
+        language = c.get("language", LANGUAGE_AUTO)
         return {"theme": c.get("theme", DEFAULT["theme"]),
-                "size": c.get("size", DEFAULT["size"])}
+                "size": c.get("size", DEFAULT["size"]),
+                "language": language if language in LANGUAGE_OVERRIDES
+                else LANGUAGE_AUTO}
     except Exception:
         return dict(DEFAULT)
 
 
 def save_config(cfg):
     try:
-        json.dump(cfg, open(CONFIG, "w", encoding="utf-8"), ensure_ascii=False)
+        with open(CONFIG, "w", encoding="utf-8") as handle:
+            json.dump(cfg, handle, ensure_ascii=False)
     except Exception:
         pass
 
@@ -63,8 +95,14 @@ def discover_themes():
             + [t for t in found if t not in THEME_ORDER])
 
 
-def theme_label(key):
-    return THEME_LABELS.get(key, key)
+def theme_label(key, language):
+    string_key = THEME_STRING_KEYS.get(key)
+    return tr(language, string_key) if string_key else key
+
+
+def size_label(key, language):
+    string_key = SIZE_STRING_KEYS.get(key)
+    return tr(language, string_key) if string_key else key
 
 
 def frame_count(theme):
@@ -122,6 +160,7 @@ class Cat(QtWidgets.QWidget):
         self.setWindowTitle("MemoryCat")
 
         self.cfg = load_config()
+        self.language = resolve_language(self.cfg["language"], system_languages())
         themes = discover_themes()
         if themes and self.cfg["theme"] not in themes:
             self.cfg["theme"] = themes[0]
@@ -176,19 +215,23 @@ class Cat(QtWidgets.QWidget):
         theme = self.cfg["theme"]
         idx = int(round(dpct / 100 * (frame_count(theme) - 1)))
         self.pix = QtGui.QPixmap(frame_path(theme, idx))
-        self.l1 = f"디스크 {dpct:.0f}%"
-        self.l2 = f"램 {vm.percent:.0f}%"
+        language = self.language
+        self.l1 = f"{tr(language, 'disk')} {dpct:.0f}%"
+        self.l2 = f"{tr(language, 'ram')} {vm.percent:.0f}%"
 
-        mood = ("여유" if dpct < 60 else "포동" if dpct < 80
-                else "배불러" if dpct < 92 else "빵빵!")
+        mood = chonk_stage(dpct, language)
         self.detail = [
-            f"기분: {mood}  (디스크 {round(dpct)}%)",
-            f"디스크 {dpct:.0f}%  ·  {human_gb(disk.used)} / {human_gb(disk.total)}  (여유 {human_gb(disk.free)})",
-            f"RAM {vm.percent:.0f}%  ·  {human_gb(vm.used)} / {human_gb(vm.total)}",
+            tr(language, "mood_detail", mood=mood, percent=round(dpct)),
+            tr(language, "disk_detail", percent=dpct, used=human_gb(disk.used),
+               total=human_gb(disk.total), free=human_gb(disk.free)),
+            tr(language, "ram_detail", percent=vm.percent,
+               used=human_gb(vm.used), total=human_gb(vm.total)),
         ]
         if sw.total > 0:
-            self.detail.append(f"스왑 {sw.percent:.0f}%  ·  {human_gb(sw.used)} / {human_gb(sw.total)}")
-        self.detail.append("─ 메모리 먹는 앱 ─")
+            self.detail.append(
+                tr(language, "swap_detail", percent=sw.percent,
+                   used=human_gb(sw.used), total=human_gb(sw.total)))
+        self.detail.append(tr(language, "memory_apps"))
         try:
             for name, rss in top_memory_apps():
                 self.detail.append(f"{rss / 1024 ** 2:,.0f} MB   {name}")
@@ -248,23 +291,36 @@ class Cat(QtWidgets.QWidget):
             a.setEnabled(False)
         menu.addSeparator()
 
-        tm = menu.addMenu("테마")
+        language = self.language
+        tm = menu.addMenu(tr(language, "menu_theme"))
         for key in discover_themes():
-            a = tm.addAction(theme_label(key))
+            a = tm.addAction(theme_label(key, language))
             a.setCheckable(True)
             a.setChecked(key == self.cfg["theme"])
             a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
-        sm = menu.addMenu("크기")
+        sm = menu.addMenu(tr(language, "menu_size"))
         for label in SIZES:
-            a = sm.addAction(label)
+            a = sm.addAction(size_label(label, language))
             a.setCheckable(True)
             a.setChecked(label == self.cfg["size"])
             a.triggered.connect(lambda _=False, s=label: self.set_size(s))
+        lm = menu.addMenu(tr(language, "menu_language"))
+        for choice in LANGUAGE_OVERRIDES:
+            a = lm.addAction(tr(language, f"language_{choice}"))
+            a.setCheckable(True)
+            a.setChecked(choice == self.cfg["language"])
+            a.triggered.connect(lambda _=False, c=choice: self.set_language(c))
 
         menu.addSeparator()
-        menu.addAction("새로고침", self.refresh)
-        menu.addAction("종료", QtWidgets.QApplication.quit)
+        menu.addAction(tr(language, "menu_refresh"), self.refresh)
+        menu.addAction(tr(language, "menu_quit"), QtWidgets.QApplication.quit)
         menu.exec(e.globalPos())
+
+    def set_language(self, choice):
+        self.cfg["language"] = choice
+        self.language = resolve_language(choice, system_languages())
+        save_config(self.cfg)
+        self.refresh()
 
     def set_theme(self, key):
         self.cfg["theme"] = key

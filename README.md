@@ -184,10 +184,11 @@ clone for development, a `.env` in the project root still works.
 ## Install on Windows
 
 > **What the Windows build includes.** The disk-driven cat, RAM and swap
-> readouts, top memory consumers, and theme and size switching. The AI features
-> are macOS only: the 🐾 What did you eat? diagnosis, custom pet themes, safe
-> cleanup, personalities, and the language toggle. In exchange the Windows
-> build has no OpenAI dependency and makes no network requests at all.
+> readouts, top memory consumers, theme and size switching, and the Korean /
+> English language toggle. The AI features are macOS only: the 🐾 What did you
+> eat? diagnosis, custom pet themes, safe cleanup, and personalities. In
+> exchange the Windows build has no OpenAI dependency and makes no network
+> requests at all.
 
 See [`windows/README.txt`](windows/README.txt) for the full instructions. In
 short:

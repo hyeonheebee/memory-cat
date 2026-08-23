@@ -30,7 +30,12 @@ if not exist "frames" (
     exit /b 1
 )
 
-pyinstaller --noconsole --onefile --name MemoryCat --add-data "frames;frames" windows_cat.pyw
+REM i18n.py 는 저장소 루트에 있다. --paths 로 import 경로에 넣어 준다.
+pyinstaller --noconsole --onefile --name MemoryCat ^
+    --add-data "frames;frames" ^
+    --paths ".." ^
+    --hidden-import i18n ^
+    windows_cat.pyw
 if errorlevel 1 (
     echo.
     echo [X] 빌드 실패. 위의 오류 메시지를 확인하세요.
