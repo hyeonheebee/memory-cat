@@ -49,6 +49,13 @@
        pip install -r requirements.txt
        pip install pyinstaller
 2) build_exe.bat 더블클릭
+
+   터미널에서 돌린다면 쓰는 터미널에 따라 다릅니다.
+       명령 프롬프트(cmd)  :  build_exe.bat
+       PowerShell          :  .\build_exe.bat      <- 앞의 .\ 를 빼면 안 됩니다
+   PowerShell 은 보안상 현재 폴더의 명령을 자동으로 찾지 않아서,
+   .\ 없이 치면 "용어가 인식되지 않습니다" 오류가 납니다.
+
    (저장소 루트 등 다른 폴더에서  windows\build_exe.bat  으로 실행해도 됩니다.
     스크립트가 자기 폴더로 먼저 이동한 뒤 빌드합니다.)
 3) windows\dist\MemoryCat.exe 가 생김 -> 그거만 있으면 실행됨
