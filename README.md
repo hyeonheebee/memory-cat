@@ -207,6 +207,14 @@ pip install pyinstaller
 windows\build_exe.bat
 ```
 
+In PowerShell, prefix the script with `.\` — PowerShell does not run commands
+from the current directory otherwise, and reports the script as an unrecognized
+term:
+
+```powershell
+.\windows\build_exe.bat
+```
+
 > **The executable it produces is unsigned — expect security warnings.** This is
 > a personal project with no code-signing certificate, so the first launch of
 > `MemoryCat.exe` triggers a Windows SmartScreen "unknown publisher" prompt, and
