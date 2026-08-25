@@ -1,4 +1,6 @@
 @echo off
+REM 한글 메시지가 cp949 콘솔에서 깨지지 않게 UTF-8 로 맞춘다.
+chcp 65001 >nul
 REM 메모리 뚱냥이 - Windows exe 빌드 스크립트
 REM 사전: pip install -r requirements.txt  그리고  pip install pyinstaller
 REM
