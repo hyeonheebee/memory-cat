@@ -1,6 +1,7 @@
 @echo off
-REM 한글 메시지가 cp949 콘솔에서 깨지지 않게 UTF-8 로 맞춘다.
 chcp 65001 >nul
+REM 위 줄이 먼저 와야 한다. 이 파일에는 한글이 들어 있는데, 코드페이지를
+REM 맞추기 전에 한글 바이트를 만나면 콘솔에 깨져 나오고 파서도 위태롭다.
 REM 메모리 뚱냥이 - Windows exe 빌드 스크립트
 REM 사전: pip install -r requirements.txt  그리고  pip install pyinstaller
 REM
@@ -27,6 +28,17 @@ if errorlevel 1 (
 if not exist "frames" (
     echo.
     echo [X] frames 폴더가 없습니다. 저장소를 통째로 받았는지 확인하세요.
+    popd
+    pause
+    exit /b 1
+)
+
+REM i18n.py 는 저장소 루트에 있다. windows 폴더만 복사해 온 경우 여기서
+REM 걸러 준다. 없으면 빌드는 되지만 실행할 때 죽는다.
+if not exist "..\i18n.py" (
+    echo.
+    echo [X] ..\i18n.py 를 찾을 수 없습니다.
+    echo     windows 폴더만 복사하지 말고 저장소를 통째로 받아 주세요.
     popd
     pause
     exit /b 1
