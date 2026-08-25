@@ -1,0 +1,21 @@
+* text=auto
+
+# Windows batch files MUST be CRLF. cmd.exe re-seeks through a batch file by
+# byte offset, and an LF-terminated .bat containing multi-byte characters
+# (Korean, here) throws that count off -- cmd then starts executing the middle
+# of a line as a command. The failure looks like a nonsense error such as
+# "'립트가'은(는) 내부 또는 외부 명령이 아닙니다" long before the real command runs.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# macOS and Unix scripts must stay LF, or the shebang line breaks.
+*.command text eol=lf
+*.sh      text eol=lf
+*.py      text eol=lf
+*.pyw     text eol=lf
+
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.icns binary
+*.heic binary
