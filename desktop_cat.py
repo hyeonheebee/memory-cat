@@ -112,15 +112,37 @@ DEFAULT = {
 }
 
 
-def alert_icon_path():
-    """알럿에 띄울 아이콘 경로. 지금 고른 테마의 첫 프레임을 쓴다.
+def frame_index_for(theme, disk_percent):
+    """디스크 사용률을 그 테마의 프레임 번호로 옮긴다.
 
-    반려동물 사진으로 자기 테마를 만든 사람에게 기본 고양이를 보여 주면,
-    화면에 떠 있는 동물과 말을 거는 동물이 달라진다. 테마를 읽지 못하면
-    번들 안 기본 고양이로 돌아간다.
+    바탕화면 고양이와 알럿 아이콘이 같은 계산을 써야 한쪽만 다른 몸집으로
+    나오는 일이 없다.
+    """
+    n = frame_count(theme)
+    return int(round(disk_percent / 100 * (n - 1)))
+
+
+def alert_icon_path():
+    """알럿에 띄울 아이콘 경로. 지금 테마의, 지금 몸집으로 보여 준다.
+
+    반려동물 사진으로 자기 테마를 만든 사람에게 기본 고양이를 보여 주면
+    화면에 떠 있는 동물과 말을 거는 동물이 달라진다. 그리고 "배불러요" 라고
+    말하는 창에 홀쭉한 그림이 붙어 있으면 말과 그림이 따로 논다. 디스크가
+    찬 만큼 부푼 프레임을 쓴다.
+
+    테마나 사용률을 읽지 못하면 번들 안 기본 고양이로 돌아간다. 아이콘을
+    못 구했다고 알럿까지 안 뜨면 안 된다.
     """
     try:
-        candidate = frame_path(load_config()["theme"], 0)
+        theme = load_config()["theme"]
+    except Exception:
+        return FALLBACK_ALERT_ICON_PATH
+    try:
+        index = frame_index_for(theme, mc.disk_usage().percent)
+    except Exception:
+        index = 0  # 측정에 실패해도 그 테마의 얼굴은 보여 준다.
+    try:
+        candidate = frame_path(theme, index)
         if os.path.exists(candidate):
             return candidate
     except Exception:
@@ -711,8 +733,7 @@ class CatController(NSObject):
         self.score = dpct
         self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
-        n = frame_count(theme)
-        idx = int(round(dpct / 100 * (n - 1)))
+        idx = frame_index_for(theme, dpct)
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
         language = self.language
         self.view.updateImage_l1_l2_(
