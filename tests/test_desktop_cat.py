@@ -13,7 +13,7 @@ from personality import CUSTOM_PERSONALITY, DEFAULT_PERSONALITY
 
 
 class DesktopCatTests(unittest.TestCase):
-    def test_new_cat_alert_uses_bundled_cat_frame_as_its_icon(self):
+    def test_new_cat_alert_uses_the_theme_the_user_is_running(self):
         alert = Mock()
         alert_class = Mock()
         alert_class.alloc.return_value.init.return_value = alert
@@ -29,7 +29,7 @@ class DesktopCatTests(unittest.TestCase):
 
         self.assertIs(created, alert)
         image_class.alloc.return_value.initWithContentsOfFile_.assert_called_once_with(
-            desktop_cat.ALERT_ICON_PATH
+            desktop_cat.alert_icon_path()
         )
         alert.setIcon_.assert_called_once_with(icon)
 
@@ -1312,6 +1312,37 @@ class RevealTests(unittest.TestCase):
                     language="ko",
                 )
                 self.assertNotIn("OPENAI_API_KEY=sk-...", content["body"])
+
+    def test_the_alert_icon_follows_a_custom_pet_theme(self):
+        # 반려동물 사진으로 테마를 만든 사람에게 기본 고양이가 말을 걸면 안 된다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "myotter").mkdir()
+            for index in range(3):
+                (root / "myotter" / f"cat_{index:02d}.png").write_bytes(b"png")
+
+            with (
+                patch.object(desktop_cat, "USER_FRAMES_BASE", str(root)),
+                patch.object(desktop_cat, "load_config", return_value={"theme": "myotter"}),
+            ):
+                chosen = desktop_cat.alert_icon_path()
+
+        self.assertEqual(chosen, str(root / "myotter" / "cat_00.png"))
+
+    def test_the_alert_icon_falls_back_when_the_theme_is_gone(self):
+        # 테마 폴더를 지웠거나 config 가 깨졌어도 알럿은 떠야 한다.
+        with patch.object(
+            desktop_cat, "load_config", return_value={"theme": "deleted-theme"}
+        ):
+            self.assertEqual(
+                desktop_cat.alert_icon_path(), desktop_cat.FALLBACK_ALERT_ICON_PATH
+            )
+
+    def test_the_alert_icon_survives_a_broken_config(self):
+        with patch.object(desktop_cat, "load_config", side_effect=OSError("boom")):
+            self.assertEqual(
+                desktop_cat.alert_icon_path(), desktop_cat.FALLBACK_ALERT_ICON_PATH
+            )
 
 
 if __name__ == "__main__":
