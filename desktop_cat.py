@@ -65,7 +65,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # 자세한 규칙은 apppaths 모듈 참고.
 FRAMES_BASE = str(apppaths.bundled_frames_dir())
 USER_FRAMES_BASE = str(apppaths.user_frames_dir())
-ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
+#: 테마를 못 읽을 때 쓰는 기본 아이콘. 번들 안이라 항상 있다.
+FALLBACK_ALERT_ICON_PATH = os.path.join(FRAMES_BASE, "cute", "cat_00.png")
 CONFIG = str(apppaths.config_file())
 REFRESH_SEC = 4.0
 DISK_FULL_NOTIFICATION_ID = "memory-cat-disk-full"
@@ -111,11 +112,27 @@ DEFAULT = {
 }
 
 
+def alert_icon_path():
+    """알럿에 띄울 아이콘 경로. 지금 고른 테마의 첫 프레임을 쓴다.
+
+    반려동물 사진으로 자기 테마를 만든 사람에게 기본 고양이를 보여 주면,
+    화면에 떠 있는 동물과 말을 거는 동물이 달라진다. 테마를 읽지 못하면
+    번들 안 기본 고양이로 돌아간다.
+    """
+    try:
+        candidate = frame_path(load_config()["theme"], 0)
+        if os.path.exists(candidate):
+            return candidate
+    except Exception:
+        pass
+    return FALLBACK_ALERT_ICON_PATH
+
+
 def new_cat_alert():
-    """Create an NSAlert with the bundled cat icon when it can be loaded."""
+    """Create an NSAlert showing the theme the user is actually running."""
     alert = NSAlert.alloc().init()
     try:
-        icon = NSImage.alloc().initWithContentsOfFile_(ALERT_ICON_PATH)
+        icon = NSImage.alloc().initWithContentsOfFile_(alert_icon_path())
         if icon is not None:
             alert.setIcon_(icon)
     except Exception:
