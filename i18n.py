@@ -33,9 +33,9 @@ _STRINGS = {
         "diagnosis_empty": "진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
         "diagnosis_error": "진단 데이터를 읽는 중 문제가 생겼습니다.",
         "retry_later": "잠시 후 다시 시도해 주세요.",
-        "personality_changed_title": "뚱냥이 성격 변경",
+        "personality_changed_title": "{pet} 성격 변경",
         "personality_changed_body": "이제 {personality} 말투로 진단할게요.",
-        "custom_title": "뚱냥이 성격을 직접 알려 주세요",
+        "custom_title": "{pet} 성격을 직접 알려 주세요",
         "custom_hint": "예: 다정하지만 핵심만 말하고, 말끝에 냥을 붙여줘",
         "save": "저장",
         "cancel": "취소",
@@ -44,13 +44,17 @@ _STRINGS = {
         "custom_saved_title": "커스텀 성격 저장",
         "personality_custom_label": "직접 입력",
         "diagnosis_already_title": "🧠 이미 진단 중이에요",
-        "diagnosis_already_body": "뚱냥이가 숫자를 살펴보고 있습니다.",
+        "diagnosis_already_body": "{pet}가 숫자를 살펴보고 있습니다.",
         "diagnosis_running_title": "🐾 살펴보는 중…",
-        "diagnosis_running_body": "뚱냥이가 얼마나 배부른지 살펴보고 있어요.",
+        "diagnosis_running_body": "{pet}가 얼마나 배부른지 살펴보고 있어요.",
         "diagnosis_source_fallback": "⚠️ 오프라인 진단 · 성격 미적용 · {reason}",
-        "diagnosis_result_openai_title": "{personality} 뚱냥이가 배부른 이유예요.",
-        "diagnosis_result_fallback_title": "뚱냥이가 배부른 이유예요.",
+        "diagnosis_result_openai_title": "{personality} {pet}가 배부른 이유예요.",
+        "diagnosis_result_fallback_title": "{pet}가 배부른 이유예요.",
         "fallback_missing_api_key": "API 키 없음",
+        "menu_pet_name": "이름 지어주기…",
+        "pet_name_title": "뭐라고 부를까요?",
+        "pet_name_hint": "비워 두면 뚱냥이라고 부릅니다.",
+        "pet_name_saved_title": "이제 {pet}라고 부를게요",
         "missing_api_key_title": "API 키가 필요해요",
         "missing_api_key_help": (
             "🔑 AI 진단과 반려동물 테마를 켜려면\n"
@@ -101,12 +105,12 @@ _STRINGS = {
         "pet_theme_complete_title": "반려동물 테마 완성",
         "pet_theme_complete_body": "{count}단계를 감지해 {theme} 테마를 바로 적용했어요.",
         "pet_theme_error_title": "테마를 만들지 못했어요",
-        "disk_full_prompt_title": "🐾 뚱냥이가 배불러요",
+        "disk_full_prompt_title": "🐾 {pet}가 배불러요",
         "disk_full_prompt_body": "배불러… 진단해볼까?",
         "disk_full_prompt_action": "진단하기",
-        "already_running_title": "뚱냥이는 이미 한 마리 있어요",
+        "already_running_title": "{pet}는 이미 한 마리 있어요",
         "already_running_body": (
-            "고양이를 불러 봤는데 대답이 없네요. 화면 어딘가에 숨어 있거나 "
+            "{pet}를 불러 봤는데 대답이 없네요. 화면 어딘가에 숨어 있거나 "
             "멈춰 있을 수 있어요. 우클릭 메뉴에서 종료한 뒤 다시 열어 주세요."
         ),
         "menu_size": "크기",
@@ -143,9 +147,9 @@ _STRINGS = {
         "diagnosis_empty": "I couldn't produce a diagnosis. Please try again shortly.",
         "diagnosis_error": "Something went wrong while reading the diagnostic data.",
         "retry_later": "Please try again shortly.",
-        "personality_changed_title": "Cat personality changed",
+        "personality_changed_title": "{pet} personality changed",
         "personality_changed_body": "Future diagnoses will use the {personality} voice.",
-        "custom_title": "Describe your cat's personality",
+        "custom_title": "Describe {pet}'s personality",
         "custom_hint": "Example: Be kind, lead with the key point, and end sentences with meow.",
         "save": "Save",
         "cancel": "Cancel",
@@ -154,13 +158,17 @@ _STRINGS = {
         "custom_saved_title": "Custom personality saved",
         "personality_custom_label": "Custom",
         "diagnosis_already_title": "🧠 Diagnosis already running",
-        "diagnosis_already_body": "The cat is still inspecting the numbers.",
+        "diagnosis_already_body": "{pet} is still inspecting the numbers.",
         "diagnosis_running_title": "🐾 Checking…",
-        "diagnosis_running_body": "Memory Cat is checking how full things feel.",
+        "diagnosis_running_body": "{pet} is checking how full things feel.",
         "diagnosis_source_fallback": "⚠️ Offline diagnosis · Personality not applied · {reason}",
-        "diagnosis_result_openai_title": "Here’s why your {personality} Memory Cat feels full.",
-        "diagnosis_result_fallback_title": "Here’s why Memory Cat feels full.",
+        "diagnosis_result_openai_title": "Here’s why your {personality} {pet} feels full.",
+        "diagnosis_result_fallback_title": "Here’s why {pet} feels full.",
         "fallback_missing_api_key": "API key missing",
+        "menu_pet_name": "Give it a name…",
+        "pet_name_title": "What should I call it?",
+        "pet_name_hint": "Leave it empty to keep calling it Memory Cat.",
+        "pet_name_saved_title": "I'll call it {pet} from now on",
         "missing_api_key_title": "An API key is needed",
         "missing_api_key_help": (
             "🔑 To turn on AI diagnosis and pet themes, put your OpenAI\n"
@@ -211,14 +219,14 @@ _STRINGS = {
         "pet_theme_complete_title": "Pet theme ready",
         "pet_theme_complete_body": "Detected {count} stages and applied the {theme} theme.",
         "pet_theme_error_title": "Couldn't make the theme",
-        "disk_full_prompt_title": "🐾 Memory Cat is full",
+        "disk_full_prompt_title": "🐾 {pet} is full",
         "disk_full_prompt_body": "I'm so full… want a checkup?",
         "disk_full_prompt_action": "Run checkup",
-        "already_running_title": "Memory Cat is already running",
+        "already_running_title": "{pet} is already running",
         "already_running_body": (
-            "The running cat did not answer. It may be hidden somewhere on "
+            "{pet} did not answer. It may be hidden somewhere on "
             "screen, or stuck. Quit it from the right-click menu and open "
-            "Memory Cat again."
+            "it again."
         ),
         "menu_size": "Size",
         "menu_personality": "Personality",
@@ -301,16 +309,30 @@ def diagnosis_personality_descriptor(label: str, language: str) -> str:
     return _DIAGNOSIS_PERSONALITY_DESCRIPTORS[lang].get(label, default)
 
 
+#: 이름을 안 지어 줬을 때 쓰는 기본 호칭.
+DEFAULT_PET_NAME = {LANGUAGE_KO: "뚱냥이", LANGUAGE_EN: "Memory Cat"}
+
+
+def pet_name(configured: Optional[str], language: str) -> str:
+    """화면에 부를 이름. 안 지었으면 기본 호칭으로 돌아간다.
+
+    사진으로 테마를 만들면 고양이가 아닐 수 있어서, "뚱냥이" 를 그대로 쓰면
+    수달한테 냥이라고 부르게 된다.
+    """
+    name = str(configured or "").strip()
+    return name or DEFAULT_PET_NAME[canonical_language(language)]
+
+
 def chonk_stage(percent: float, language: str) -> str:
     """한국어는 기존 4단계를 유지하고 영어만 6단계 chonk chart를 쓴다."""
     if canonical_language(language) == LANGUAGE_KO:
         if percent < 60:
-            return "여유 😺"
+            return "여유"
         if percent < 80:
-            return "포동 🐈"
+            return "포동"
         if percent < 92:
-            return "배불러 🍙"
-        return "빵빵! 🐷"
+            return "배불러"
+        return "빵빵!"
 
     if percent < 60:
         return CHONK_STAGES_EN[0]

@@ -47,6 +47,7 @@ from i18n import (
     LANGUAGE_OVERRIDES,
     chonk_stage,
     diagnosis_personality_descriptor,
+    pet_name,
     resolve_language,
     tr,
 )
@@ -105,6 +106,7 @@ SIZE_STRING_KEYS = {
 }
 DEFAULT = {
     "theme": "cute",
+    "pet_name": "",
     "size": "보통",
     "personality": DEFAULT_PERSONALITY,
     "custom_personality": "",
@@ -179,6 +181,7 @@ def load_config(path=None):
     cfg = dict(DEFAULT)
     if isinstance(loaded, dict):
         cfg["theme"] = loaded.get("theme", DEFAULT["theme"])
+        cfg["pet_name"] = str(loaded.get("pet_name", "") or "").strip()[:40]
         size = loaded.get("size", DEFAULT["size"])
         cfg["size"] = size if size in SIZES else DEFAULT["size"]
         selection, custom = config_personality(loaded)
@@ -309,11 +312,13 @@ def request_reveal(timeout=REVEAL_ACK_TIMEOUT_SEC):
 
 def show_already_running_alert(language=None):
     """부른 뚱냥이가 대답을 안 할 때만 뜨는 안내창."""
+    cfg = load_config()
     if language is None:
-        language = resolve_language(load_config()["language"])
+        language = resolve_language(cfg["language"])
+    name = pet_name(cfg.get("pet_name"), language)
     alert = new_cat_alert()
-    alert.setMessageText_(tr(language, "already_running_title"))
-    alert.setInformativeText_(tr(language, "already_running_body"))
+    alert.setMessageText_(tr(language, "already_running_title", pet=name))
+    alert.setInformativeText_(tr(language, "already_running_body", pet=name))
     alert.addButtonWithTitle_(tr(language, "confirm"))
     NSApp.activateIgnoringOtherApps_(True)
     alert.runModal()
@@ -329,9 +334,11 @@ def diagnosis_notification_text(result, language=LANGUAGE_KO):
     return "\n".join(lines) or tr(language, "diagnosis_empty")
 
 
-def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO):
+def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO,
+                             pet=None):
     """진단 JSON을 결과창에서 읽기 쉬운 제목·본문·동작으로 바꾼다."""
     help_text = None
+    pet = pet_name(pet, language)
     if result.get("source") == "openai":
         title = tr(
             language,
@@ -339,10 +346,11 @@ def diagnosis_result_content(result, personality_label, language=LANGUAGE_KO):
             personality=diagnosis_personality_descriptor(
                 personality_label, language
             ),
+            pet=pet,
         )
         source = None
     else:
-        title = tr(language, "diagnosis_result_fallback_title")
+        title = tr(language, "diagnosis_result_fallback_title", pet=pet)
         reason_key = {
             "missing_api_key": "fallback_missing_api_key",
             "api_error": "fallback_api_error",
@@ -669,6 +677,27 @@ class CatController(NSObject):
         except Exception:
             pass
 
+    @objc.python_method
+    def configuredPetName(self):
+        """설정에 저장된 원본 이름. 비어 있을 수 있다.
+
+        기본 호칭은 **문장을 만드는 쪽의 언어**로 정해져야 한다. 여기서 미리
+        확정해 버리면 진단이 도는 사이 언어를 바꿨을 때 한국어 문장에 영어
+        기본 이름이 섞인다.
+        """
+        return (getattr(self, "cfg", None) or {}).get("pet_name")
+
+    @objc.python_method
+    def petName(self):
+        """화면에 부를 이름. 안 지었으면 기본 호칭.
+
+        설정을 읽기 전에 알럿이 뜰 수도 있어서 없는 상태를 견딘다. 이름을
+        못 구했다고 창이 안 뜨면 안 된다.
+        """
+        cfg = getattr(self, "cfg", None) or {}
+        language = getattr(self, "language", LANGUAGE_KO)
+        return pet_name(cfg.get("pet_name"), language)
+
     def revealCat(self):
         """창을 화면 안쪽으로 되돌리고 맨 앞에 세운다.
 
@@ -837,11 +866,11 @@ class CatController(NSObject):
         self.cfg["personality"] = sender.representedObject()
         save_config(self.cfg)
         label = preset_label(self.cfg["personality"], self.language)
-        self._notify(tr(self.language, "personality_changed_title"), tr(self.language, "personality_changed_body", personality=label))
+        self._notify(tr(self.language, "personality_changed_title", pet=self.petName()), tr(self.language, "personality_changed_body", personality=label))
 
     def setCustomPersonality_(self, sender):
         alert = new_cat_alert()
-        alert.setMessageText_(tr(self.language, "custom_title"))
+        alert.setMessageText_(tr(self.language, "custom_title", pet=self.petName()))
         alert.setInformativeText_(tr(self.language, "custom_hint"))
         alert.addButtonWithTitle_(tr(self.language, "save"))
         alert.addButtonWithTitle_(tr(self.language, "cancel"))
@@ -861,6 +890,28 @@ class CatController(NSObject):
         save_config(self.cfg)
         self._notify(tr(self.language, "custom_saved_title"), custom)
 
+    def setPetName_(self, sender):
+        alert = new_cat_alert()
+        alert.setMessageText_(tr(self.language, "pet_name_title"))
+        alert.setInformativeText_(tr(self.language, "pet_name_hint"))
+        alert.addButtonWithTitle_(tr(self.language, "save"))
+        alert.addButtonWithTitle_(tr(self.language, "cancel"))
+        field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 240, 28))
+        field.setStringValue_(self.cfg.get("pet_name", "") or "")
+        alert.setAccessoryView_(field)
+        NSApp.activateIgnoringOtherApps_(True)
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+
+        # 비우면 기본 호칭으로 돌아간다. 이름을 지우는 것도 선택이다.
+        self.cfg["pet_name"] = str(field.stringValue() or "").strip()[:40]
+        save_config(self.cfg)
+        self.refresh_(None)
+        self._notify(
+            tr(self.language, "pet_name_saved_title", pet=self.petName()),
+            tr(self.language, "pet_name_hint"),
+        )
+
     def setLanguage_(self, sender):
         self.cfg["language"] = sender.representedObject()
         self.language = resolve_language(self.cfg["language"])
@@ -877,7 +928,7 @@ class CatController(NSObject):
 
     def diagnose_(self, sender):
         if self._diagnosis_running:
-            self._notify(tr(self.language, "diagnosis_already_title"), tr(self.language, "diagnosis_already_body"))
+            self._notify(tr(self.language, "diagnosis_already_title"), tr(self.language, "diagnosis_already_body", pet=self.petName()))
             return
         personality, custom = config_personality(self.cfg)
         personality_display = (
@@ -891,7 +942,7 @@ class CatController(NSObject):
             "language": self.language,
         }
         self._diagnosis_running = True
-        self._notify(tr(self.language, "diagnosis_running_title"), tr(self.language, "diagnosis_running_body"))
+        self._notify(tr(self.language, "diagnosis_running_title"), tr(self.language, "diagnosis_running_body", pet=self.petName()))
         self._diagnosis_thread = threading.Thread(
             target=_diagnosis_worker,
             args=(personality, custom, self.language, self._finish_diagnosis),
@@ -960,7 +1011,7 @@ class CatController(NSObject):
     @objc.python_method
     def _show_disk_full_prompt(self):
         notification = NSUserNotification.alloc().init()
-        notification.setTitle_(tr(self.language, "disk_full_prompt_title"))
+        notification.setTitle_(tr(self.language, "disk_full_prompt_title", pet=self.petName()))
         notification.setInformativeText_(
             tr(self.language, "disk_full_prompt_body")
         )
@@ -983,7 +1034,7 @@ class CatController(NSObject):
     def _show_disk_full_alert(self):
         """알림이 뜨지 않는 환경을 위한 대체 경로. 진단으로 바로 이어준다."""
         alert = new_cat_alert()
-        alert.setMessageText_(tr(self.language, "disk_full_prompt_title"))
+        alert.setMessageText_(tr(self.language, "disk_full_prompt_title", pet=self.petName()))
         alert.setInformativeText_(tr(self.language, "disk_full_prompt_body"))
         alert.addButtonWithTitle_(tr(self.language, "disk_full_prompt_action"))
         alert.addButtonWithTitle_(tr(self.language, "close"))
@@ -1032,6 +1083,7 @@ class CatController(NSObject):
             result,
             personality_label=context["personality_label"],
             language=language,
+            pet=self.configuredPetName(),
         )["title"]
         if not self._notify(title, body):
             self._show_information_alert(title, body)
@@ -1057,6 +1109,7 @@ class CatController(NSObject):
             result,
             personality_label=context["personality_label"],
             language=language,
+            pet=self.configuredPetName(),
         )
         alert = new_cat_alert()
         alert.setMessageText_(content["title"])
@@ -1292,6 +1345,12 @@ class CatController(NSObject):
         )
         language_item.setSubmenu_(language_menu)
         menu.addItem_(language_item)
+
+        name_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            tr(self.language, "menu_pet_name"), b"setPetName:", ""
+        )
+        name_item.setTarget_(self)
+        menu.addItem_(name_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
         r = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_refresh"), b"refresh:", "")

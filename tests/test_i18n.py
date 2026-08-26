@@ -18,11 +18,23 @@ class I18nTests(unittest.TestCase):
         stages = [i18n.chonk_stage(value, "en") for value in (50, 65, 75, 85, 92, 99)]
         self.assertEqual(tuple(stages), i18n.CHONK_STAGES_EN)
 
-    def test_korean_growth_stages_are_unchanged(self):
-        self.assertEqual(
-            [i18n.chonk_stage(value, "ko") for value in (50, 70, 85, 95)],
-            ["여유 😺", "포동 🐈", "배불러 🍙", "빵빵! 🐷"],
-        )
+    def test_korean_growth_stages_carry_no_animal_emoji(self):
+        # 사진으로 만든 테마는 고양이가 아닐 수 있다. 고양이 이모지가 붙어
+        # 있으면 수달한테 냥이라고 부르는 꼴이 된다.
+        stages = [i18n.chonk_stage(value, "ko") for value in (50, 70, 85, 95)]
+        self.assertEqual(stages, ["여유", "포동", "배불러", "빵빵!"])
+        for stage in stages:
+            with self.subTest(stage=stage):
+                self.assertTrue(all(ord(ch) < 0x1F300 for ch in stage))
+
+    def test_the_pet_name_falls_back_to_the_default_when_unset(self):
+        self.assertEqual(i18n.pet_name("", "ko"), "뚱냥이")
+        self.assertEqual(i18n.pet_name(None, "en"), "Memory Cat")
+        self.assertEqual(i18n.pet_name("   ", "ko"), "뚱냥이")
+
+    def test_the_pet_name_is_used_when_the_user_named_one(self):
+        self.assertEqual(i18n.pet_name("몽이", "ko"), "몽이")
+        self.assertEqual(i18n.pet_name("  Mongi  ", "en"), "Mongi")
 
     def test_translation_can_format_a_language_placeholder(self):
         self.assertEqual(
