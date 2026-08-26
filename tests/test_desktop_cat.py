@@ -1313,21 +1313,62 @@ class RevealTests(unittest.TestCase):
                 )
                 self.assertNotIn("OPENAI_API_KEY=sk-...", content["body"])
 
-    def test_the_alert_icon_follows_a_custom_pet_theme(self):
-        # 반려동물 사진으로 테마를 만든 사람에게 기본 고양이가 말을 걸면 안 된다.
+    def test_the_alert_icon_follows_a_custom_pet_theme_and_its_current_size(self):
+        # 반려동물 사진으로 테마를 만든 사람에게 기본 고양이가 말을 걸면 안 되고,
+        # "배불러요" 라고 말하는 창에 홀쭉한 그림이 붙어 있어도 안 된다.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "myotter").mkdir()
-            for index in range(3):
+            for index in range(11):
                 (root / "myotter" / f"cat_{index:02d}.png").write_bytes(b"png")
+
+            cases = {0.0: "cat_00.png", 50.0: "cat_05.png", 91.0: "cat_09.png",
+                     100.0: "cat_10.png"}
+            for percent, expected in cases.items():
+                with self.subTest(percent=percent):
+                    with (
+                        patch.object(desktop_cat, "USER_FRAMES_BASE", str(root)),
+                        patch.object(desktop_cat, "load_config",
+                                     return_value={"theme": "myotter"}),
+                        patch.object(desktop_cat.mc, "disk_usage",
+                                     return_value=SimpleNamespace(percent=percent)),
+                    ):
+                        chosen = desktop_cat.alert_icon_path()
+                    self.assertEqual(chosen, str(root / "myotter" / expected))
+
+    def test_the_alert_icon_still_appears_when_the_disk_cannot_be_measured(self):
+        # 측정이 실패해도 그 테마의 얼굴은 보여 준다. 아이콘 때문에 알럿이
+        # 안 뜨는 쪽이 나쁘다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "myotter").mkdir()
+            (root / "myotter" / "cat_00.png").write_bytes(b"png")
 
             with (
                 patch.object(desktop_cat, "USER_FRAMES_BASE", str(root)),
                 patch.object(desktop_cat, "load_config", return_value={"theme": "myotter"}),
+                patch.object(desktop_cat.mc, "disk_usage", side_effect=OSError("boom")),
             ):
                 chosen = desktop_cat.alert_icon_path()
 
         self.assertEqual(chosen, str(root / "myotter" / "cat_00.png"))
+
+    def test_the_cat_and_the_alert_icon_use_the_same_frame_maths(self):
+        # 둘이 갈라지면 바탕화면과 대화상자의 몸집이 달라진다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "myotter").mkdir()
+            for index in range(40):
+                (root / "myotter" / f"cat_{index:02d}.png").write_bytes(b"png")
+
+            with patch.object(desktop_cat, "USER_FRAMES_BASE", str(root)):
+                for percent in (0.0, 37.5, 91.0, 100.0):
+                    with self.subTest(percent=percent):
+                        index = desktop_cat.frame_index_for("myotter", percent)
+                        self.assertEqual(
+                            desktop_cat.frame_path("myotter", index),
+                            str(root / "myotter" / f"cat_{index:02d}.png"),
+                        )
 
     def test_the_alert_icon_falls_back_when_the_theme_is_gone(self):
         # 테마 폴더를 지웠거나 config 가 깨졌어도 알럿은 떠야 한다.
