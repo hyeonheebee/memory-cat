@@ -1182,11 +1182,29 @@ class SecondLaunchTests(unittest.TestCase):
             desktop_cat.show_already_running_alert("en")
 
         alert.setMessageText_.assert_called_once_with(
-            i18n.tr("en", "already_running_title")
+            i18n.tr("en", "already_running_title", pet="Memory Cat")
         )
         alert.setInformativeText_.assert_called_once_with(
-            i18n.tr("en", "already_running_body")
+            i18n.tr("en", "already_running_body", pet="Memory Cat")
         )
+
+    def test_already_running_alert_uses_the_name_the_user_gave(self):
+        alert = Mock()
+
+        with (
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "NSApp", Mock()),
+            patch.object(
+                desktop_cat,
+                "load_config",
+                return_value={"language": "ko", "pet_name": "몽이"},
+            ),
+        ):
+            desktop_cat.show_already_running_alert()
+
+        title = alert.setMessageText_.call_args.args[0]
+        self.assertIn("몽이", title)
+        self.assertNotIn("뚱냥이", title)
 
 
 class RevealTests(unittest.TestCase):
@@ -1384,6 +1402,88 @@ class RevealTests(unittest.TestCase):
             self.assertEqual(
                 desktop_cat.alert_icon_path(), desktop_cat.FALLBACK_ALERT_ICON_PATH
             )
+
+    def test_the_diagnosis_calls_the_pet_by_the_name_the_user_gave(self):
+        result = {
+            "source": "openai",
+            "why_slow": ["디스크가 꽉 찼어요"],
+            "one_line_advice": "정리해보세요",
+            "estimated_reclaimable": "12 GB",
+        }
+        named = desktop_cat.diagnosis_result_content(
+            result, personality_label="따뜻함", language="ko", pet="몽이"
+        )
+        self.assertIn("몽이", named["title"])
+        self.assertNotIn("뚱냥이", named["title"])
+
+        unnamed = desktop_cat.diagnosis_result_content(
+            result, personality_label="따뜻함", language="ko", pet=""
+        )
+        self.assertIn("뚱냥이", unnamed["title"])
+
+    def test_the_default_name_follows_the_language_of_the_message(self):
+        # 진단이 도는 사이 언어를 바꾸면, 문장은 한국어인데 이름만 영어가 될
+        # 수 있었다. 기본 호칭은 문장을 만드는 쪽 언어를 따라야 한다.
+        result = {
+            "source": "fallback",
+            "fallback_reason": "api_error",
+            "why_slow": ["x"],
+            "one_line_advice": "y",
+            "estimated_reclaimable": "1 GB",
+        }
+        for language, expected in (("ko", "뚱냥이"), ("en", "Memory Cat")):
+            with self.subTest(language=language):
+                content = desktop_cat.diagnosis_result_content(
+                    result, personality_label="따뜻함", language=language, pet=None
+                )
+                self.assertIn(expected, content["title"])
+
+    def test_naming_the_pet_stores_a_trimmed_name(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT)
+        controller.language = "ko"
+        controller.refresh_ = Mock()
+        controller._notify = Mock(return_value=True)
+        alert = Mock()
+        alert.runModal.return_value = desktop_cat.NSAlertFirstButtonReturn
+        field = Mock()
+        field.stringValue.return_value = "  몽이  "
+
+        with (
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "NSApp", Mock()),
+            patch.object(desktop_cat, "NSTextField", Mock(
+                **{"alloc.return_value.initWithFrame_.return_value": field})),
+            patch.object(desktop_cat, "save_config", return_value=True) as save,
+        ):
+            controller.setPetName_(None)
+
+        self.assertEqual(controller.cfg["pet_name"], "몽이")
+        save.assert_called_once_with(controller.cfg)
+
+    def test_clearing_the_name_goes_back_to_the_default(self):
+        # 이름을 지우는 것도 선택이다. 빈 칸이면 기본 호칭으로 돌아가야 한다.
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT, pet_name="몽이")
+        controller.language = "ko"
+        controller.refresh_ = Mock()
+        controller._notify = Mock(return_value=True)
+        alert = Mock()
+        alert.runModal.return_value = desktop_cat.NSAlertFirstButtonReturn
+        field = Mock()
+        field.stringValue.return_value = "   "
+
+        with (
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "NSApp", Mock()),
+            patch.object(desktop_cat, "NSTextField", Mock(
+                **{"alloc.return_value.initWithFrame_.return_value": field})),
+            patch.object(desktop_cat, "save_config", return_value=True),
+        ):
+            controller.setPetName_(None)
+
+        self.assertEqual(controller.cfg["pet_name"], "")
+        self.assertEqual(controller.petName(), "뚱냥이")
 
 
 if __name__ == "__main__":
