@@ -1,0 +1,121 @@
+name: Build Intel macOS app
+
+# 애플 실리콘 zip 은 손으로 만들어 올리지만, 인텔용은 인텔 맥이 있어야 한다.
+# psutil / jiter / Pillow 에는 universal2 휠이 없어서 한 대에서 두 아키텍처를
+# 다 만들 수 없다. macos-13 러너가 x86_64 라 여기서 굽는다.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # macos-14 부터는 arm64 다. 인텔 산출물을 만들려면 13 이어야 한다.
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 번들에 넣을 인터프리터. 프레임워크 빌드여야 번들 정체성이 생긴다.
+          python-version: '3.12'
+
+      - name: 러너가 정말 인텔인지 확인
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          echo "runner arch: $arch"
+          if [ "$arch" != "x86_64" ]; then
+            echo "::error::인텔 러너가 아닙니다 ($arch). runs-on 을 확인하세요."
+            exit 1
+          fi
+
+      - name: 의존성 설치
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          # 이 순서를 바꾸면 안 된다. 낡은 pip 은 pyobjc-core 휠을 못 찾고
+          # 소스 빌드로 넘어가 컴파일러가 없다며 실패한다.
+          ./.venv/bin/python -m pip install --upgrade pip
+          ./.venv/bin/python -m pip install -r requirements.txt
+
+      - name: 번들 조립
+        run: |
+          set -euo pipefail
+          # --skip-migration: 러너 홈에는 옮길 사용자 데이터가 없다.
+          # --launch-agent 생략: CI 에서 로그인 항목을 등록할 이유가 없다.
+          ./.venv/bin/python macos/build_app.py \
+            --source . \
+            --app "dist/Memory Cat.app" \
+            --skip-migration
+
+      - name: 산출물 검증
+        run: |
+          set -euo pipefail
+          app="dist/Memory Cat.app"
+
+          echo "--- 아키텍처 ---"
+          # 번들 안 모든 Mach-O 가 x86_64 를 지원해야 인텔 맥에서 돈다.
+          bad=0
+          while IFS= read -r file; do
+            archs="$(lipo -archs "$file" 2>/dev/null || true)"
+            [ -z "$archs" ] && continue
+            case "$archs" in
+              *x86_64*) ;;
+              *) echo "::error::x86_64 미지원: ${file#"$app/"} [$archs]"; bad=1 ;;
+            esac
+          done < <(find "$app" -type f \( -name '*.so' -o -name '*.dylib' -o -perm +111 \))
+          [ "$bad" -eq 0 ] || exit 1
+
+          echo "--- 번들 정체성 ---"
+          # 프레임워크 인터프리터를 못 찾으면 build_app.py 는 경고만 하고 넘어간다.
+          # 그대로 배포하면 알림이 "Python" 이름으로 뜬다. 여기서 막는다.
+          cat > "$app/Contents/Resources/_ci_probe.py" <<'PROBE'
+          from Foundation import NSBundle
+          import sys
+          bundle = NSBundle.mainBundle()
+          identifier = bundle.bundleIdentifier()
+          print("bundleIdentifier:", identifier)
+          print("python:", sys.version.split()[0])
+          if identifier != "com.memorycat.desktop":
+              raise SystemExit(f"기대한 번들 ID 가 아닙니다: {identifier}")
+          PROBE
+          sed 's|\$RES/desktop_cat\.py|$RES/_ci_probe.py|' \
+            "$app/Contents/MacOS/MemoryCat" > "$app/Contents/MacOS/_ci_probe"
+          chmod +x "$app/Contents/MacOS/_ci_probe"
+          "$app/Contents/MacOS/_ci_probe"
+          rm -f "$app/Contents/MacOS/_ci_probe" "$app/Contents/Resources/_ci_probe.py"
+
+          echo "--- 개인 정보가 섞이지 않았는지 ---"
+          if [ -f "$app/Contents/Resources/.env" ]; then
+            echo "::error::.env 가 번들에 들어갔습니다"; exit 1
+          fi
+
+          echo "--- Info.plist ---"
+          plutil -lint "$app/Contents/Info.plist"
+
+      - name: zip 만들기
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/Memory Cat.app" "Memory-Cat-macOS-Intel.zip"
+          shasum -a 256 Memory-Cat-macOS-Intel.zip | tee checksum.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Memory-Cat-macOS-Intel
+          path: |
+            Memory-Cat-macOS-Intel.zip
+            checksum.txt
+
+      # 릴리스에서 실행됐을 때만 붙인다. 수동 실행은 아티팩트로만 받아 보고
+      # 확인한 뒤 사람이 올린다.
+      - name: 릴리스에 첨부
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" Memory-Cat-macOS-Intel.zip --clobber
