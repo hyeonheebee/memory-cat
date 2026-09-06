@@ -11,10 +11,12 @@
    확인되는 물건이라 회귀가 조용히 지나가기 쉽다.
 """
 
+import ast
 import importlib.util
 import os
 import plistlib
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -440,6 +442,112 @@ class AppPathsTests(unittest.TestCase):
                 candidates = apppaths.dotenv_candidates()
             self.assertEqual(candidates[0], Path(temp) / ".env")
             self.assertEqual(candidates[1], apppaths.source_dir() / ".env")
+
+
+class FrozenSourceDirTests(unittest.TestCase):
+    """``_resolve_source_dir()`` 은 세 가지 실행 형태를 모두 맞춰야 한다.
+
+    저장소 직접 실행 / ``build_app.py`` 번들(소스를 .py 그대로 넣어서 frozen 이
+    아니다) / PyInstaller 릴리스 번들(frozen, ``sys._MEIPASS``).
+    """
+
+    def test_repo_and_local_bundle_look_next_to_this_file(self):
+        expected = Path(apppaths.__file__).resolve().parent
+        with patch.object(sys, "frozen", False, create=True):
+            self.assertEqual(apppaths._resolve_source_dir(), expected)
+        # `frozen` 속성 자체가 없는 평범한 인터프리터도 같은 답이어야 한다.
+        with patch.dict(sys.__dict__):
+            sys.__dict__.pop("frozen", None)
+            self.assertEqual(apppaths._resolve_source_dir(), expected)
+
+    def test_pyinstaller_bundle_uses_meipass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            meipass = Path(temp).resolve()
+            with patch.object(sys, "frozen", True, create=True), \
+                 patch.object(sys, "_MEIPASS", str(meipass), create=True):
+                self.assertEqual(apppaths._resolve_source_dir(), meipass)
+
+    def test_frozen_without_meipass_falls_back_to_this_file(self):
+        # cx_Freeze 처럼 _MEIPASS 를 안 넣는 freezer 에서 죽지 말고, 이 변경
+        # 이전과 같은 동작으로 돌아가야 한다.
+        expected = Path(apppaths.__file__).resolve().parent
+        with patch.dict(sys.__dict__), \
+                patch.object(sys, "frozen", True, create=True):
+            sys.__dict__.pop("_MEIPASS", None)
+            self.assertEqual(apppaths._resolve_source_dir(), expected)
+
+    def test_module_level_source_dir_matches_the_resolver(self):
+        # import 시점에 한 번만 계산해서 캐시한다. 함수와 어긋나면 안 된다.
+        self.assertEqual(apppaths.source_dir(), apppaths._resolve_source_dir())
+
+
+class ReleaseSpecTests(unittest.TestCase):
+    """릴리스 스펙이 기본 테마만, 그리고 전부 담는지 지킨다.
+
+    스펙이 개인 테마(``mypet*`` 등 실제 반려동물 사진)를 담으면 되돌릴 수 없고,
+    기본 테마를 빠뜨리면 사용자가 그 테마를 고른 순간 프레임을 못 읽는다.
+    """
+
+    SPEC = Path(__file__).resolve().parent.parent / "macos" / "memorycat.spec"
+
+    def test_spec_takes_the_theme_list_from_apppaths(self):
+        # 목록을 베껴 적으면 한쪽만 고쳤을 때 조용히 어긋난다.
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn("BUNDLED_THEMES = apppaths.BUNDLED_THEMES", source)
+
+    def _tree(self):
+        # 주석·docstring 에 어떤 단어가 있는지는 상관없다. 실제로 실행되는
+        # 코드만 봐야 하므로 텍스트 검색이 아니라 AST 로 읽는다.
+        return ast.parse(self.SPEC.read_text(encoding="utf-8"))
+
+    def _code_strings(self):
+        return [
+            node.value
+            for node in ast.walk(self._tree())
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+
+    def test_spec_never_names_a_theme_outside_the_defaults(self):
+        # 개인 테마 이름이 코드에 들어가면 즉시 실패한다.
+        docstrings = set()
+        tree = self._tree()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc:
+                    docstrings.add(doc)
+        for text in self._code_strings():
+            if text in docstrings:
+                continue
+            for name in ("mypet", "gandi-", "dog-hero", "livetest"):
+                self.assertNotIn(name, text)
+
+    def test_spec_ships_only_frame_files(self):
+        # 폴더를 통째로 넣으면 추적 안 되는 잡파일(_preview.png)까지 따라간다.
+        self.assertIn("cat_*.png", self._code_strings())
+
+    def test_theme_guards_survive_python_dash_O(self):
+        # `python -O` 로 빌드하면 assert 문이 통째로 사라진다. 개인 사진 유출
+        # 방어선을 인터프리터 플래그 하나로 꺼지는 문에 두면 안 된다.
+        asserts = [n for n in ast.walk(self._tree()) if isinstance(n, ast.Assert)]
+        self.assertEqual(
+            asserts, [],
+            "스펙에 assert 가 있다. -O 빌드에서 사라지므로 raise 로 바꿔야 한다.",
+        )
+
+    def test_minimum_system_version_is_declared(self):
+        # 이 키가 없으면 하한 미만 macOS 에서 dyld 가 조용히 죽인다.
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn("LSMinimumSystemVersion", source)
+
+    def test_executable_name_matches_the_local_install_bundle(self):
+        # LaunchAgent 가 Contents/MacOS/<이 이름> 을 절대경로로 가리킨다.
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn(f'name="{build_app.EXECUTABLE_NAME}"', source)
+
+    def test_both_build_paths_stamp_the_same_version(self):
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn(f'VERSION = "{build_app.VERSION}"', source)
 
 
 if __name__ == "__main__":

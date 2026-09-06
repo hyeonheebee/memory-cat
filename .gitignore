@@ -15,7 +15,10 @@ cat.log
 # 빌드 / 배포 산출물
 build/
 dist/
+# PyInstaller 가 자동 생성하는 스펙은 버린다. 릴리스 빌드에 쓰는
+# macos/memorycat.spec 은 손으로 쓴 소스라 예외로 둔다.
 *.spec
+!macos/memorycat.spec
 *.zip
 
 # 작업용 원본 이미지 (사용자가 직접 넣음)

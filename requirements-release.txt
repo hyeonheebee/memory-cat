@@ -1,0 +1,13 @@
+# 릴리스 zip 을 굽는 데만 필요한 것. 앱 실행에는 필요 없다.
+#
+#   python3.12 -m venv .relvenv
+#   .relvenv/bin/pip install -r requirements.txt -r requirements-release.txt
+#   .relvenv/bin/python -m PyInstaller --noconfirm --clean macos/memorycat.spec
+#
+# 빌드에 쓰는 인터프리터가 곧 번들에 들어가는 인터프리터다. Homebrew
+# python@3.12 의 framework 빌드를 쓴다. 자세한 내용은 macos/memorycat.spec.
+#
+# 상한(<7)은 requirements.txt 와 같은 이유다 — 메이저 업그레이드가 예고 없이
+# 릴리스 빌드를 바꾸면 안 된다. 하한은 실제로 검증한 가장 오래된 버전.
+# v0.2.0 은 6.22.2 로 구웠다.
+pyinstaller>=6.20,<7
