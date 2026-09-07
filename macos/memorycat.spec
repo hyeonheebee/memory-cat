@@ -134,11 +134,18 @@ app = BUNDLE(  # noqa: F821
         "CFBundleDisplayName": "Memory Cat",
         "CFBundleShortVersionString": VERSION,
         "CFBundleVersion": VERSION,
-        # 바이너리의 LC_BUILD_VERSION minos 와 반드시 같이 움직인다.
-        # 이 키가 없으면 하한 미만 macOS 에서 Launch Services 가 막지 않고 그냥
-        # 띄우고, dyld 가 프로세스를 즉시 죽인다. LSUIElement 라 창도 에러도
-        # 안 뜨는 "조용한 무반응" 이 된다 — v0.1.0 과 똑같은 증상.
-        # 값을 바꿀 때는 `vtool -show-build Contents/MacOS/MemoryCat` 로 확인한다.
+        # 번들 전체의 하한은 **가장 높은 minos 를 요구하는 바이너리** 가 정한다.
+        # 이 값을 낮게 적으면 그 사이 macOS 에서 Launch Services 가 막지 않고
+        # 그냥 띄우고, dyld 가 프로세스를 죽인다. LSUIElement 라 창도 에러도
+        # 안 뜨는 "조용한 무반응" — v0.1.0 을 못 쓰게 만든 그 증상이다.
+        #
+        # 부트로더(Contents/MacOS/MemoryCat) 하나만 보면 안 된다. 그건 번들에서
+        # 가장 낮은 값을 갖기 때문에 무슨 값을 적어도 통과한다. 하한을 올리는
+        # 것은 대개 파이썬 본체와 그 표준 라이브러리 .so 들이다.
+        #
+        # 확인은 tests/test_macos_bundle.py 의 BuiltBundleFloorTests 가 한다.
+        # 빌드 후 반드시 돌린다:
+        #     MEMORY_CAT_BUNDLE="dist/Memory Cat.app" python -m pytest -q
         "LSMinimumSystemVersion": "11.0",
         # 독에 아이콘을 띄우지 않는 배경 앱. 바탕화면 위 고양이가 본체다.
         "LSUIElement": True,

@@ -1,13 +1,47 @@
-# 릴리스 zip 을 굽는 데만 필요한 것. 앱 실행에는 필요 없다.
+# 릴리스 zip 을 굽는 데만 필요한 것. 앱 실행에도, 개발에도 필요 없다.
 #
-#   python3.12 -m venv .relvenv
-#   .relvenv/bin/pip install -r requirements.txt -r requirements-release.txt
+# ─────────────────────────────────────────────────────────────────────
+# 어떤 파이썬으로 굽느냐가 "누가 이 앱을 쓸 수 있는가" 를 정한다
+# ─────────────────────────────────────────────────────────────────────
+# PyInstaller 는 빌드에 쓴 인터프리터를 번들 안으로 **복사한다**. 그래서 굽는
+# 사람 맥에 파이썬이 있느냐가 아니라, 상자에 어떤 부품이 들어가느냐의 문제다.
+# 파이썬 바이너리에 새겨진 최소 macOS(minos)가 그대로 앱의 하한이 된다.
+#
+#   Homebrew python@3.12   minos 15.0   arm64            ← 쓰면 안 된다
+#   python.org  3.12.10    minos 11.0   x86_64 + arm64   ← 이걸 쓴다
+#
+# Homebrew 는 병(bottle)을 빌드하는 기계의 OS 기준으로 굽는다. Sequoia 에서
+# 설치했으면 "macOS 15 이상" 이 박히고, 그게 복사되어 macOS 11~14 사용자는
+# 앱이 조용히 죽는다(LSUIElement 라 창도 에러도 안 뜬다). v0.2.0 을 준비하며
+# 실제로 이 함정에 한 번 빠졌다.
+#
+# python.org 설치본(https://www.python.org/downloads/macos/)의 `macos11` 접미사
+# 파일을 쓴다. 3.12 는 3.12.10 이 바이너리 설치본이 있는 마지막 버전이다
+# (이후 보안 릴리스는 소스만 배포된다).
+#
+# ─────────────────────────────────────────────────────────────────────
+# 릴리스 굽는 순서
+# ─────────────────────────────────────────────────────────────────────
+#   /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 \
+#       -m venv .relvenv
+#   .relvenv/bin/pip install -r requirements.txt "numpy<2" \
+#       -r requirements-release.txt
 #   .relvenv/bin/python -m PyInstaller --noconfirm --clean macos/memorycat.spec
 #
-# 빌드에 쓰는 인터프리터가 곧 번들에 들어가는 인터프리터다. Homebrew
-# python@3.12 의 framework 빌드를 쓴다. 자세한 내용은 macos/memorycat.spec.
+#   # 하한이 실제로 맞는지 반드시 확인한다. 이 검사가 없으면 조용히 틀린다.
+#   MEMORY_CAT_BUNDLE="dist/Memory Cat.app" python -m pytest -q
 #
+#   # 포장은 ditto 로. zip -r 은 ad-hoc 서명을 깨뜨린다.
+#   ditto -c -k --sequesterRsrc --keepParent \
+#       "dist/Memory Cat.app" "Memory-Cat-macOS-AppleSilicon.zip"
+#
+# ─────────────────────────────────────────────────────────────────────
+
 # 상한(<7)은 requirements.txt 와 같은 이유다 — 메이저 업그레이드가 예고 없이
 # 릴리스 빌드를 바꾸면 안 된다. 하한은 실제로 검증한 가장 오래된 버전.
-# v0.2.0 은 6.22.2 로 구웠다.
 pyinstaller>=6.20,<7
+
+# numpy 2.x 의 arm64 휠은 macOS 14 를 요구한다. 앱은 requirements.txt 에서
+# >=1.24,<3 을 허용하므로, 릴리스 빌드에서만 1.x 로 낮춰 하한을 11.0 으로
+# 유지한다. 개발·소스 설치는 2.x 를 그대로 써도 된다.
+numpy<2

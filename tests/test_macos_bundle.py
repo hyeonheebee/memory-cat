@@ -537,6 +537,8 @@ class ReleaseSpecTests(unittest.TestCase):
 
     def test_minimum_system_version_is_declared(self):
         # 이 키가 없으면 하한 미만 macOS 에서 dyld 가 조용히 죽인다.
+        # 값이 맞는지는 BuiltBundleFloorTests 가 실물로 검사한다 — 여기서
+        # 문자열만 보고 끝내면 11.0 이든 99.0 이든 통과한다.
         source = self.SPEC.read_text(encoding="utf-8")
         self.assertIn("LSMinimumSystemVersion", source)
 
@@ -548,6 +550,134 @@ class ReleaseSpecTests(unittest.TestCase):
     def test_both_build_paths_stamp_the_same_version(self):
         source = self.SPEC.read_text(encoding="utf-8")
         self.assertIn(f'VERSION = "{build_app.VERSION}"', source)
+
+
+#: Mach-O 로드 커맨드. ``LC_BUILD_VERSION`` 이 그 바이너리가 요구하는 최소
+#: OS(minos)를 담는다. 구형 툴체인은 ``LC_VERSION_MIN_MACOSX`` 를 쓴다.
+LC_BUILD_VERSION = 0x32
+LC_VERSION_MIN_MACOSX = 0x24
+
+MH_MAGIC_64 = 0xFEEDFACF
+MH_CIGAM_64 = 0xCFFAEDFE
+FAT_MAGICS = (0xCAFEBABE, 0xBEBAFECA, 0xCAFEBABF, 0xBFBAFECA)
+
+
+def _triple(parts):
+    """버전 조각을 항상 3칸짜리 튜플로. 길이가 달라 생기는 오비교를 막는다."""
+    nums = [int(part) for part in parts][:3]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def macho_minos(blob):
+    """Mach-O 하나가 요구하는 최소 macOS 를 ``(major, minor, patch)`` 로.
+
+    ``vtool``/``otool`` 을 부르지 않는 이유는 이 저장소가 서브프로세스를 쓰지
+    않기 때문이다(`macos/build_app.py` 첫 docstring). 포맷은 단순하다 —
+    64비트 헤더 32바이트 뒤로 ``(cmd 4바이트, cmdsize 4바이트, 본문)`` 반복.
+
+    Mach-O 가 아니거나 버전 로드 커맨드가 없으면 ``None``.
+    """
+    if len(blob) < 32:
+        return None
+    magic = struct.unpack("<I", blob[:4])[0]
+    if magic in FAT_MAGICS:
+        # universal 바이너리. 이 저장소는 단일 아키텍처만 굽는다.
+        return None
+    if magic == MH_MAGIC_64:
+        endian = "<"
+    elif magic == MH_CIGAM_64:
+        endian = ">"
+    else:
+        return None
+
+    ncmds = struct.unpack(endian + "I", blob[16:20])[0]
+    offset = 32
+    for _ in range(ncmds):
+        if offset + 8 > len(blob):
+            return None
+        cmd, cmdsize = struct.unpack(endian + "II", blob[offset:offset + 8])
+        if cmdsize < 8:
+            return None
+        if cmd == LC_BUILD_VERSION and offset + 16 <= len(blob):
+            raw = struct.unpack(endian + "I", blob[offset + 12:offset + 16])[0]
+            return _triple((raw >> 16, (raw >> 8) & 0xFF, raw & 0xFF))
+        if cmd == LC_VERSION_MIN_MACOSX and offset + 12 <= len(blob):
+            raw = struct.unpack(endian + "I", blob[offset + 8:offset + 12])[0]
+            return _triple((raw >> 16, (raw >> 8) & 0xFF, raw & 0xFF))
+        offset += cmdsize
+    return None
+
+
+class BuiltBundleFloorTests(unittest.TestCase):
+    """빌드된 번들의 ``LSMinimumSystemVersion`` 이 실물과 맞는지 본다.
+
+    번들 전체의 하한은 **가장 높은 minos 를 요구하는 바이너리** 가 정한다.
+    이걸 낮게 적으면 그 사이 버전의 macOS 에서 Launch Services 가 막지 않고
+    그냥 띄우고, dyld 가 프로세스를 죽인다. ``LSUIElement`` 라 창도 에러도
+    없이 아무 일도 안 일어난다 — v0.1.0 을 못 쓰게 만든 바로 그 증상이다.
+
+    v0.2.0 직전에 실제로 이걸 틀렸다. 스펙에는 11.0 이라고 적혀 있었지만
+    Homebrew python@3.12 병이 Sequoia 에서 구워져서 실제 하한은 15.0 이었다.
+    부트로더(`Contents/MacOS/MemoryCat`)만 확인하면 번들에서 유일하게 11.0 인
+    놈이라 통과해 버린다. **모든** Mach-O 를 봐야 한다.
+
+    번들이 없으면 건너뛴다. 릴리스 전에는 반드시 빌드한 뒤 돌린다.
+    """
+
+    #: 빌드 산출물 위치. `--distpath` 를 다른 데로 줬으면 이 환경변수로 알린다.
+    BUNDLE_ENV = "MEMORY_CAT_BUNDLE"
+
+    def setUp(self):
+        override = os.environ.get(self.BUNDLE_ENV)
+        self.bundle = (
+            Path(override).expanduser()
+            if override
+            else _REPO / "dist" / "Memory Cat.app"
+        )
+        if not (self.bundle / "Contents" / "Info.plist").is_file():
+            self.skipTest(
+                f"빌드된 번들이 없습니다: {self.bundle} "
+                f"(다른 데 있으면 {self.BUNDLE_ENV} 로 알려주세요)"
+            )
+
+    def _declared(self):
+        with open(self.bundle / "Contents" / "Info.plist", "rb") as handle:
+            info = plistlib.load(handle)
+        raw = info.get("LSMinimumSystemVersion")
+        self.assertIsNotNone(raw, "LSMinimumSystemVersion 이 없습니다")
+        # "15" / "15.0" / "15.0.0" 이 다 같은 값이어야 한다. 길이가 다른 튜플을
+        # 그냥 비교하면 (15, 0) < (15, 0, 0) 이라 맞는 값도 실패한다.
+        return _triple(str(raw).split("."))
+
+    def _actual(self):
+        """번들 안 모든 Mach-O 중 가장 높은 minos 와, 그걸 요구한 파일들."""
+        highest = (0, 0, 0)
+        blame = []
+        for path in sorted(self.bundle.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                minos = macho_minos(path.read_bytes())
+            except OSError:
+                continue
+            if minos is None:
+                continue
+            if minos > highest:
+                highest, blame = minos, [path]
+            elif minos == highest:
+                blame.append(path)
+        return highest, blame
+
+    def test_declared_floor_is_not_lower_than_the_binaries_require(self):
+        declared = self._declared()
+        actual, blame = self._actual()
+        self.assertNotEqual(actual, (0, 0, 0), "Mach-O 를 하나도 못 찾았습니다")
+        names = ", ".join(p.name for p in blame[:5])
+        self.assertGreaterEqual(
+            declared, actual,
+            f"선언한 하한 {declared} 이 실제 {actual} 보다 낮습니다. "
+            f"그 사이 macOS 에서 조용히 죽습니다. 요구한 파일: {names}",
+        )
 
 
 if __name__ == "__main__":
