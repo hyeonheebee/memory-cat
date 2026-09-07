@@ -115,7 +115,53 @@ deleted.
 | Madness | A sparkly, wide-eyed chibi cat |
 | Wake-up call | An intentionally derpy reminder to check your drive |
 
+## Download
+
+Prebuilt builds live on the [releases page](https://github.com/hyeonheebee/memory-cat/releases/latest).
+Nothing to install — unzip and run.
+
+| | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon) | `Memory-Cat-macOS-AppleSilicon.zip` | macOS 11 or later |
+| macOS (Intel) | `Memory-Cat-macOS-Intel.zip` | macOS 11 or later |
+| Windows | `MemoryCat.exe` | x64. No AI features — and no network requests at all |
+
+Prefer to build it yourself, or want it to start automatically at login?
+Use [Install on macOS](#install-on-macos) below instead.
+
+### macOS will refuse to open it the first time
+
+These builds are **not code-signed** — I have no Apple Developer certificate.
+macOS therefore cannot verify them and blocks the first launch. The app is fine;
+macOS just has no way to know that. Verify the SHA-256 in the release notes if
+you want to be sure you got the file I published.
+
+**On macOS 15 (Sequoia) and later**, the dialog offers only *Done* and *Move to
+Trash* — right-clicking and choosing *Open* no longer works. Do this instead:
+
+1. Double-click the app once and press **Done** on the warning.
+2. Open **System Settings → Privacy & Security**, scroll to the bottom.
+3. Next to *"Memory Cat" was blocked*, press **Open Anyway**.
+
+That entry only appears right after a blocked launch, so do step 1 first.
+
+**On macOS 11–14**, right-click the app and choose **Open**, then **Open** again
+in the dialog.
+
+You only have to do this once.
+
+### Removing a downloaded build
+
+Move the app to the Trash. Your settings and any themes you made stay in
+`~/Library/Application Support/Memory Cat/` — delete that folder too if you want
+them gone. (Downloaded builds do not register a login item, so there is nothing
+else to clean up. The `uninstall_mac.command` mentioned below is only for
+installs made by `install_mac.command`.)
+
 ## Install on macOS
+
+This path builds the app from source on your own machine and sets it to start
+at login. It also works on Intel Macs and does not trip the warning above.
 
 ```bash
 git clone https://github.com/hyeonheebee/memory-cat.git
@@ -223,12 +269,22 @@ term:
 > positive (a `--onefile` binary unpacks itself into a temp folder at startup,
 > which resembles malware behaviour). That is expected here, but **please do not
 > learn to click through unsigned-binary warnings in general** — it is a
-> genuinely dangerous habit. Do not run a `MemoryCat.exe` you got from anyone
-> else; there is no way to verify it was built from this repository. If you want
-> assurance, skip the executable and run the Python script directly:
-> `windows/windows_cat.pyw` is a single readable file you can inspect before
-> running it. Building the `.exe` yourself, on your own machine, is the only
-> use it is recommended for.
+> genuinely dangerous habit. Do not run a `MemoryCat.exe` that reached you by
+> any other route — a forwarded file, a mirror, a chat attachment — because
+> there is no way to tell it was built from this repository.
+>
+> The build on this repository's [releases page](https://github.com/hyeonheebee/memory-cat/releases/latest)
+> is the one exception, and only if you check it: each release note publishes
+> the SHA-256 of the file, so compare it before running.
+>
+> ```powershell
+> Get-FileHash .\MemoryCat.exe -Algorithm SHA256
+> ```
+>
+> If you would rather not trust any binary, skip the executable and run the
+> Python script directly: `windows/windows_cat.pyw` is a single readable file
+> you can inspect before running it. Building the `.exe` yourself, on your own
+> machine, is always the safest option.
 
 ## Make your own theme 🎨
 
@@ -279,6 +335,10 @@ Code-generated built-in themes can be rebuilt with `python generate_frames.py`.
 desktop_cat.py      macOS desktop app and menus (PyObjC)
 apppaths.py         where bundled assets end and user data begins
 macos/build_app.py  assembles Memory Cat.app and the LaunchAgent plist
+                    (local install; the bundle it makes needs the Python it
+                    was built with)
+macos/memorycat.spec  PyInstaller spec for the release zips (self-contained:
+                    Python and every dependency live inside the bundle)
 brain.py            GPT-5.6 performance diagnosis and safe Trash workflow
 personality.py      personality presets and custom prompt compiler
 i18n.py             English/Korean UI strings and chonk-stage names
