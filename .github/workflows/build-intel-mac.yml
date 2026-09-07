@@ -1,0 +1,179 @@
+name: Build Intel macOS app
+
+# 애플 실리콘 zip 은 손으로 만들어 올리지만, 인텔용은 인텔 맥이 있어야 한다.
+# psutil / jiter / Pillow 에는 universal2 휠이 없어서 한 대에서 두 아키텍처를
+# 다 만들 수 없다. macos-13 러너가 x86_64 라 여기서 굽는다.
+#
+# 굽는 방법은 `macos/memorycat.spec`(PyInstaller) 하나뿐이다.
+# `macos/build_app.py` 로 구우면 안 된다 — 그건 로컬 설치용 조립기라서 굽는
+# 기계의 인터프리터를 절대경로로 물고 표준 라이브러리도 거기서 빌려 쓴다.
+# 러너에서 돌리면 그 자리에 hostedtoolcache 경로가 박히는데, 그건 어느
+# 사용자 맥에도 없다. 받는 사람은 LSUIElement 때문에 에러도 창도 없이
+# "아무 일도 안 일어남" 만 겪는다. v0.1.0 의 macOS zip 이 정확히 그랬다.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # macos-14 부터는 arm64 다. 인텔 산출물을 만들려면 13 이어야 한다.
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 러너가 정말 인텔인지 확인
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          echo "runner arch: $arch"
+          if [ "$arch" != "x86_64" ]; then
+            echo "::error::인텔 러너가 아닙니다 ($arch). runs-on 을 확인하세요."
+            exit 1
+          fi
+
+      - name: 의존성 설치
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          # 이 순서를 바꾸면 안 된다. 낡은 pip 은 pyobjc-core 휠을 못 찾고
+          # 소스 빌드로 넘어가 컴파일러가 없다며 실패한다.
+          ./.venv/bin/python -m pip install --upgrade pip
+          # numpy<2 인 이유와 릴리스 빌드 규칙은 requirements-release.txt 참고.
+          ./.venv/bin/python -m pip install \
+            -r requirements.txt "numpy<2" \
+            -r requirements-release.txt \
+            -r requirements-dev.txt
+
+      - name: 번들 굽기
+        run: |
+          set -euo pipefail
+          ./.venv/bin/python -m PyInstaller --noconfirm --clean \
+            macos/memorycat.spec
+
+      - name: 자립성 검증 (이게 핵심이다)
+        run: |
+          set -euo pipefail
+          app="dist/Memory Cat.app"
+
+          echo "--- 굽는 기계에 묶인 절대경로가 없는지 ---"
+          # 시스템 라이브러리와 @rpath/@loader_path 외의 절대경로가 하나라도
+          # 있으면 그 경로가 없는 맥에서 dyld 가 프로세스를 죽인다.
+          # v0.1.0 을 못 쓰게 만든 결함이 정확히 이것이고, 예전 워크플로는
+          # 이 검사가 없어서 통과시켰다.
+          bad=0
+          while IFS= read -r file; do
+            [ -n "$(lipo -archs "$file" 2>/dev/null || true)" ] || continue
+            while IFS= read -r dep; do
+              case "$dep" in
+                /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*) ;;
+                *) echo "::error::외부 절대경로: ${file#"$app/"} -> $dep"; bad=1 ;;
+              esac
+            done < <(otool -L "$file" 2>/dev/null | tail -n +2 | awk '{print $1}')
+          done < <(find "$app" -type f ! -type l)
+          [ "$bad" -eq 0 ] || exit 1
+          echo "OK: 외부 절대경로 0건"
+
+          echo "--- 굽는 기계의 경로 문자열이 남지 않았는지 ---"
+          if grep -rlE "hostedtoolcache|/Users/runner/work" "$app" 2>/dev/null \
+              | grep -v "site-packages/\(jiter\|pydantic_core\)" | head -5; then
+            echo "::warning::러너 경로 문자열이 남아 있습니다(위 목록 확인)"
+          fi
+
+          echo "--- 아키텍처 ---"
+          # 번들 안 모든 Mach-O 가 x86_64 를 지원해야 인텔 맥에서 돈다.
+          bad=0
+          while IFS= read -r file; do
+            archs="$(lipo -archs "$file" 2>/dev/null || true)"
+            [ -z "$archs" ] && continue
+            case "$archs" in
+              *x86_64*) ;;
+              *) echo "::error::x86_64 미지원: ${file#"$app/"} [$archs]"; bad=1 ;;
+            esac
+          done < <(find "$app" -type f ! -type l)
+          [ "$bad" -eq 0 ] || exit 1
+          echo "OK: 전부 x86_64 지원"
+
+          echo "--- 번들 정체성 ---"
+          plutil -lint "$app/Contents/Info.plist"
+          got="$(plutil -extract CFBundleIdentifier raw \
+            "$app/Contents/Info.plist")"
+          if [ "$got" != "com.memorycat.desktop" ]; then
+            echo "::error::기대한 번들 ID 가 아닙니다: $got"; exit 1
+          fi
+          # 실행 파일 이름이 바뀌면 install_mac.command 로 깐 사람의
+          # LaunchAgent 가 깨진다. 그쪽은 절대경로로 MemoryCat 을 가리킨다.
+          exe="$(plutil -extract CFBundleExecutable raw \
+            "$app/Contents/Info.plist")"
+          if [ "$exe" != "MemoryCat" ]; then
+            echo "::error::실행 파일 이름이 바뀌었습니다: $exe"; exit 1
+          fi
+          echo "OK: $got / $exe"
+
+          echo "--- 개인 정보가 섞이지 않았는지 ---"
+          # 개발용 frames/ 에는 실제 반려동물 사진으로 만든 테마가 쌓인다.
+          # 한 번 나가면 되돌릴 수 없다.
+          leak="$(find "$app" \( -name '.env' -o -name 'config.json' \
+            -o -iname '*mypet*' -o -iname '*gandi*' -o -iname '*dog-hero*' \
+            -o -iname '*livetest*' \) | head -5)"
+          if [ -n "$leak" ]; then
+            echo "::error::번들에 개인 자료가 있습니다:"; echo "$leak"; exit 1
+          fi
+          echo "OK: 개인 자료 0건"
+
+      - name: OS 하한이 선언값과 맞는지
+        # 번들 안 모든 Mach-O 의 minos 를 읽어 가장 높은 값과 Info.plist 의
+        # LSMinimumSystemVersion 을 대조한다. 낮게 적으면 그 사이 macOS 에서
+        # 조용히 죽는다. 러너 인터프리터가 하한을 올리면 여기서 걸린다.
+        run: |
+          set -euo pipefail
+          MEMORY_CAT_BUNDLE="dist/Memory Cat.app" \
+            ./.venv/bin/python -m pytest -q \
+            tests/test_macos_bundle.py::BuiltBundleFloorTests
+
+      - name: 전체 테스트
+        run: |
+          set -euo pipefail
+          MEMORY_CAT_HOME="$RUNNER_TEMP/memory-cat-home" \
+            ./.venv/bin/python -m pytest -q
+
+      - name: zip 만들기
+        run: |
+          set -euo pipefail
+          # ditto 로만 포장한다. zip -r 은 심볼릭 링크를 따라가서 실체를
+          # 복사하고, 그 과정에서 ad-hoc 서명이 깨진다. 그러면 macOS 가
+          # "손상되었기 때문에 열 수 없습니다" 를 띄운다.
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/Memory Cat.app" "Memory-Cat-macOS-Intel.zip"
+          shasum -a 256 Memory-Cat-macOS-Intel.zip | tee checksum.txt
+
+      - name: 포장한 zip 을 다시 풀어 서명 확인
+        run: |
+          set -euo pipefail
+          ditto -x -k Memory-Cat-macOS-Intel.zip roundtrip
+          codesign --verify --deep --strict "roundtrip/Memory Cat.app"
+          echo "OK: 왕복 후에도 서명이 온전함"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Memory-Cat-macOS-Intel
+          path: |
+            Memory-Cat-macOS-Intel.zip
+            checksum.txt
+
+      # 릴리스에서 실행됐을 때만 붙인다. 수동 실행은 아티팩트로만 받아 보고
+      # 확인한 뒤 사람이 올린다.
+      # 위 검증 단계가 하나라도 실패하면 잡이 멈춰서 여기까지 오지 않는다.
+      - name: 릴리스에 첨부
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" Memory-Cat-macOS-Intel.zip --clobber
