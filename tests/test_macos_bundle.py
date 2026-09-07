@@ -581,8 +581,13 @@ def macho_minos(blob):
         return None
     magic = struct.unpack("<I", blob[:4])[0]
     if magic in FAT_MAGICS:
-        # universal 바이너리. 이 저장소는 단일 아키텍처만 굽는다.
-        return None
+        # universal 바이너리. 이 저장소는 아키텍처 하나씩만 굽는다(휠에
+        # universal2 가 없다). 여기서 None 을 돌려주면 그 파일의 minos 가
+        # 검사에서 통째로 사라지므로, 조용히 넘기지 않고 알린다.
+        raise ValueError(
+            "fat(universal) 바이너리는 아직 검사할 수 없습니다. "
+            "슬라이스별 minos 를 읽도록 이 함수를 고쳐야 합니다."
+        )
     if magic == MH_MAGIC_64:
         endian = "<"
     elif magic == MH_CIGAM_64:
@@ -627,6 +632,11 @@ class BuiltBundleFloorTests(unittest.TestCase):
     #: 빌드 산출물 위치. `--distpath` 를 다른 데로 줬으면 이 환경변수로 알린다.
     BUNDLE_ENV = "MEMORY_CAT_BUNDLE"
 
+    #: 1 이면 번들이 없을 때 건너뛰지 않고 실패한다. 릴리스를 구울 때 이걸
+    #: 걸어야 한다 — 그러지 않으면 `--distpath` 를 옮긴 순간 이 검사들이
+    #: 통째로 조용히 사라지고, 아무도 모르는 채로 zip 이 나간다.
+    REQUIRE_ENV = "MEMORY_CAT_REQUIRE_BUNDLE"
+
     def setUp(self):
         override = os.environ.get(self.BUNDLE_ENV)
         self.bundle = (
@@ -635,10 +645,13 @@ class BuiltBundleFloorTests(unittest.TestCase):
             else _REPO / "dist" / "Memory Cat.app"
         )
         if not (self.bundle / "Contents" / "Info.plist").is_file():
-            self.skipTest(
+            missing = (
                 f"빌드된 번들이 없습니다: {self.bundle} "
                 f"(다른 데 있으면 {self.BUNDLE_ENV} 로 알려주세요)"
             )
+            if os.environ.get(self.REQUIRE_ENV) == "1":
+                self.fail(f"{self.REQUIRE_ENV}=1 인데 {missing}")
+            self.skipTest(missing)
 
     def _declared(self):
         with open(self.bundle / "Contents" / "Info.plist", "rb") as handle:
@@ -668,15 +681,57 @@ class BuiltBundleFloorTests(unittest.TestCase):
                 blame.append(path)
         return highest, blame
 
-    def test_declared_floor_is_not_lower_than_the_binaries_require(self):
+    def test_declared_floor_matches_what_the_binaries_require(self):
+        """선언값은 실제 최대 minos 와 **정확히 같아야** 한다.
+
+        낮게 적으면 그 사이 macOS 에서 Launch Services 를 통과한 뒤 dyld 가
+        프로세스를 죽인다 — LSUIElement 라 창도 에러도 없다. 높게 적으면
+        반대로, 멀쩡히 돌아갈 맥에서 Launch Services 가 아예 열어 주지 않는다.
+        사용자에게는 양쪽 다 "안 켜진다" 로만 보이므로 한 방향만 보면 안 된다.
+        """
         declared = self._declared()
         actual, blame = self._actual()
         self.assertNotEqual(actual, (0, 0, 0), "Mach-O 를 하나도 못 찾았습니다")
         names = ", ".join(p.name for p in blame[:5])
-        self.assertGreaterEqual(
+        self.assertEqual(
             declared, actual,
-            f"선언한 하한 {declared} 이 실제 {actual} 보다 낮습니다. "
-            f"그 사이 macOS 에서 조용히 죽습니다. 요구한 파일: {names}",
+            f"선언한 하한 {declared} 과 실제 {actual} 이 다릅니다. 낮으면 그 사이 "
+            f"macOS 에서 조용히 죽고, 높으면 멀쩡한 맥에서 안 열립니다. "
+            f"실제 하한을 요구한 파일: {names}",
+        )
+
+    def test_bundled_themes_actually_landed(self):
+        """기본 테마가 번들 안에 실제로 있는지 본다.
+
+        스펙은 **소스** frames 가 없으면 빌드를 멈추지만 산출물은 확인하지
+        않는다. 그리고 앱이 읽는 `Contents/Frameworks/frames` 는 PyInstaller 가
+        만든 `../Resources/frames` 심볼릭 링크다 — 허용 범위 안의 PyInstaller
+        마이너 업그레이드가 이 배치를 바꾸면 링크가 사라지고 프레임을 못 읽는다.
+        LSUIElement 라 고양이가 조용히 안 뜨고, 나머지 검사는 전부 초록이다.
+        """
+        roots = [
+            self.bundle / "Contents" / "Frameworks" / "frames",
+            self.bundle / "Contents" / "Resources" / "frames",
+        ]
+        for root in roots:
+            self.assertTrue(root.is_dir(), f"번들에 frames 가 없습니다: {root}")
+            found = {child.name for child in root.iterdir() if child.is_dir()}
+            self.assertEqual(
+                found, set(apppaths.BUNDLED_THEMES),
+                f"{root} 의 테마 목록이 다릅니다. "
+                f"빠짐: {sorted(set(apppaths.BUNDLED_THEMES) - found)} / "
+                f"남는 것(개인 테마 유출일 수 있음): {sorted(found - set(apppaths.BUNDLED_THEMES))}",
+            )
+            for theme in apppaths.BUNDLED_THEMES:
+                frames = sorted((root / theme).glob("cat_*.png"))
+                self.assertTrue(frames, f"{theme} 에 cat_*.png 가 없습니다")
+
+    def test_executable_is_where_the_plist_says(self):
+        info_exe = self.bundle / "Contents" / "MacOS" / build_app.EXECUTABLE_NAME
+        self.assertTrue(
+            info_exe.is_file(),
+            f"실행 파일이 없습니다: {info_exe}. LaunchAgent 가 이 절대경로를 "
+            f"가리키므로 이름이 바뀌면 기존 설치자의 로그인 실행이 깨진다.",
         )
 
 

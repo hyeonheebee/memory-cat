@@ -25,13 +25,25 @@
 깨져서("bundle format is ambiguous") macOS 가 "손상되었기 때문에 열 수
 없습니다" 를 띄운다. arm64 는 서명 없이는 실행 자체가 안 되므로 치명적이다.
 
-빌드에 쓰는 인터프리터가 곧 번들에 들어가는 인터프리터다. Homebrew
-python@3.12 의 **framework 빌드**로 빌드해야 한다 (`--enable-framework` 없이
-빌드된 파이썬은 .app 안에서 GUI 세션을 못 잡는다).
+빌드 후 반드시 검사한다(선언한 OS 하한이 실물과 맞는지 등):
+
+    MEMORY_CAT_BUNDLE="dist/Memory Cat.app" MEMORY_CAT_REQUIRE_BUNDLE=1 \
+        python -m pytest -q
+
+`MEMORY_CAT_REQUIRE_BUNDLE=1` 을 빼면 번들을 못 찾았을 때 조용히 건너뛴다.
+릴리스를 구울 때는 반드시 건다.
+
+빌드에 쓰는 인터프리터가 곧 번들에 들어가는 인터프리터다. **Homebrew 파이썬
+으로 구우면 안 된다** — Homebrew 는 병(bottle)을 빌드하는 기계의 OS 기준으로
+굽기 때문에, Sequoia 에서 설치했으면 minos 15.0 이 박히고 그게 그대로 앱의
+하한이 된다. macOS 11~14 사용자는 앱이 조용히 죽는다. python.org 설치본의
+`macos11` 접미사 파일(framework 빌드, minos 11.0)을 쓴다. 이유와 굽는 순서는
+`requirements-release.txt` 에 적어 두었다.
 
 아키텍처는 빌드하는 기계를 따른다. universal2 는 만들지 않는다 —
 psutil·Pillow·jiter 에 universal2 휠이 없어서 어차피 한쪽만 들어간다.
-Intel 용이 필요하면 Intel 러너에서 이 스펙을 그대로 한 번 더 돌린다.
+Intel 용이 필요하면 Intel 러너에서 이 스펙을 그대로 한 번 더 돌린다
+(`.github/workflows/build-intel-mac.yml`).
 """
 
 import sys
@@ -45,8 +57,14 @@ VERSION = "0.2.0"
 
 # 기본 테마 목록은 apppaths 가 단일 진실 원천이다. 여기에 베껴 적으면 한쪽만
 # 고쳤을 때 조용히 어긋난다(기본 테마를 추가했는데 번들에 안 들어가는 식).
+# PyInstaller 는 스펙을 빌드 프로세스 안에서 exec 한다. 경로를 얹은 채로
+# 두면 이후 훅이 `metrics`/`i18n` 같은 흔한 이름을 import 할 때 저장소 모듈이
+# 이겨 버린다. import 하자마자 되돌린다(Analysis 는 pathex 로 따로 받는다).
 sys.path.insert(0, str(REPO))
-import apppaths  # noqa: E402  (위에서 경로를 얹은 뒤에야 import 된다)
+try:
+    import apppaths  # noqa: E402  (위에서 경로를 얹은 뒤에야 import 된다)
+finally:
+    sys.path.remove(str(REPO))
 
 BUNDLED_THEMES = apppaths.BUNDLED_THEMES
 
