@@ -1178,6 +1178,11 @@ class SecondLaunchTests(unittest.TestCase):
         with (
             patch.object(desktop_cat, "new_cat_alert", return_value=alert),
             patch.object(desktop_cat, "NSApp", Mock()),
+            # 이 함수는 설정 파일을 직접 읽는다. 패치하지 않으면 테스트를
+            # 돌리는 사람이 펫에게 지어 준 이름이 결과에 섞여 들어온다.
+            patch.object(
+                desktop_cat, "load_config", return_value={"language": "en"}
+            ),
         ):
             desktop_cat.show_already_running_alert("en")
 
