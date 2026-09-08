@@ -552,6 +552,51 @@ class ReleaseSpecTests(unittest.TestCase):
         self.assertIn(f'VERSION = "{build_app.VERSION}"', source)
 
 
+class WindowsWorkflowTests(unittest.TestCase):
+    """윈도우 워크플로가 빌드 방법을 베껴 적지 않았는지 본다.
+
+    PyInstaller 인자를 YAML 에 복사해 두면, 사람이 `build_exe.bat` 으로 굽는
+    경로와 CI 가 굽는 경로가 조용히 어긋난다. 어긋난 줄 모르는 채로 릴리스가
+    나가는 것이 이 저장소가 이미 한 번 겪은 사고다.
+    """
+
+    WORKFLOW = _REPO / ".github" / "workflows" / "build-windows.yml"
+    BAT = _REPO / "windows" / "build_exe.bat"
+
+    def setUp(self):
+        if not self.WORKFLOW.is_file():
+            self.skipTest(f"워크플로가 없습니다: {self.WORKFLOW}")
+        self.source = self.WORKFLOW.read_text(encoding="utf-8")
+
+    def _code_lines(self):
+        """주석을 걷어낸 줄들. 주석에 무슨 단어가 있는지는 상관없다."""
+        out = []
+        for line in self.source.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            out.append(line)
+        return "\n".join(out)
+
+    def test_calls_the_batch_file_instead_of_repeating_it(self):
+        code = self._code_lines()
+        self.assertIn("build_exe.bat", code)
+        # PyInstaller 빌드 인자가 여기에도 있으면 진실 원천이 둘이 된다.
+        # (pip install "pyinstaller>=..." 는 빌드 호출이 아니라 설치라 괜찮다.)
+        for arg in ("--onefile", "--noconsole", "--add-data", "--hidden-import"):
+            self.assertNotIn(arg, code, f"{arg} 가 워크플로에 베껴져 있습니다")
+
+    def test_defuses_the_pause_prompts(self):
+        # build_exe.bat 은 더블클릭용이라 pause 가 있다. CI 에서 그대로 부르면
+        # 키 입력을 기다리며 잡이 멈춘다.
+        self.assertIn("pause", self.BAT.read_text(encoding="utf-8"))
+        self.assertIn("< nul", self.source)
+
+    def test_only_attaches_to_a_real_release(self):
+        # 수동 실행이 릴리스에 파일을 붙이면 검증 전 산출물이 공개된다.
+        self.assertIn("github.event_name == 'release'", self.source)
+
+
 #: Mach-O 로드 커맨드. ``LC_BUILD_VERSION`` 이 그 바이너리가 요구하는 최소
 #: OS(minos)를 담는다. 구형 툴체인은 ``LC_VERSION_MIN_MACOSX`` 를 쓴다.
 LC_BUILD_VERSION = 0x32
