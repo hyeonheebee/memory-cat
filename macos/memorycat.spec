@@ -46,6 +46,7 @@ Intel 용이 필요하면 Intel 러너에서 이 스펙을 그대로 한 번 더
 (`.github/workflows/build-intel-mac.yml`).
 """
 
+import platform
 import sys
 from pathlib import Path
 
@@ -54,6 +55,30 @@ REPO = Path(SPECPATH).resolve().parent  # noqa: F821  (SPECPATH is injected)
 
 # 릴리스 태그와 반드시 같이 움직여야 하는 값. 태그를 올리면 여기도 올린다.
 VERSION = "0.2.0"
+
+# 번들이 요구하는 최소 macOS. **아키텍처마다 다르다.**
+#
+#   arm64  → 11.0   Apple Silicon 자체가 macOS 11 부터라 더 내려갈 수 없다.
+#   x86_64 → 10.13  pyobjc 의 x86_64 휠이 여기를 타깃한다.
+#
+# 하나로 박아 두면 인텔 사용자 중 10.13~10.15 를 이유 없이 막는다(Launch
+# Services 가 아예 열어 주지 않는다). 반대로 낮게 적으면 그 사이 macOS 에서
+# dyld 가 조용히 죽인다. 둘 다 사용자에겐 "안 켜진다" 로만 보인다.
+#
+# 이 표는 손으로 관리한다. 대신 진실은 테스트가 지킨다 —
+# BuiltBundleFloorTests 가 번들 안 모든 Mach-O 의 minos 최댓값과 이 값이
+# **정확히 같은지** 본다. 휠이 올라가서 하한이 바뀌면 빌드가 시끄럽게
+# 실패하니, 그때 이 표를 고치면 된다. 조용히 틀리는 일은 없다.
+FLOOR_BY_ARCH = {
+    "arm64": "11.0",
+    "x86_64": "10.13",
+}
+_MACHINE = platform.machine()
+if _MACHINE not in FLOOR_BY_ARCH:
+    raise SystemExit(
+        f"모르는 아키텍처 {_MACHINE!r} 입니다. FLOOR_BY_ARCH 에 추가하세요."
+    )
+MINIMUM_MACOS = FLOOR_BY_ARCH[_MACHINE]
 
 # 기본 테마 목록은 apppaths 가 단일 진실 원천이다. 여기에 베껴 적으면 한쪽만
 # 고쳤을 때 조용히 어긋난다(기본 테마를 추가했는데 번들에 안 들어가는 식).
@@ -161,10 +186,12 @@ app = BUNDLE(  # noqa: F821
         # 가장 낮은 값을 갖기 때문에 무슨 값을 적어도 통과한다. 하한을 올리는
         # 것은 대개 파이썬 본체와 그 표준 라이브러리 .so 들이다.
         #
+        # 값은 위 FLOOR_BY_ARCH 가 정한다(아키텍처마다 다르다).
         # 확인은 tests/test_macos_bundle.py 의 BuiltBundleFloorTests 가 한다.
         # 빌드 후 반드시 돌린다:
-        #     MEMORY_CAT_BUNDLE="dist/Memory Cat.app" python -m pytest -q
-        "LSMinimumSystemVersion": "11.0",
+        #     MEMORY_CAT_BUNDLE="dist/Memory Cat.app" \
+        #     MEMORY_CAT_REQUIRE_BUNDLE=1 python -m pytest -q
+        "LSMinimumSystemVersion": MINIMUM_MACOS,
         # 독에 아이콘을 띄우지 않는 배경 앱. 바탕화면 위 고양이가 본체다.
         "LSUIElement": True,
         "NSHighResolutionCapable": True,
