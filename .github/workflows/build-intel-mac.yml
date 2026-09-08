@@ -2,7 +2,7 @@ name: Build Intel macOS app
 
 # 애플 실리콘 zip 은 손으로 만들어 올리지만, 인텔용은 인텔 맥이 있어야 한다.
 # psutil / jiter / Pillow 에는 universal2 휠이 없어서 한 대에서 두 아키텍처를
-# 다 만들 수 없다. macos-13 러너가 x86_64 라 여기서 굽는다.
+# 다 만들 수 없다. 그래서 x86_64 러너에서 따로 굽는다.
 #
 # 굽는 방법은 `macos/memorycat.spec`(PyInstaller) 하나뿐이다.
 # `macos/build_app.py` 로 구우면 안 된다 — 그건 로컬 설치용 조립기라서 굽는
@@ -20,8 +20,17 @@ permissions:
 
 jobs:
   build:
-    # macos-14 부터는 arm64 다. 인텔 산출물을 만들려면 13 이어야 한다.
-    runs-on: macos-13
+    # 기본 macos-* 라벨은 arm64 다(macos-14 부터). 인텔 산출물을 만들려면
+    # x64 라벨을 명시해야 한다.
+    #
+    # 예전에는 `macos-13` 이었는데 GitHub 이 그 이미지를 폐지했다. 폐지된
+    # 라벨은 잡을 실패시키지 않고 **영원히 queued 로 매달아 둔다** — 실제로
+    # 55분을 기다리다 러너 미배정인 걸 확인하고서야 알았다. 러너 목록은
+    # https://github.com/actions/runner-images 의 README 에서 확인한다.
+    #
+    # 이 라벨이 또 폐지되면 같은 증상이 난다. 잡이 오래 queued 면 실패가
+    # 아니라 라벨을 먼저 의심할 것.
+    runs-on: macos-15-intel
 
     steps:
       - uses: actions/checkout@v4
