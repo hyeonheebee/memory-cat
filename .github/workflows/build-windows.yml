@@ -1,0 +1,128 @@
+name: Build Windows app
+
+# 윈도우 exe 는 윈도우에서만 구울 수 있다. 지금까지는 사람이 자기 PC 에서
+# 구워 릴리스에 올렸는데, 그러면 두 가지가 걸린다.
+#
+#   1. 코드를 한 줄 고쳐도 그 PC 가 있어야 릴리스가 나간다.
+#   2. 받는 사람이 그 exe 를 검증할 방법이 없다. README 가 "출처를 확인할 수
+#      없는 MemoryCat.exe 는 실행하지 마세요" 라고 적어 두었는데, 릴리스에
+#      올린 파일이 바로 그런 파일이 되어 버린다.
+#
+# 여기서 구우면 커밋 → 빌드 로그 → 산출물이 공개로 이어진다. 받는 사람은
+# 릴리스 노트의 SHA-256 과 대조해서 "이 커밋에서 나온 파일" 임을 확인할 수 있다.
+#
+# 빌드 자체는 `windows/build_exe.bat` 을 그대로 부른다. PyInstaller 인자를
+# 여기에 베껴 적으면 둘이 조용히 어긋난다 — 사람이 손으로 굽는 경로와
+# CI 가 굽는 경로가 달라지는 것이 이 저장소가 이미 한 번 겪은 사고다.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # windows/requirements.txt = PySide6, psutil (맥판과 완전히 별개 구현)
+          python -m pip install -r windows/requirements.txt
+          python -m pip install "pyinstaller>=6.20,<7"
+
+      - name: exe 굽기
+        shell: cmd
+        # `< nul` 이 필요하다. build_exe.bat 은 사람이 더블클릭해서 쓰는
+        # 스크립트라 끝과 오류 지점마다 `pause` 가 있는데, CI 에서는 그게
+        # 키 입력을 기다리며 잡을 멈춰 세운다. stdin 을 nul 로 돌리면
+        # pause 가 즉시 반환한다.
+        run: windows\build_exe.bat < nul
+
+      - name: 산출물 검증
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'windows\dist\MemoryCat.exe'
+
+          if (-not (Test-Path $exe)) {
+            Write-Error "::error::exe 가 안 만들어졌습니다: $exe"
+            exit 1
+          }
+
+          # PE(윈도우 실행 파일) 매직 'MZ' 확인. 빌드가 반쯤 실패하고
+          # 껍데기만 남는 경우를 거른다.
+          $head = [System.IO.File]::ReadAllBytes($exe)[0..1]
+          if ($head[0] -ne 0x4D -or $head[1] -ne 0x5A) {
+            Write-Error "::error::PE 실행 파일이 아닙니다"
+            exit 1
+          }
+
+          # --onefile 이라 압축돼 있다. 너무 작으면 의존성이 빠진 것이다.
+          $size = (Get-Item $exe).Length
+          Write-Host "크기: $([math]::Round($size/1MB,1)) MB"
+          if ($size -lt 15MB) {
+            Write-Error "::error::exe 가 너무 작습니다 ($size 바이트). 의존성이 빠졌을 수 있습니다."
+            exit 1
+          }
+
+          # 개인 테마가 섞이지 않았는지. CI 는 git 에서 체크아웃하므로
+          # 추적되지 않는 파일이 낄 자리가 없지만, 누가 windows/frames 에
+          # 개인 테마를 커밋하면 그건 걸러야 한다.
+          $leak = Get-ChildItem windows\frames -Directory |
+            Where-Object { $_.Name -notin @('cute','simple','madness','derpy') }
+          if ($leak) {
+            Write-Error "::error::기본 테마가 아닌 폴더가 있습니다: $($leak.Name -join ', ')"
+            exit 1
+          }
+          Write-Host "OK: 기본 테마 4종만"
+
+      - name: 실제로 실행되는지 (연기 시험)
+        shell: pwsh
+        # PySide6 GUI 앱이라 러너의 데스크톱 세션에서 뜬다. --onefile 은
+        # 실행할 때마다 임시 폴더로 압축을 풀어서 시작이 느리니 넉넉히 준다.
+        # 살아 있으면 import 사슬(PySide6·psutil·i18n)이 전부 성공한 것이다.
+        run: |
+          $p = Start-Process -FilePath 'windows\dist\MemoryCat.exe' -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Error "::error::20초 안에 종료됐습니다 (exit code $($p.ExitCode))"
+            exit 1
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "OK: 20초 생존"
+
+      - name: 체크섬
+        shell: pwsh
+        run: |
+          Copy-Item windows\dist\MemoryCat.exe .\MemoryCat.exe
+          $h = Get-FileHash .\MemoryCat.exe -Algorithm SHA256
+          "$($h.Hash.ToLower())  MemoryCat.exe" | Tee-Object -FilePath checksum.txt
+          # 이 값을 릴리스 노트에 적는다. README 가 안내하는 대조 명령:
+          #   Get-FileHash .\MemoryCat.exe -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MemoryCat-Windows
+          path: |
+            MemoryCat.exe
+            checksum.txt
+
+      # 릴리스에서 실행됐을 때만 붙인다. 수동 실행은 아티팩트로만 받아 보고
+      # 확인한 뒤 사람이 올린다. 위 검증이 하나라도 실패하면 여기까지 못 온다.
+      - name: 릴리스에 첨부
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" MemoryCat.exe --clobber
