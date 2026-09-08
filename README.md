@@ -399,3 +399,12 @@ pet sprite sheets.
 ## Author and license
 
 Built by Hyeonhee Shim (@hyeonheebee). Code by Codex; planning, review, and demo by Claude. MIT License.
+
+The MIT License covers the code. The name **"Memory Cat" / "메모리 뚱냥이"** and
+the cat artwork are not part of that grant — if you redistribute a modified
+version, please give it a different name.
+
+The Windows build bundles **PySide6**, which is licensed under the LGPL. Its
+source and build script are in [`windows/`](windows/), and the release
+executable is built from them by [GitHub Actions](.github/workflows/build-windows.yml),
+so you can rebuild it yourself with a modified PySide6 if you wish.
