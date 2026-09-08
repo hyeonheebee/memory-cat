@@ -11,10 +11,12 @@
    확인되는 물건이라 회귀가 조용히 지나가기 쉽다.
 """
 
+import ast
 import importlib.util
 import os
 import plistlib
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -440,6 +442,297 @@ class AppPathsTests(unittest.TestCase):
                 candidates = apppaths.dotenv_candidates()
             self.assertEqual(candidates[0], Path(temp) / ".env")
             self.assertEqual(candidates[1], apppaths.source_dir() / ".env")
+
+
+class FrozenSourceDirTests(unittest.TestCase):
+    """``_resolve_source_dir()`` 은 세 가지 실행 형태를 모두 맞춰야 한다.
+
+    저장소 직접 실행 / ``build_app.py`` 번들(소스를 .py 그대로 넣어서 frozen 이
+    아니다) / PyInstaller 릴리스 번들(frozen, ``sys._MEIPASS``).
+    """
+
+    def test_repo_and_local_bundle_look_next_to_this_file(self):
+        expected = Path(apppaths.__file__).resolve().parent
+        with patch.object(sys, "frozen", False, create=True):
+            self.assertEqual(apppaths._resolve_source_dir(), expected)
+        # `frozen` 속성 자체가 없는 평범한 인터프리터도 같은 답이어야 한다.
+        with patch.dict(sys.__dict__):
+            sys.__dict__.pop("frozen", None)
+            self.assertEqual(apppaths._resolve_source_dir(), expected)
+
+    def test_pyinstaller_bundle_uses_meipass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            meipass = Path(temp).resolve()
+            with patch.object(sys, "frozen", True, create=True), \
+                 patch.object(sys, "_MEIPASS", str(meipass), create=True):
+                self.assertEqual(apppaths._resolve_source_dir(), meipass)
+
+    def test_frozen_without_meipass_falls_back_to_this_file(self):
+        # cx_Freeze 처럼 _MEIPASS 를 안 넣는 freezer 에서 죽지 말고, 이 변경
+        # 이전과 같은 동작으로 돌아가야 한다.
+        expected = Path(apppaths.__file__).resolve().parent
+        with patch.dict(sys.__dict__), \
+                patch.object(sys, "frozen", True, create=True):
+            sys.__dict__.pop("_MEIPASS", None)
+            self.assertEqual(apppaths._resolve_source_dir(), expected)
+
+    def test_module_level_source_dir_matches_the_resolver(self):
+        # import 시점에 한 번만 계산해서 캐시한다. 함수와 어긋나면 안 된다.
+        self.assertEqual(apppaths.source_dir(), apppaths._resolve_source_dir())
+
+
+class ReleaseSpecTests(unittest.TestCase):
+    """릴리스 스펙이 기본 테마만, 그리고 전부 담는지 지킨다.
+
+    스펙이 개인 테마(``mypet*`` 등 실제 반려동물 사진)를 담으면 되돌릴 수 없고,
+    기본 테마를 빠뜨리면 사용자가 그 테마를 고른 순간 프레임을 못 읽는다.
+    """
+
+    SPEC = Path(__file__).resolve().parent.parent / "macos" / "memorycat.spec"
+
+    def test_spec_takes_the_theme_list_from_apppaths(self):
+        # 목록을 베껴 적으면 한쪽만 고쳤을 때 조용히 어긋난다.
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn("BUNDLED_THEMES = apppaths.BUNDLED_THEMES", source)
+
+    def _tree(self):
+        # 주석·docstring 에 어떤 단어가 있는지는 상관없다. 실제로 실행되는
+        # 코드만 봐야 하므로 텍스트 검색이 아니라 AST 로 읽는다.
+        return ast.parse(self.SPEC.read_text(encoding="utf-8"))
+
+    def _code_strings(self):
+        return [
+            node.value
+            for node in ast.walk(self._tree())
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+
+    def test_spec_never_names_a_theme_outside_the_defaults(self):
+        # 개인 테마 이름이 코드에 들어가면 즉시 실패한다.
+        docstrings = set()
+        tree = self._tree()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc:
+                    docstrings.add(doc)
+        for text in self._code_strings():
+            if text in docstrings:
+                continue
+            for name in ("mypet", "gandi-", "dog-hero", "livetest"):
+                self.assertNotIn(name, text)
+
+    def test_spec_ships_only_frame_files(self):
+        # 폴더를 통째로 넣으면 추적 안 되는 잡파일(_preview.png)까지 따라간다.
+        self.assertIn("cat_*.png", self._code_strings())
+
+    def test_theme_guards_survive_python_dash_O(self):
+        # `python -O` 로 빌드하면 assert 문이 통째로 사라진다. 개인 사진 유출
+        # 방어선을 인터프리터 플래그 하나로 꺼지는 문에 두면 안 된다.
+        asserts = [n for n in ast.walk(self._tree()) if isinstance(n, ast.Assert)]
+        self.assertEqual(
+            asserts, [],
+            "스펙에 assert 가 있다. -O 빌드에서 사라지므로 raise 로 바꿔야 한다.",
+        )
+
+    def test_minimum_system_version_is_declared(self):
+        # 이 키가 없으면 하한 미만 macOS 에서 dyld 가 조용히 죽인다.
+        # 값이 맞는지는 BuiltBundleFloorTests 가 실물로 검사한다 — 여기서
+        # 문자열만 보고 끝내면 11.0 이든 99.0 이든 통과한다.
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn("LSMinimumSystemVersion", source)
+
+    def test_executable_name_matches_the_local_install_bundle(self):
+        # LaunchAgent 가 Contents/MacOS/<이 이름> 을 절대경로로 가리킨다.
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn(f'name="{build_app.EXECUTABLE_NAME}"', source)
+
+    def test_both_build_paths_stamp_the_same_version(self):
+        source = self.SPEC.read_text(encoding="utf-8")
+        self.assertIn(f'VERSION = "{build_app.VERSION}"', source)
+
+
+#: Mach-O 로드 커맨드. ``LC_BUILD_VERSION`` 이 그 바이너리가 요구하는 최소
+#: OS(minos)를 담는다. 구형 툴체인은 ``LC_VERSION_MIN_MACOSX`` 를 쓴다.
+LC_BUILD_VERSION = 0x32
+LC_VERSION_MIN_MACOSX = 0x24
+
+MH_MAGIC_64 = 0xFEEDFACF
+MH_CIGAM_64 = 0xCFFAEDFE
+FAT_MAGICS = (0xCAFEBABE, 0xBEBAFECA, 0xCAFEBABF, 0xBFBAFECA)
+
+
+def _triple(parts):
+    """버전 조각을 항상 3칸짜리 튜플로. 길이가 달라 생기는 오비교를 막는다."""
+    nums = [int(part) for part in parts][:3]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def macho_minos(blob):
+    """Mach-O 하나가 요구하는 최소 macOS 를 ``(major, minor, patch)`` 로.
+
+    ``vtool``/``otool`` 을 부르지 않는 이유는 이 저장소가 서브프로세스를 쓰지
+    않기 때문이다(`macos/build_app.py` 첫 docstring). 포맷은 단순하다 —
+    64비트 헤더 32바이트 뒤로 ``(cmd 4바이트, cmdsize 4바이트, 본문)`` 반복.
+
+    Mach-O 가 아니거나 버전 로드 커맨드가 없으면 ``None``.
+    """
+    if len(blob) < 32:
+        return None
+    magic = struct.unpack("<I", blob[:4])[0]
+    if magic in FAT_MAGICS:
+        # universal 바이너리. 이 저장소는 아키텍처 하나씩만 굽는다(휠에
+        # universal2 가 없다). 여기서 None 을 돌려주면 그 파일의 minos 가
+        # 검사에서 통째로 사라지므로, 조용히 넘기지 않고 알린다.
+        raise ValueError(
+            "fat(universal) 바이너리는 아직 검사할 수 없습니다. "
+            "슬라이스별 minos 를 읽도록 이 함수를 고쳐야 합니다."
+        )
+    if magic == MH_MAGIC_64:
+        endian = "<"
+    elif magic == MH_CIGAM_64:
+        endian = ">"
+    else:
+        return None
+
+    ncmds = struct.unpack(endian + "I", blob[16:20])[0]
+    offset = 32
+    for _ in range(ncmds):
+        if offset + 8 > len(blob):
+            return None
+        cmd, cmdsize = struct.unpack(endian + "II", blob[offset:offset + 8])
+        if cmdsize < 8:
+            return None
+        if cmd == LC_BUILD_VERSION and offset + 16 <= len(blob):
+            raw = struct.unpack(endian + "I", blob[offset + 12:offset + 16])[0]
+            return _triple((raw >> 16, (raw >> 8) & 0xFF, raw & 0xFF))
+        if cmd == LC_VERSION_MIN_MACOSX and offset + 12 <= len(blob):
+            raw = struct.unpack(endian + "I", blob[offset + 8:offset + 12])[0]
+            return _triple((raw >> 16, (raw >> 8) & 0xFF, raw & 0xFF))
+        offset += cmdsize
+    return None
+
+
+class BuiltBundleFloorTests(unittest.TestCase):
+    """빌드된 번들의 ``LSMinimumSystemVersion`` 이 실물과 맞는지 본다.
+
+    번들 전체의 하한은 **가장 높은 minos 를 요구하는 바이너리** 가 정한다.
+    이걸 낮게 적으면 그 사이 버전의 macOS 에서 Launch Services 가 막지 않고
+    그냥 띄우고, dyld 가 프로세스를 죽인다. ``LSUIElement`` 라 창도 에러도
+    없이 아무 일도 안 일어난다 — v0.1.0 을 못 쓰게 만든 바로 그 증상이다.
+
+    v0.2.0 직전에 실제로 이걸 틀렸다. 스펙에는 11.0 이라고 적혀 있었지만
+    Homebrew python@3.12 병이 Sequoia 에서 구워져서 실제 하한은 15.0 이었다.
+    부트로더(`Contents/MacOS/MemoryCat`)만 확인하면 번들에서 유일하게 11.0 인
+    놈이라 통과해 버린다. **모든** Mach-O 를 봐야 한다.
+
+    번들이 없으면 건너뛴다. 릴리스 전에는 반드시 빌드한 뒤 돌린다.
+    """
+
+    #: 빌드 산출물 위치. `--distpath` 를 다른 데로 줬으면 이 환경변수로 알린다.
+    BUNDLE_ENV = "MEMORY_CAT_BUNDLE"
+
+    #: 1 이면 번들이 없을 때 건너뛰지 않고 실패한다. 릴리스를 구울 때 이걸
+    #: 걸어야 한다 — 그러지 않으면 `--distpath` 를 옮긴 순간 이 검사들이
+    #: 통째로 조용히 사라지고, 아무도 모르는 채로 zip 이 나간다.
+    REQUIRE_ENV = "MEMORY_CAT_REQUIRE_BUNDLE"
+
+    def setUp(self):
+        override = os.environ.get(self.BUNDLE_ENV)
+        self.bundle = (
+            Path(override).expanduser()
+            if override
+            else _REPO / "dist" / "Memory Cat.app"
+        )
+        if not (self.bundle / "Contents" / "Info.plist").is_file():
+            missing = (
+                f"빌드된 번들이 없습니다: {self.bundle} "
+                f"(다른 데 있으면 {self.BUNDLE_ENV} 로 알려주세요)"
+            )
+            if os.environ.get(self.REQUIRE_ENV) == "1":
+                self.fail(f"{self.REQUIRE_ENV}=1 인데 {missing}")
+            self.skipTest(missing)
+
+    def _declared(self):
+        with open(self.bundle / "Contents" / "Info.plist", "rb") as handle:
+            info = plistlib.load(handle)
+        raw = info.get("LSMinimumSystemVersion")
+        self.assertIsNotNone(raw, "LSMinimumSystemVersion 이 없습니다")
+        # "15" / "15.0" / "15.0.0" 이 다 같은 값이어야 한다. 길이가 다른 튜플을
+        # 그냥 비교하면 (15, 0) < (15, 0, 0) 이라 맞는 값도 실패한다.
+        return _triple(str(raw).split("."))
+
+    def _actual(self):
+        """번들 안 모든 Mach-O 중 가장 높은 minos 와, 그걸 요구한 파일들."""
+        highest = (0, 0, 0)
+        blame = []
+        for path in sorted(self.bundle.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                minos = macho_minos(path.read_bytes())
+            except OSError:
+                continue
+            if minos is None:
+                continue
+            if minos > highest:
+                highest, blame = minos, [path]
+            elif minos == highest:
+                blame.append(path)
+        return highest, blame
+
+    def test_declared_floor_matches_what_the_binaries_require(self):
+        """선언값은 실제 최대 minos 와 **정확히 같아야** 한다.
+
+        낮게 적으면 그 사이 macOS 에서 Launch Services 를 통과한 뒤 dyld 가
+        프로세스를 죽인다 — LSUIElement 라 창도 에러도 없다. 높게 적으면
+        반대로, 멀쩡히 돌아갈 맥에서 Launch Services 가 아예 열어 주지 않는다.
+        사용자에게는 양쪽 다 "안 켜진다" 로만 보이므로 한 방향만 보면 안 된다.
+        """
+        declared = self._declared()
+        actual, blame = self._actual()
+        self.assertNotEqual(actual, (0, 0, 0), "Mach-O 를 하나도 못 찾았습니다")
+        names = ", ".join(p.name for p in blame[:5])
+        self.assertEqual(
+            declared, actual,
+            f"선언한 하한 {declared} 과 실제 {actual} 이 다릅니다. 낮으면 그 사이 "
+            f"macOS 에서 조용히 죽고, 높으면 멀쩡한 맥에서 안 열립니다. "
+            f"실제 하한을 요구한 파일: {names}",
+        )
+
+    def test_bundled_themes_actually_landed(self):
+        """기본 테마가 번들 안에 실제로 있는지 본다.
+
+        스펙은 **소스** frames 가 없으면 빌드를 멈추지만 산출물은 확인하지
+        않는다. 그리고 앱이 읽는 `Contents/Frameworks/frames` 는 PyInstaller 가
+        만든 `../Resources/frames` 심볼릭 링크다 — 허용 범위 안의 PyInstaller
+        마이너 업그레이드가 이 배치를 바꾸면 링크가 사라지고 프레임을 못 읽는다.
+        LSUIElement 라 고양이가 조용히 안 뜨고, 나머지 검사는 전부 초록이다.
+        """
+        roots = [
+            self.bundle / "Contents" / "Frameworks" / "frames",
+            self.bundle / "Contents" / "Resources" / "frames",
+        ]
+        for root in roots:
+            self.assertTrue(root.is_dir(), f"번들에 frames 가 없습니다: {root}")
+            found = {child.name for child in root.iterdir() if child.is_dir()}
+            self.assertEqual(
+                found, set(apppaths.BUNDLED_THEMES),
+                f"{root} 의 테마 목록이 다릅니다. "
+                f"빠짐: {sorted(set(apppaths.BUNDLED_THEMES) - found)} / "
+                f"남는 것(개인 테마 유출일 수 있음): {sorted(found - set(apppaths.BUNDLED_THEMES))}",
+            )
+            for theme in apppaths.BUNDLED_THEMES:
+                frames = sorted((root / theme).glob("cat_*.png"))
+                self.assertTrue(frames, f"{theme} 에 cat_*.png 가 없습니다")
+
+    def test_executable_is_where_the_plist_says(self):
+        info_exe = self.bundle / "Contents" / "MacOS" / build_app.EXECUTABLE_NAME
+        self.assertTrue(
+            info_exe.is_file(),
+            f"실행 파일이 없습니다: {info_exe}. LaunchAgent 가 이 절대경로를 "
+            f"가리키므로 이름이 바뀌면 기존 설치자의 로그인 실행이 깨진다.",
+        )
 
 
 if __name__ == "__main__":

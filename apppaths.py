@@ -17,6 +17,7 @@
 """
 
 import os
+import sys
 from pathlib import Path
 
 APP_NAME = "Memory Cat"
@@ -28,7 +29,25 @@ BUNDLED_THEMES = ("cute", "simple", "madness", "derpy")
 #: 사용자 데이터 위치를 통째로 옮기고 싶을 때 쓰는 탈출구(주로 테스트용).
 HOME_ENV = "MEMORY_CAT_HOME"
 
-_SOURCE_DIR = Path(__file__).resolve().parent
+def _resolve_source_dir() -> Path:
+    """소스와 기본 테마가 놓인 폴더를 정한다.
+
+    PyInstaller 로 묶은 릴리스 번들(:file:`macos/memorycat.spec`)에서는 이 모듈이
+    아카이브 안에 들어가서 ``__file__`` 이 실제 파일을 가리키지 않는다. 그때는
+    PyInstaller 가 풀어 놓은 폴더(``sys._MEIPASS``)에 ``frames/`` 가 있다.
+
+    저장소에서 그냥 실행할 때와 ``install_mac.command`` 가 만든 번들
+    (:file:`macos/build_app.py`, 소스를 .py 그대로 넣는다)에서는 종전대로
+    이 파일 옆을 본다.
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass).resolve()
+    return Path(__file__).resolve().parent
+
+
+_SOURCE_DIR = _resolve_source_dir()
 
 
 def source_dir() -> Path:
