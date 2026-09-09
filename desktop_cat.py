@@ -839,7 +839,12 @@ class CatController(NSObject):
             tr(language, "mood_detail", mood=mood, percent=round(pct),
                source=tr(language, f"source_{source}")),
             tr(language, "disk_detail", percent=dpct, used=mc.human_gb(disk.used), total=mc.human_gb(disk.total), free=mc.human_gb(disk.free)),
-            tr(language, "ram_detail", percent=vm.percent, used=mc.human_gb(vm.used), total=mc.human_gb(vm.total)),
+            # `vm.used` 를 쓰면 안 된다. macOS 에서 그건 active+wired 라
+            # 압축 메모리를 빼는데, `vm.percent` 는 포함한다. 한 줄에 나란히
+            # 두면 "RAM 70% · 9.0/18.0 GB"(=50%) 처럼 자기모순이 된다.
+            tr(language, "ram_detail", percent=vm.percent,
+               used=mc.human_gb(vm.total - vm.available),
+               total=mc.human_gb(vm.total)),
         ]
         if sw.total > 0:
             self.detail.append(tr(language, "swap_detail", percent=sw.percent, used=mc.human_gb(sw.used), total=mc.human_gb(sw.total)))

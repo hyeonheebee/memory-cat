@@ -2,15 +2,15 @@
 
 *메모리 뚱냥이 — an OpenAI Build Week project*
 
-> Your disk usage, visualized as a cat that gets chonkier as your drive fills up.
+> Your memory pressure, visualized as a cat that gets chonkier as your Mac fills up.
 
 <p align="center">
-  <img src="./docs/chonk-loop.gif" alt="A cat getting rounder as the disk fills up" width="300">
+  <img src="./docs/chonk-loop.gif" alt="A cat getting rounder as memory fills up" width="300">
 </p>
 
 Memory Cat is a desktop pet for macOS, with a lightweight Windows version. It
 turns an invisible system metric into something you can understand at a glance:
-the fuller your drive gets, the rounder your cat becomes.
+the fuller your Mac's memory gets, the rounder your cat becomes.
 
 The killer demo feature makes that cat personal. Give Memory Cat one photo of
 your pet, and **gpt-image-2** creates a six-stage chonk progression that the app
@@ -22,7 +22,7 @@ automatically converts into a custom 40-frame desktop theme.
   <tr>
     <td align="center">
       <img src="./cute.png" width="260"><br>
-      <sub>The default cat gets rounder as disk usage rises</sub>
+      <sub>The default cat gets rounder as memory fills up</sub>
     </td>
     <td align="center">
       <img src="./simple.png" width="260"><br>
@@ -50,7 +50,7 @@ automatically converts into a custom 40-frame desktop theme.
   pet's distinctive colors, markings, face, and ears while generating a
   six-stage horizontal sprite sheet. Memory Cat segments it and builds the full
   40-frame theme automatically.
-- **The complete chonk chart:** disk usage moves your cat through **A fine boi →
+- **The complete chonk chart:** memory pressure moves your cat through **A fine boi →
   He chomnk → A heckin' chonker → HEFTYCHONK → MEGACHONKER → OH LAWD HE
   COMIN**.
 - **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
@@ -71,6 +71,30 @@ automatically converts into a custom 40-frame desktop theme.
 
 The AI-powered items above are macOS only. See
 [Install on Windows](#install-on-windows) for what the Windows build covers.
+
+## What makes him chonky
+
+By default the cat follows **memory** — close a few apps and he slims down
+within seconds. Right-click → **What makes him chonky** to switch:
+
+| Choice | He slims down when you… |
+|---|---|
+| **Memory** (default) | close apps |
+| **Storage** | delete files |
+| **Whichever is fuller** | do either |
+
+Memory is the default because that is usually what makes a Mac feel slow —
+when RAM runs out, macOS pushes pages to swap and pulls them back, and you feel
+the wait. Storage matters too: a full drive leaves swap no room to grow.
+
+> Swap usage is deliberately **not** part of the score. macOS creates and
+> removes swap files on demand, so `used / total` sits at 80–90% no matter what
+> and even moves the wrong way — when pressure rises and the kernel grows the
+> swap file, the ratio falls. Counting it made the cat slim down after a reboot
+> while the Mac was actually more pressured than before. The diagnosis still
+> reports swap; it just does not decide his size.
+
+The Windows build follows storage only.
 
 ## Privacy
 
@@ -123,7 +147,7 @@ Nothing to install — unzip and run.
 | | File | Notes |
 |---|---|---|
 | macOS (Apple Silicon) | `Memory-Cat-macOS-AppleSilicon.zip` | macOS 11 or later |
-| macOS (Intel) | `Memory-Cat-macOS-Intel.zip` | macOS 11 or later |
+| macOS (Intel) | `Memory-Cat-macOS-Intel.zip` | macOS 10.13 or later |
 | Windows | `MemoryCat.exe` | x64. No AI features — and no network requests at all |
 
 Prefer to build it yourself, or want it to start automatically at login?

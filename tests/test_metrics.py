@@ -85,7 +85,9 @@ class MetricsTests(unittest.TestCase):
         ):
             score, measured_vm, swap = metrics.safe_pressure_score()
 
-        self.assertAlmostEqual(score, 30.0)
+        # 스왑을 못 읽어도 점수가 흔들리면 안 된다. 예전에는 이 경우 점수가
+        # 스왑 몫만큼 폭락해서, 메모리는 그대로인데 고양이가 갑자기 홀쭉해졌다.
+        self.assertAlmostEqual(score, 50.0)
         self.assertIs(measured_vm, vm)
         self.assertEqual((swap.total, swap.used, swap.percent), (0, 0, 0.0))
 
@@ -98,8 +100,69 @@ class MetricsTests(unittest.TestCase):
         ):
             score, measured_vm, swap = metrics.safe_pressure_score()
 
-        self.assertAlmostEqual(score, 40.0)
+        self.assertAlmostEqual(score, 50.0)
         self.assertIs(swap, sw)
+
+
+class PressureScoreTests(unittest.TestCase):
+    """압박 점수는 **쓸 수 있는 RAM 이 얼마나 없는가** 만 본다.
+
+    예전에는 ``0.6*RAM + 0.4*스왑`` 이었다. 그런데 macOS 의
+    ``swap.percent`` 는 ``used/total`` 인데 커널이 스왑 파일을 수요에 맞춰
+    만들고 지우기 때문에 분자와 분모가 같이 움직인다. 늘 80~90% 에 붙어
+    있어서 정보가 없고, 게다가 **부호가 뒤집힌다** — 압박이 심해져 스왑
+    파일이 커지면 분모만 커져서 percent 가 오히려 내려간다.
+
+    실측(2026-09): 재부팅으로 스왑이 6.9GB→0.5GB 로 비워지자 옛 점수는
+    80.9→67.9 로 여섯 칸이나 홀쭉해졌다. 같은 순간 실제 여유 RAM 은
+    4.1GB→3.6GB 로 **줄었다**. 고양이가 거짓말을 한 것이다.
+    """
+
+    def test_score_is_exactly_the_ram_percentage(self):
+        vm = SimpleNamespace(total=8, used=4, percent=63.8)
+        sw = SimpleNamespace(total=2, used=1, percent=48.9)
+        with (
+            patch.object(metrics.psutil, "virtual_memory", return_value=vm),
+            patch.object(metrics.psutil, "swap_memory", return_value=sw),
+        ):
+            score, measured_vm, swap = metrics.pressure_score()
+        self.assertAlmostEqual(score, 63.8)
+        self.assertIs(measured_vm, vm)
+        self.assertIs(swap, sw)
+
+    def test_swap_does_not_move_the_score(self):
+        """스왑만 달라지면 점수는 그대로여야 한다."""
+        vm = SimpleNamespace(total=8, used=4, percent=70.0)
+        scores = []
+        for swap_percent in (0.0, 50.0, 100.0):
+            sw = SimpleNamespace(total=2, used=1, percent=swap_percent)
+            with (
+                patch.object(metrics.psutil, "virtual_memory", return_value=vm),
+                patch.object(metrics.psutil, "swap_memory", return_value=sw),
+            ):
+                scores.append(metrics.pressure_score()[0])
+        self.assertEqual(scores, [70.0, 70.0, 70.0])
+
+    def test_swap_is_still_reported_for_diagnosis(self):
+        """점수에서 뺐다고 스왑을 안 보는 건 아니다. 진단은 계속 쓴다."""
+        vm = SimpleNamespace(total=8, used=4, percent=70.0)
+        sw = SimpleNamespace(total=2, used=1, percent=99.0)
+        with (
+            patch.object(metrics.psutil, "virtual_memory", return_value=vm),
+            patch.object(metrics.psutil, "swap_memory", return_value=sw),
+        ):
+            _, _, swap = metrics.pressure_score()
+        self.assertEqual(swap.percent, 99.0)
+
+    def test_closing_a_big_app_moves_the_cat_visibly(self):
+        """실측 재현: 크롬(4GB)을 닫으면 vm.percent 가 80.0 → 63.8 로 떨어졌다.
+
+        40 프레임 테마에서 여섯 칸 넘게 움직여야 사람 눈에 보인다. 이 검사가
+        깨지면 "앱을 닫으면 홀쭉해진다" 는 약속이 깨진 것이다.
+        """
+        frames = 40
+        moved = (80.0 - 63.8) / 100 * (frames - 1)
+        self.assertGreater(moved, 5.0, f"{moved:.1f}칸밖에 안 움직인다")
 
 
 if __name__ == "__main__":

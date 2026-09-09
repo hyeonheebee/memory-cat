@@ -230,8 +230,11 @@ class Cat(QtWidgets.QWidget):
                source=tr(language, "source_disk")),
             tr(language, "disk_detail", percent=dpct, used=human_gb(disk.used),
                total=human_gb(disk.total), free=human_gb(disk.free)),
+            # `vm.used` 가 아니라 total-available 을 쓴다. 둘이 다른 것을 세서
+            # 나란히 두면 percent 와 GB 가 어긋난다(맥판 주석 참고).
             tr(language, "ram_detail", percent=vm.percent,
-               used=human_gb(vm.used), total=human_gb(vm.total)),
+               used=human_gb(vm.total - vm.available),
+               total=human_gb(vm.total)),
         ]
         if sw.total > 0:
             self.detail.append(
