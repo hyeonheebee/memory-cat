@@ -221,11 +221,20 @@ class Cat(QtWidgets.QWidget):
 
         mood = chonk_stage(dpct, language)
         self.detail = [
-            tr(language, "mood_detail", mood=mood, percent=round(dpct)),
+            # `source` 를 반드시 넘긴다. 이 문구는 맥판과 공유하는데, 맥은
+            # 메모리/디스크를 고를 수 있어서 무엇을 보고 있는지 밝혀야 한다.
+            # 윈도우판은 디스크만 본다. 이 인자를 빠뜨리면 KeyError 가 나고,
+            # 아래 refresh() 가 예외를 삼켜서 앱은 멀쩡히 도는데 이 정보창만
+            # 통째로 빈 채로 남는다(v0.3.0 에서 실제로 그랬다).
+            tr(language, "mood_detail", mood=mood, percent=round(dpct),
+               source=tr(language, "source_disk")),
             tr(language, "disk_detail", percent=dpct, used=human_gb(disk.used),
                total=human_gb(disk.total), free=human_gb(disk.free)),
+            # `vm.used` 가 아니라 total-available 을 쓴다. 둘이 다른 것을 세서
+            # 나란히 두면 percent 와 GB 가 어긋난다(맥판 주석 참고).
             tr(language, "ram_detail", percent=vm.percent,
-               used=human_gb(vm.used), total=human_gb(vm.total)),
+               used=human_gb(vm.total - vm.available),
+               total=human_gb(vm.total)),
         ]
         if sw.total > 0:
             self.detail.append(

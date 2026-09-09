@@ -360,6 +360,11 @@ def _fallback_ai(
     disk_percent = float(disk.get("percent", 0))
     pressure = float(ram.get("pressure_score", ram.get("percent", 0)))
     ram_total = int(ram.get("total_bytes", 0))
+    # 압박 점수는 이제 RAM 만 본다(metrics.pressure_score 참고). 그래서 스왑을
+    # 얘기하려면 스냅샷의 실사용량을 직접 봐야 한다. 점수가 높다고 스왑 탓을
+    # 하면 스왑이 0 인 기계에서도 그렇게 말하게 된다.
+    swap_used = int(snapshot.get("swap", {}).get("used_bytes", 0))
+    swapping = swap_used >= 1024 ** 3  # 1GB 넘게 밀려나 있으면 언급할 값어치가 있다
     why: List[str] = []
 
     if lang == LANGUAGE_EN:
@@ -372,11 +377,13 @@ def _fallback_ai(
                 f"Disk usage is high at {disk_percent:.0f}%, which can constrain temporary files and swap space."
             )
         if pressure >= 80:
-            why.append(
-                f"Memory pressure is {pressure:.0f}, so swapping may be adding latency."
-            )
+            why.append(f"Memory is {pressure:.0f}% full, so there is little room left.")
         elif pressure >= 65:
-            why.append(f"Memory pressure is somewhat high at {pressure:.0f}.")
+            why.append(f"Memory is fairly full at {pressure:.0f}%.")
+        if swapping:
+            why.append(
+                f"{human_gb(swap_used)} has been pushed out to swap, which adds latency when it is read back."
+            )
     else:
         if disk_percent >= 90:
             why.append(
@@ -387,11 +394,13 @@ def _fallback_ai(
                 f"디스크 사용률이 {disk_percent:.0f}%로 높아 임시 파일과 스왑 공간이 빠듯할 수 있습니다."
             )
         if pressure >= 80:
-            why.append(
-                f"메모리 압박 점수가 {pressure:.0f}점이라 스왑 사용으로 지연이 생길 수 있습니다."
-            )
+            why.append(f"메모리가 {pressure:.0f}% 차 있어 남은 자리가 얼마 없습니다.")
         elif pressure >= 65:
-            why.append(f"메모리 압박 점수가 {pressure:.0f}점으로 다소 높습니다.")
+            why.append(f"메모리가 {pressure:.0f}% 로 다소 차 있습니다.")
+        if swapping:
+            why.append(
+                f"{human_gb(swap_used)} 가 스왑으로 밀려나 있어, 다시 불러올 때 지연이 생깁니다."
+            )
 
     if apps:
         top = apps[0]

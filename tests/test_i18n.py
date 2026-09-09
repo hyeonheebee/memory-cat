@@ -1,6 +1,100 @@
+import ast
+import pathlib
+import string
 import unittest
 
 import i18n
+
+_REPO = pathlib.Path(__file__).resolve().parent.parent
+
+
+class FormatArgumentTests(unittest.TestCase):
+    """``tr()`` 을 부르는 모든 곳이 그 문구가 요구하는 인자를 다 넘기는지 본다.
+
+    v0.3.0 에서 공용 문구 ``mood_detail`` 에 ``{source}`` 를 더했는데 맥판만
+    고치고 윈도우판(`windows/windows_cat.pyw`)을 놓쳤다. 윈도우의 갱신 루프는
+    한 틱이 실패해도 삼키도록 되어 있어서, 앱은 멀쩡히 도는데 우클릭 정보창만
+    통째로 비었다. 에러도 안 뜨고 기존 검사도 못 잡았다 — 그 검사는 "키가 두
+    언어에 다 있는가" 만 봤기 때문이다.
+
+    문구를 mac/win 이 함께 쓰므로 한쪽만 고치는 실수가 다시 나기 쉽다.
+    """
+
+    #: 검사할 소스. 윈도우판은 PySide6 가 없어 import 할 수 없으므로 글로 읽는다.
+    SOURCES = (
+        "desktop_cat.py",
+        "windows/windows_cat.pyw",
+        "brain.py",
+        "personality.py",
+        "vision_theme.py",
+        "import_theme.py",
+    )
+
+    @staticmethod
+    def _placeholders(template):
+        """``"{a} {b:.0f}"`` → ``{"a", "b"}``. 형식 지정자는 떼어낸다."""
+        return {
+            name.split(".")[0].split("[")[0]
+            for _, name, _, _ in string.Formatter().parse(template)
+            if name
+        }
+
+    def _tr_calls(self, path):
+        """``tr(language, "키", ...)`` 중 키가 상수인 것만. 동적 키는 못 본다."""
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "tr"):
+                continue
+            if len(node.args) < 2 or not isinstance(node.args[1], ast.Constant):
+                continue
+            if isinstance(node.args[1].value, str):
+                yield node
+
+    def test_every_call_passes_the_arguments_its_string_needs(self):
+        missing = []
+        checked = 0
+        for name in self.SOURCES:
+            path = _REPO / name
+            if not path.is_file():
+                continue
+            for node in self._tr_calls(path):
+                key = node.args[1].value
+                given = {kw.arg for kw in node.keywords if kw.arg}
+                for language in ("ko", "en"):
+                    template = i18n._STRINGS[language].get(key)
+                    if template is None:
+                        continue
+                    checked += 1
+                    lack = self._placeholders(template) - given
+                    if lack:
+                        missing.append(
+                            f"{name}:{node.lineno} tr(..., {key!r}) 에 "
+                            f"{sorted(lack)} 가 빠졌습니다 [{language}]"
+                        )
+        self.assertGreater(checked, 0, "tr() 호출을 하나도 못 찾았습니다")
+        self.assertEqual(missing, [], "\n" + "\n".join(missing))
+
+    def test_every_literal_key_exists(self):
+        """없는 키를 부르면 그 자리에서 KeyError 가 난다."""
+        unknown = []
+        for name in self.SOURCES:
+            path = _REPO / name
+            if not path.is_file():
+                continue
+            for node in self._tr_calls(path):
+                key = node.args[1].value
+                if key not in i18n._STRINGS["ko"]:
+                    unknown.append(f"{name}:{node.lineno} {key!r}")
+        self.assertEqual(unknown, [], "\n" + "\n".join(unknown))
+
+    def test_both_languages_carry_the_same_keys(self):
+        """한쪽에만 있는 키는 그 언어에서 그 문구를 깨뜨린다."""
+        ko = set(i18n._STRINGS["ko"])
+        en = set(i18n._STRINGS["en"])
+        self.assertEqual(ko - en, set(), f"영어에 없는 키: {sorted(ko - en)}")
+        self.assertEqual(en - ko, set(), f"한국어에 없는 키: {sorted(en - ko)}")
 
 
 class I18nTests(unittest.TestCase):

@@ -840,7 +840,7 @@ class SizeSourceTests(unittest.TestCase):
         disk = SimpleNamespace(
             total=100, used=50, free=50, percent=50.0
         )
-        vm = SimpleNamespace(total=8, used=4, percent=50.0)
+        vm = SimpleNamespace(total=8, used=4, available=4, percent=50.0)
         sw = SimpleNamespace(total=0, used=0, percent=0.0)
 
         with (
@@ -879,7 +879,7 @@ class SizeSourceTests(unittest.TestCase):
                 controller.view = Mock()
                 controller._maybe_prompt_disk_full = Mock()
                 disk = SimpleNamespace(total=100, used=50, free=50, percent=50.0)
-                vm = SimpleNamespace(total=8, used=4, percent=50.0)
+                vm = SimpleNamespace(total=8, used=4, available=4, percent=50.0)
                 sw = SimpleNamespace(total=0, used=0, percent=0.0)
                 with (
                     patch.object(desktop_cat.mc, "disk_usage", return_value=disk),
