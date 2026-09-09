@@ -52,7 +52,7 @@ INTERPRETER_NAME = "MemoryCatPython"
 PYTHON_HOME_FILE = "pythonhome"
 # 릴리스 빌드(macos/memorycat.spec)와 같은 값이어야 한다. 두 경로가 서로 다른
 # 버전을 새기면 사용자가 어느 쪽으로 설치했는지 구별할 수 없다.
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 #: 번들 안에서의 아이콘 파일 이름. ``CFBundleIconFile`` 에 이 값이 그대로
 #: 들어간다. 확장자를 붙여 둔다 — 애플 문서가 허용하는 형태고(크롬도
