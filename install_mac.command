@@ -44,6 +44,10 @@ mkdir -p "$APPS_DIR" "$APP/Contents/Resources"
 python3 -m venv "$APP/Contents/Resources/venv"
 VENVPY="$APP/Contents/Resources/venv/bin/python"
 
+# 인터프리터 사본의 이름. build_app.py 가 단일 진실 원천이므로 물어본다 —
+# 여기에 베껴 적으면 한쪽만 고쳤을 때 조용히 어긋난다.
+INTERPRETER="$(python3 -c "import sys; sys.path.insert(0, '$SRC/macos'); import build_app; print(build_app.INTERPRETER_NAME)")"
+
 # 이 순서는 바꾸면 안 된다. macOS 기본 python3 의 venv 에 딸려오는 pip 21.2.4 는
 # pyobjc-core 휠을 찾지 못해 소스 빌드로 넘어가고 "Cannot locate a working
 # compiler" 로 죽는다. pip 를 먼저 올려야 휠이 잡힌다.
@@ -57,6 +61,40 @@ VENVPY="$APP/Contents/Resources/venv/bin/python"
     --app "$APP" \
     --launch-agent "$PLIST" \
     --log "$LOG"
+
+# 복사한 인터프리터를 ad-hoc 으로 다시 서명한다.
+#
+# python.org 배포본은 Apple 개발자 인증서로 정식 서명돼 있다(TeamIdentifier
+# 가 붙어 있다). 그 바이너리를 번들 안으로 복사하면 서명이 자기 자리를 벗어나
+# "invalid Info.plist (plist or signature have been modified)" 상태가 되고,
+# 커널이 SIGKILL(종료코드 137)로 죽인다. 파이썬이 시작조차 못 하므로 로그도
+# 안 남는다 — 설치는 성공했다고 하는데 고양이만 안 뜬다.
+#
+# Homebrew 파이썬은 ad-hoc 서명이라 복사해도 이 일이 없다. 그래서 오래
+# 드러나지 않았다.
+#
+# `--sign -` 는 ad-hoc 서명이라 인증서가 필요 없다. 원래 서명을 지우고 이
+# 자리에 맞는 것으로 바꾸는 것뿐이다.
+if ! codesign --force --sign - "$APP/Contents/MacOS/$INTERPRETER" 2>/dev/null; then
+    echo "⚠️  인터프리터 재서명에 실패했습니다. 계속 진행하지만 실행이 안 될 수 있습니다."
+fi
+
+# 만든 앱이 진짜로 도는지 본다. 파일이 제자리에 있는 것과 실행되는 것은 다르다.
+# 여기서 걸러야 "✅ 완료" 라고 해 놓고 아무것도 안 뜨는 일을 막는다.
+if ! "$APP/Contents/MacOS/$INTERPRETER" -c "import sys" >/dev/null 2>&1; then
+    echo ""
+    echo "❌ 번들 안 파이썬이 실행되지 않습니다. 설치를 멈춥니다."
+    echo ""
+    echo "   쓰인 파이썬: $(python3 -c 'import sys; print(sys.base_prefix)' 2>/dev/null)"
+    echo ""
+    echo "   코드 서명 때문일 수 있습니다. 다른 파이썬으로 다시 해 보세요:"
+    echo "       PATH=\"/opt/homebrew/bin:\$PATH\" ./install_mac.command"
+    echo ""
+    echo "   그래도 안 되면 이 내용을 붙여서 이슈로 남겨 주세요:"
+    echo "       codesign --verify --verbose \"$APP/Contents/MacOS/$INTERPRETER\""
+    echo ""
+    exit 1
+fi
 
 if ! plutil -lint "$APP/Contents/Info.plist" >/dev/null; then
     echo "❌ 번들 Info.plist 가 깨졌습니다. 설치를 멈춥니다."

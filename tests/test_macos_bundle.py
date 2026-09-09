@@ -552,6 +552,72 @@ class ReleaseSpecTests(unittest.TestCase):
         self.assertIn(f'VERSION = "{build_app.VERSION}"', source)
 
 
+class InstallScriptTests(unittest.TestCase):
+    """`install_mac.command` 가 죽은 앱을 설치해 놓고 성공했다고 말하지 않는지.
+
+    실제로 그런 일이 있었다. python.org 파이썬을 쓰는 맥에서 설치가 "✅ 완료!"
+    를 찍었는데 고양이는 뜨지 않았다. 원인은 인터프리터 사본의 코드 서명이었다 —
+    python.org 배포본은 Apple 개발자 인증서로 정식 서명돼 있어서(TeamIdentifier
+    가 있다), 번들 안으로 복사하면 서명이 자기 Info.plist 와 안 맞게 되고 커널이
+    SIGKILL(종료코드 137)로 죽인다. Homebrew 파이썬은 ad-hoc 이라 이 일이
+    없어서 오래 드러나지 않았다.
+
+    로그도 남지 않는다. exec 단계에서 죽으므로 파이썬이 시작조차 못 한다.
+    """
+
+    SCRIPT = _REPO / "install_mac.command"
+
+    def setUp(self):
+        if not self.SCRIPT.is_file():
+            self.skipTest(f"설치 스크립트가 없습니다: {self.SCRIPT}")
+        self.source = self.SCRIPT.read_text(encoding="utf-8")
+
+    def test_the_copied_interpreter_is_re_signed(self):
+        """복사한 인터프리터는 ad-hoc 으로 다시 서명해야 실행된다."""
+        self.assertIn("codesign", self.source)
+        self.assertIn("--force", self.source)
+        # `--sign -` 가 ad-hoc 서명이다. 인증서를 요구하지 않는다.
+        self.assertRegex(self.source, r"--sign\s+-")
+
+    def test_it_checks_the_app_actually_runs(self):
+        """번들을 만든 뒤 실제로 실행해 봐야 한다.
+
+        파일이 제자리에 있는 것과 실행되는 것은 다르다. 서명이든 아키텍처든
+        의존성이든, 무엇 때문이든 안 도는 앱을 설치해 놓고 성공을 알리면 안 된다.
+        """
+        # 인터프리터 이름은 build_app 이 단일 진실 원천이다. 이름을 베껴
+        # 적었든 물어봤든, 둘 중 하나로 이 스크립트에 닿아 있어야 한다.
+        self.assertTrue(
+            build_app.INTERPRETER_NAME in self.source
+            or "INTERPRETER_NAME" in self.source,
+            "인터프리터 이름이 스크립트에 없습니다",
+        )
+        # 실제로 실행해 보는 단계가 있어야 한다. 파일 존재 확인만으로는
+        # 서명·아키텍처·의존성 문제를 못 잡는다.
+        self.assertIn('-c "import sys"', self.source)
+        # 그리고 그 검사가 성공 문구보다 앞이어야 의미가 있다.
+        # 주석에 적힌 "완료" 는 세지 않는다 — 실제로 출력하는 줄만 본다.
+        lines = self.source.splitlines()
+        def first_line(predicate):
+            for i, line in enumerate(lines):
+                if line.strip().startswith("#"):
+                    continue
+                if predicate(line):
+                    return i
+            return None
+        check = first_line(lambda ln: '-c "import sys"' in ln)
+        done = first_line(lambda ln: "echo" in ln and "완료" in ln)
+        self.assertIsNotNone(done, "성공을 출력하는 줄을 못 찾았습니다")
+        self.assertIsNotNone(check, "실행 검사를 못 찾았습니다")
+        self.assertLess(check, done, "실행 검사가 성공 문구보다 뒤에 있습니다")
+
+    def test_failure_message_names_the_cause_and_a_remedy(self):
+        """조용히 죽지 말고 무엇을 하라고 알려줘야 한다."""
+        self.assertIn("codesign", self.source)
+        for hint in ("서명", "python"):
+            self.assertIn(hint, self.source.lower() if hint == "python" else self.source)
+
+
 class WindowsWorkflowTests(unittest.TestCase):
     """윈도우 워크플로가 빌드 방법을 베껴 적지 않았는지 본다.
 
