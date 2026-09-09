@@ -104,6 +104,16 @@ SIZE_STRING_KEYS = {
     "크게": "size_large",
     "왕": "size_king",
 }
+#: 고양이 몸집을 무엇으로 정할지.
+#:
+#: 메모리(책상)와 디스크(창고)는 성격이 다르다. 메모리는 앱을 닫으면 몇 초
+#: 안에 내려가고, 디스크는 파일을 지워야 내려간다. 그래서 같은 그림이라도
+#: 무엇에 반응하느냐에 따라 전혀 다른 물건이 된다. 사용자가 고른다.
+SOURCE_MEMORY = "memory"
+SOURCE_DISK = "disk"
+SOURCE_MAX = "max"
+SIZE_SOURCES = (SOURCE_MEMORY, SOURCE_DISK, SOURCE_MAX)
+
 DEFAULT = {
     "theme": "cute",
     "pet_name": "",
@@ -111,17 +121,57 @@ DEFAULT = {
     "personality": DEFAULT_PERSONALITY,
     "custom_personality": "",
     "language": LANGUAGE_AUTO,
+    # 이름이 Memory Cat 인데 v0.2.0 까지 디스크로 돌고 있었다. 느려짐의 실제
+    # 원인도 메모리 쪽이라(스왑을 오가느라 버벅인다) 기본값을 메모리로 둔다.
+    "size_source": SOURCE_MEMORY,
 }
 
 
-def frame_index_for(theme, disk_percent):
-    """디스크 사용률을 그 테마의 프레임 번호로 옮긴다.
+def size_percent(source=None, memory=None, disk=None):
+    """고양이 몸집을 정할 0~100 값. 어느 지표를 볼지는 ``source`` 가 정한다.
 
+    ``memory``/``disk`` 를 주면 그 값을 쓰고 다시 재지 않는다. 화면 갱신은
+    이미 두 지표를 다 재 놓고 들어오므로, 여기서 또 재면 1초마다 프로세스
+    목록을 두 번 훑게 된다.
+
+    측정이 실패해도 예외를 내지 않는다. 숫자를 못 읽었다고 고양이가 화면에서
+    사라지면 안 되므로, 못 읽은 지표는 0 으로 두고 남은 것으로 정한다.
+    """
+    if source not in SIZE_SOURCES:
+        source = DEFAULT["size_source"]
+
+    def _memory():
+        if memory is not None:
+            return float(memory)
+        try:
+            return float(mc.safe_pressure_score()[0])
+        except Exception:
+            return 0.0
+
+    def _disk():
+        if disk is not None:
+            return float(disk)
+        try:
+            return float(mc.disk_usage().percent)
+        except Exception:
+            return 0.0
+
+    if source == SOURCE_MEMORY:
+        return _memory()
+    if source == SOURCE_DISK:
+        return _disk()
+    return max(_memory(), _disk())
+
+
+def frame_index_for(theme, percent):
+    """0~100 값을 그 테마의 프레임 번호로 옮긴다.
+
+    무슨 지표인지는 여기서 따지지 않는다(:func:`size_percent` 가 정한다).
     바탕화면 고양이와 알럿 아이콘이 같은 계산을 써야 한쪽만 다른 몸집으로
     나오는 일이 없다.
     """
     n = frame_count(theme)
-    return int(round(disk_percent / 100 * (n - 1)))
+    return int(round(percent / 100 * (n - 1)))
 
 
 def alert_icon_path():
@@ -136,11 +186,12 @@ def alert_icon_path():
     못 구했다고 알럿까지 안 뜨면 안 된다.
     """
     try:
-        theme = load_config()["theme"]
+        cfg = load_config()
+        theme = cfg["theme"]
     except Exception:
         return FALLBACK_ALERT_ICON_PATH
     try:
-        index = frame_index_for(theme, mc.disk_usage().percent)
+        index = frame_index_for(theme, size_percent(cfg.get("size_source")))
     except Exception:
         index = 0  # 측정에 실패해도 그 테마의 얼굴은 보여 준다.
     try:
@@ -189,6 +240,10 @@ def load_config(path=None):
         cfg["custom_personality"] = custom
         language = loaded.get("language", LANGUAGE_AUTO)
         cfg["language"] = language if language in LANGUAGE_OVERRIDES else LANGUAGE_AUTO
+        source = loaded.get("size_source", DEFAULT["size_source"])
+        cfg["size_source"] = (
+            source if source in SIZE_SOURCES else DEFAULT["size_source"]
+        )
     return cfg
 
 
@@ -759,21 +814,30 @@ class CatController(NSObject):
         disk = mc.disk_usage()
         score, vm, sw = mc.safe_pressure_score()
         dpct = disk.percent
-        self.score = dpct
+        # 몸집은 설정이 고른 지표를 따른다. 디스크 경고는 그것과 무관하게
+        # 언제나 디스크를 본다 — 정리할 대상이 디스크이기 때문이다.
+        source = self.cfg.get("size_source", DEFAULT["size_source"])
+        pct = size_percent(source, memory=score, disk=dpct)
+        self.score = pct
         self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
-        idx = frame_index_for(theme, dpct)
+        idx = frame_index_for(theme, pct)
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
         language = self.language
-        self.view.updateImage_l1_l2_(
-            img,
-            f"{tr(language, 'disk')} {dpct:.0f}%",
-            f"{tr(language, 'ram')} {vm.percent:.0f}%",
-        )
+        # 큰 숫자가 몸집을 설명해야 한다. 메모리로 부풀었는데 디스크가 크게
+        # 적혀 있으면 왜 뚱뚱한지 읽을 수 없다.
+        if source == SOURCE_DISK or (source == SOURCE_MAX and dpct >= score):
+            first = f"{tr(language, 'disk')} {dpct:.0f}%"
+            second = f"{tr(language, 'ram')} {vm.percent:.0f}%"
+        else:
+            first = f"{tr(language, 'ram')} {vm.percent:.0f}%"
+            second = f"{tr(language, 'disk')} {dpct:.0f}%"
+        self.view.updateImage_l1_l2_(img, first, second)
 
-        mood = chonk_stage(dpct, language)
+        mood = chonk_stage(pct, language)
         self.detail = [
-            tr(language, "mood_detail", mood=mood, percent=round(dpct)),
+            tr(language, "mood_detail", mood=mood, percent=round(pct),
+               source=tr(language, f"source_{source}")),
             tr(language, "disk_detail", percent=dpct, used=mc.human_gb(disk.used), total=mc.human_gb(disk.total), free=mc.human_gb(disk.free)),
             tr(language, "ram_detail", percent=vm.percent, used=mc.human_gb(vm.used), total=mc.human_gb(vm.total)),
         ]
@@ -910,6 +974,18 @@ class CatController(NSObject):
         self._notify(
             tr(self.language, "pet_name_saved_title", pet=self.petName()),
             tr(self.language, "pet_name_hint"),
+        )
+
+    def setSizeSource_(self, sender):
+        """무엇을 보고 뚱뚱해질지 바꾼다. 바꾸는 즉시 몸집이 따라온다."""
+        self.cfg["size_source"] = sender.representedObject()
+        save_config(self.cfg)
+        self.refresh_(None)
+        label = tr(self.language, f"source_{self.cfg['size_source']}")
+        self._notify(
+            tr(self.language, "size_source_changed_title", source=label),
+            tr(self.language, "size_source_changed_body",
+               pet=self.petName(), source=label),
         )
 
     def setLanguage_(self, sender):
@@ -1324,6 +1400,23 @@ class CatController(NSObject):
         pi = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_personality"), None, "")
         pi.setSubmenu_(personality_menu)
         menu.addItem_(pi)
+
+        source_menu = NSMenu.alloc().init()
+        current_source = self.cfg.get("size_source", DEFAULT["size_source"])
+        for option in SIZE_SOURCES:
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                tr(self.language, f"size_source_{option}"), b"setSizeSource:", ""
+            )
+            item.setTarget_(self)
+            item.setRepresentedObject_(option)
+            if option == current_source:
+                item.setState_(1)
+            source_menu.addItem_(item)
+        source_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            tr(self.language, "menu_size_source"), None, ""
+        )
+        source_item.setSubmenu_(source_menu)
+        menu.addItem_(source_item)
 
         language_menu = NSMenu.alloc().init()
         for override in LANGUAGE_OVERRIDES:

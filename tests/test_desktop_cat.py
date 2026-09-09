@@ -317,6 +317,99 @@ class DesktopCatTests(unittest.TestCase):
         self.assertEqual(desktop_cat.theme_label("cute", LANGUAGE_EN), "Cute")
         self.assertEqual(desktop_cat.size_label("보통", LANGUAGE_EN), "Medium")
 
+    def test_size_source_defaults_to_memory(self):
+        """이름이 Memory Cat 인데 디스크로 돌고 있었다. 기본값을 메모리로 둔다."""
+        self.assertEqual(desktop_cat.DEFAULT["size_source"], desktop_cat.SOURCE_MEMORY)
+
+    def test_size_source_round_trips_through_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            config = dict(desktop_cat.DEFAULT, size_source=desktop_cat.SOURCE_DISK)
+            self.assertTrue(desktop_cat.save_config(config, path))
+            loaded = desktop_cat.load_config(path)
+        self.assertEqual(loaded["size_source"], desktop_cat.SOURCE_DISK)
+
+    def test_unknown_size_source_falls_back_to_default(self):
+        # 손으로 고친 설정 파일이나 옛 버전이 남긴 값이 앱을 죽이면 안 된다.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text('{"size_source": "cpu"}', encoding="utf-8")
+            loaded = desktop_cat.load_config(path)
+        self.assertEqual(loaded["size_source"], desktop_cat.DEFAULT["size_source"])
+
+    def test_old_config_without_size_source_gets_the_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.json"
+            path.write_text('{"theme": "cute"}', encoding="utf-8")
+            loaded = desktop_cat.load_config(path)
+        self.assertEqual(loaded["size_source"], desktop_cat.SOURCE_MEMORY)
+
+
+class SizeSourceTests(unittest.TestCase):
+    """무엇이 고양이를 뚱뚱하게 만드는지 고르는 설정.
+
+    메모리(책상)와 디스크(창고)는 성격이 다르다. 메모리는 앱을 닫으면 바로
+    내려가고, 디스크는 파일을 지워야 내려간다. 어느 쪽에 반응할지는 사용자가
+    고른다.
+    """
+
+    def _metrics(self, disk_percent, pressure):
+        vm = SimpleNamespace(percent=pressure, used=0, total=0, available=0)
+        sw = SimpleNamespace(percent=pressure, used=0, total=0)
+        return (
+            patch.object(desktop_cat.mc, "disk_usage",
+                         return_value=SimpleNamespace(
+                             percent=disk_percent, used=0, total=0, free=0)),
+            patch.object(desktop_cat.mc, "safe_pressure_score",
+                         return_value=(pressure, vm, sw)),
+        )
+
+    def test_memory_source_follows_pressure(self):
+        disk, mem = self._metrics(90.0, 20.0)
+        with disk, mem:
+            self.assertEqual(
+                desktop_cat.size_percent(desktop_cat.SOURCE_MEMORY), 20.0)
+
+    def test_disk_source_follows_disk(self):
+        disk, mem = self._metrics(90.0, 20.0)
+        with disk, mem:
+            self.assertEqual(
+                desktop_cat.size_percent(desktop_cat.SOURCE_DISK), 90.0)
+
+    def test_max_source_takes_the_fuller_one(self):
+        disk, mem = self._metrics(90.0, 20.0)
+        with disk, mem:
+            self.assertEqual(
+                desktop_cat.size_percent(desktop_cat.SOURCE_MAX), 90.0)
+        disk, mem = self._metrics(20.0, 90.0)
+        with disk, mem:
+            self.assertEqual(
+                desktop_cat.size_percent(desktop_cat.SOURCE_MAX), 90.0)
+
+    def test_unknown_source_behaves_like_the_default(self):
+        disk, mem = self._metrics(90.0, 20.0)
+        with disk, mem:
+            self.assertEqual(
+                desktop_cat.size_percent("cpu"),
+                desktop_cat.size_percent(desktop_cat.DEFAULT["size_source"]))
+
+    def test_a_broken_reading_does_not_raise(self):
+        # 측정이 실패해도 고양이는 떠 있어야 한다. 0 이면 홀쭉한 모습이다.
+        with patch.object(desktop_cat.mc, "safe_pressure_score",
+                          side_effect=OSError("boom")), \
+             patch.object(desktop_cat.mc, "disk_usage",
+                          side_effect=OSError("boom")):
+            self.assertEqual(desktop_cat.size_percent(desktop_cat.SOURCE_MAX), 0.0)
+
+    def test_every_source_maps_onto_a_real_frame(self):
+        for source in desktop_cat.SIZE_SOURCES:
+            disk, mem = self._metrics(100.0, 100.0)
+            with disk, mem:
+                index = desktop_cat.frame_index_for(
+                    "cute", desktop_cat.size_percent(source))
+            self.assertEqual(index, desktop_cat.frame_count("cute") - 1)
+
+
     def test_custom_personality_round_trips_through_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "config.json"
@@ -760,12 +853,68 @@ class DesktopCatTests(unittest.TestCase):
         ):
             controller.refresh_(None)
 
+        # 화면 갱신 한 번에 측정도 한 번이어야 한다. size_percent 가 다시
+        # 재면 1초마다 프로세스 목록을 두 번 훑게 된다.
         measure.assert_called_once_with()
-        self.assertEqual(controller.score, 50.0)
+        # 기본값이 메모리이므로 몸집은 압박 점수(30.0)를 따른다. 디스크 50.0 이
+        # 아니다.
+        self.assertEqual(controller.score, 30.0)
         # 스왑을 못 읽은 경우 스왑 줄은 넣지 않는다.
         self.assertNotIn(
             "스왑", "".join(controller.detail)
         )
+
+    def test_refresh_follows_the_configured_source(self):
+        """같은 측정값이라도 설정에 따라 몸집이 달라진다."""
+        expected = {
+            desktop_cat.SOURCE_MEMORY: 30.0,
+            desktop_cat.SOURCE_DISK: 50.0,
+            desktop_cat.SOURCE_MAX: 50.0,
+        }
+        for source, want in expected.items():
+            with self.subTest(source=source):
+                controller = desktop_cat.CatController.alloc().init()
+                controller.cfg = dict(desktop_cat.DEFAULT, size_source=source)
+                controller.language = "ko"
+                controller.view = Mock()
+                controller._maybe_prompt_disk_full = Mock()
+                disk = SimpleNamespace(total=100, used=50, free=50, percent=50.0)
+                vm = SimpleNamespace(total=8, used=4, percent=50.0)
+                sw = SimpleNamespace(total=0, used=0, percent=0.0)
+                with (
+                    patch.object(desktop_cat.mc, "disk_usage", return_value=disk),
+                    patch.object(desktop_cat.mc, "safe_pressure_score",
+                                 return_value=(30.0, vm, sw)),
+                    patch.object(desktop_cat.mc, "top_memory_apps", return_value=[]),
+                    patch.object(desktop_cat, "NSImage"),
+                ):
+                    controller.refresh_(None)
+                self.assertEqual(controller.score, want)
+
+    def test_disk_warning_always_watches_disk(self):
+        """몸집을 메모리로 돌려도 디스크 경고는 디스크를 봐야 한다.
+
+        정리할 대상이 디스크이기 때문이다. 메모리를 보고 "디스크가 찼어요" 라고
+        하면 사용자가 지울 게 없다.
+        """
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT,
+                              size_source=desktop_cat.SOURCE_MEMORY)
+        controller.language = "ko"
+        controller.view = Mock()
+        controller._maybe_prompt_disk_full = Mock()
+        disk = SimpleNamespace(total=100, used=95, free=5, percent=95.0)
+        vm = SimpleNamespace(total=8, used=1, percent=10.0)
+        sw = SimpleNamespace(total=0, used=0, percent=0.0)
+        with (
+            patch.object(desktop_cat.mc, "disk_usage", return_value=disk),
+            patch.object(desktop_cat.mc, "safe_pressure_score",
+                         return_value=(10.0, vm, sw)),
+            patch.object(desktop_cat.mc, "top_memory_apps", return_value=[]),
+            patch.object(desktop_cat, "NSImage"),
+        ):
+            controller.refresh_(None)
+        controller._maybe_prompt_disk_full.assert_called_once_with(95.0)
 
     def test_disk_full_warning_falls_back_to_an_alert_when_it_never_appears(self):
         controller = desktop_cat.CatController.alloc().init()
@@ -1347,17 +1496,25 @@ class RevealTests(unittest.TestCase):
 
             cases = {0.0: "cat_00.png", 50.0: "cat_05.png", 91.0: "cat_09.png",
                      100.0: "cat_10.png"}
-            for percent, expected in cases.items():
-                with self.subTest(percent=percent):
-                    with (
-                        patch.object(desktop_cat, "USER_FRAMES_BASE", str(root)),
-                        patch.object(desktop_cat, "load_config",
-                                     return_value={"theme": "myotter"}),
-                        patch.object(desktop_cat.mc, "disk_usage",
-                                     return_value=SimpleNamespace(percent=percent)),
-                    ):
-                        chosen = desktop_cat.alert_icon_path()
-                    self.assertEqual(chosen, str(root / "myotter" / expected))
+            # 아이콘도 설정이 고른 지표를 따라야 한다. 화면 위 고양이는 메모리로
+            # 부풀어 있는데 말 거는 창에는 홀쭉한 그림이 붙으면 따로 논다.
+            for source in (desktop_cat.SOURCE_MEMORY, desktop_cat.SOURCE_DISK):
+                for percent, expected in cases.items():
+                    with self.subTest(source=source, percent=percent):
+                        vm = SimpleNamespace(percent=percent, used=0, total=0)
+                        sw = SimpleNamespace(percent=percent, used=0, total=0)
+                        with (
+                            patch.object(desktop_cat, "USER_FRAMES_BASE", str(root)),
+                            patch.object(desktop_cat, "load_config",
+                                         return_value={"theme": "myotter",
+                                                       "size_source": source}),
+                            patch.object(desktop_cat.mc, "disk_usage",
+                                         return_value=SimpleNamespace(percent=percent)),
+                            patch.object(desktop_cat.mc, "safe_pressure_score",
+                                         return_value=(percent, vm, sw)),
+                        ):
+                            chosen = desktop_cat.alert_icon_path()
+                        self.assertEqual(chosen, str(root / "myotter" / expected))
 
     def test_the_alert_icon_still_appears_when_the_disk_cannot_be_measured(self):
         # 측정이 실패해도 그 테마의 얼굴은 보여 준다. 아이콘 때문에 알럿이
