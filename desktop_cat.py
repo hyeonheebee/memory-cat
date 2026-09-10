@@ -839,11 +839,10 @@ class CatController(NSObject):
             tr(language, "mood_detail", mood=mood, percent=round(pct),
                source=tr(language, f"source_{source}")),
             tr(language, "disk_detail", percent=dpct, used=mc.human_gb(disk.used), total=mc.human_gb(disk.total), free=mc.human_gb(disk.free)),
-            # `vm.used` 를 쓰면 안 된다. macOS 에서 그건 active+wired 라
-            # 압축 메모리를 빼는데, `vm.percent` 는 포함한다. 한 줄에 나란히
-            # 두면 "RAM 70% · 9.0/18.0 GB"(=50%) 처럼 자기모순이 된다.
+            # 계산은 metrics.ram_used_for_display 가 한 곳에서 한다 —
+            # 맥과 윈도우가 각자 세면 갈라진다.
             tr(language, "ram_detail", percent=vm.percent,
-               used=mc.human_gb(vm.total - vm.available),
+               used=mc.human_gb(mc.ram_used_for_display(vm)),
                total=mc.human_gb(vm.total)),
         ]
         if sw.total > 0:

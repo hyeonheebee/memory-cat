@@ -25,6 +25,9 @@ from i18n import (
     resolve_language,
     tr,
 )
+# metrics 는 저장소 루트의 플랫폼 공통 모듈이다(GUI 의존 없음). i18n 과 같은
+# 방식으로 닿는다 — build_exe.bat 의 `--paths ".."` 와 `--hidden-import`.
+from metrics import ram_used_for_display
 
 # 빌드(.exe)면 frames 는 번들 안, config 는 exe 옆에 둔다
 if getattr(sys, "frozen", False):
@@ -230,10 +233,10 @@ class Cat(QtWidgets.QWidget):
                source=tr(language, "source_disk")),
             tr(language, "disk_detail", percent=dpct, used=human_gb(disk.used),
                total=human_gb(disk.total), free=human_gb(disk.free)),
-            # `vm.used` 가 아니라 total-available 을 쓴다. 둘이 다른 것을 세서
-            # 나란히 두면 percent 와 GB 가 어긋난다(맥판 주석 참고).
+            # 계산은 metrics.ram_used_for_display 가 한 곳에서 한다 —
+            # 맥과 윈도우가 각자 세면 갈라진다.
             tr(language, "ram_detail", percent=vm.percent,
-               used=human_gb(vm.total - vm.available),
+               used=human_gb(ram_used_for_display(vm)),
                total=human_gb(vm.total)),
         ]
         if sw.total > 0:
