@@ -579,6 +579,33 @@ class InstallScriptTests(unittest.TestCase):
         # `--sign -` 가 ad-hoc 서명이다. 인증서를 요구하지 않는다.
         self.assertRegex(self.source, r"--sign\s+-")
 
+    def _run_check_block(self):
+        """실행 검사 `if` 문의 본문. 주석은 뺀다.
+
+        스크립트 전체를 훑으면 안 된다. `codesign` 이든 `서명` 이든 다른
+        자리에도 나오는 단어라, 전체 검색으로는 실패 처리를 통째로 지워도
+        통과한다. 실제로 그랬다 — 이 블록의 `exit 1` 과 안내문 11줄을 지워도
+        예전 검사는 191개 전부 통과했다.
+        """
+        lines = self.source.splitlines()
+        start = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if stripped.startswith("if ") and '-c "import sys"' in stripped:
+                start = i
+                break
+        self.assertIsNotNone(start, "실행 검사 if 문을 못 찾았습니다")
+        body = []
+        for line in lines[start + 1:]:
+            if line.strip() == "fi":
+                return body
+            if line.strip().startswith("#"):
+                continue
+            body.append(line)
+        self.fail("실행 검사 if 문이 fi 로 닫히지 않았습니다")
+
     def test_it_checks_the_app_actually_runs(self):
         """번들을 만든 뒤 실제로 실행해 봐야 한다.
 
@@ -611,11 +638,35 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIsNotNone(check, "실행 검사를 못 찾았습니다")
         self.assertLess(check, done, "실행 검사가 성공 문구보다 뒤에 있습니다")
 
+    def test_a_dead_interpreter_stops_the_install(self):
+        """실행 검사가 실패하면 0 이 아닌 코드로 멈춰야 한다.
+
+        검사만 해 놓고 그냥 지나가면 검사가 없는 것과 같다. 안 도는 앱을
+        설치해 놓고 "✅ 완료!" 를 찍는 그 사고가 그대로 재발한다.
+        """
+        body = self._run_check_block()
+        self.assertTrue(
+            any(line.strip() == "exit 1" for line in body),
+            "실행 검사가 실패해도 설치가 멈추지 않습니다 — 블록 안에 exit 1 이 없습니다:\n"
+            + "\n".join(body),
+        )
+
     def test_failure_message_names_the_cause_and_a_remedy(self):
-        """조용히 죽지 말고 무엇을 하라고 알려줘야 한다."""
-        self.assertIn("codesign", self.source)
-        for hint in ("서명", "python"):
-            self.assertIn(hint, self.source.lower() if hint == "python" else self.source)
+        """조용히 죽지 말고 무엇을 하라고 알려줘야 한다.
+
+        `exit 1` 만 있고 안내가 없으면 사용자는 왜 멈췄는지 모른다. 이 앱은
+        독 아이콘이 없어서(LSUIElement) 화면에 아무 흔적도 안 남는다.
+        """
+        body = self._run_check_block()
+        printed = "\n".join(
+            line for line in body if line.strip().startswith("echo")
+        )
+        self.assertTrue(printed.strip(), "실패해도 아무 말도 하지 않습니다")
+        # 원인: 코드 서명 이야기가 나와야 한다.
+        self.assertIn("codesign", printed, "안내문이 원인(코드 서명)을 짚지 않습니다")
+        # 해법: 다른 파이썬으로 다시 해 보라는 길을 줘야 한다.
+        self.assertIn("python", printed.lower(), "안내문이 해볼 것을 알려주지 않습니다")
+
 
 
 class WindowsWorkflowTests(unittest.TestCase):

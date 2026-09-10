@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import brain
+import metrics
 from personality import CUSTOM_PERSONALITY
 
 
@@ -79,9 +80,46 @@ class BrainTests(unittest.TestCase):
         ):
             snapshot = brain.collect_metrics()
 
-        self.assertEqual(snapshot["ram"]["pressure_score"], 36.0)
+        # 스왑을 못 읽었다고 점수가 내려가면 안 된다. 점수는 이제 RAM 만
+        # 보므로(metrics.pressure_score 참고) vm.percent 그대로여야 한다.
+        # 예전에는 여기서 0.6 을 곱해 36.0 이 나왔다 — 같은 기계, 같은 순간에
+        # 고양이는 60 을 보고 진단은 36 을 봤다.
+        self.assertEqual(snapshot["ram"]["pressure_score"], 60.0)
         self.assertEqual(snapshot["swap"]["total_bytes"], 0)
         self.assertEqual(snapshot["measurement_warnings"], ["swap_unavailable"])
+
+    def test_swap_fallback_agrees_with_the_shared_metrics_fallback(self):
+        """brain 이 자기만의 폴백 공식을 갖지 않는다.
+
+        v0.3.1 이 metrics.pressure_score 에서 스왑을 뺐는데, brain 의 폴백
+        사본에는 옛 가중식(0.6 * vm.percent)이 그대로 남아 있었다. 두 곳이
+        같은 일을 따로 계산하면 한쪽만 고쳐도 테스트가 통과한다. 실제로 그랬다.
+
+        이 검사는 값을 베껴 적지 않는다. 두 경로에 같은 vm 을 주고 결과가
+        같은지만 본다. 그래서 나중에 공식이 또 바뀌어도 같이 따라간다.
+        """
+        disk = SimpleNamespace(total=100, used=70, free=30, percent=70.0)
+        vm = SimpleNamespace(total=200, available=80, used=120, percent=54.0)
+
+        with (
+            patch.object(brain, "disk_usage", return_value=disk),
+            patch.object(brain, "pressure_score", side_effect=OSError),
+            patch.object(brain.psutil, "virtual_memory", return_value=vm),
+            patch.object(brain, "top_memory_apps", return_value=[]),
+        ):
+            snapshot = brain.collect_metrics()
+
+        with (
+            patch.object(metrics, "pressure_score", side_effect=OSError),
+            patch.object(metrics.psutil, "virtual_memory", return_value=vm),
+        ):
+            shared, _, _ = metrics.safe_pressure_score()
+
+        self.assertEqual(
+            snapshot["ram"]["pressure_score"],
+            round(float(shared), 1),
+            "brain 의 스왑 폴백이 metrics.safe_pressure_score 와 갈라졌습니다",
+        )
 
     def test_collect_metrics_tolerates_unavailable_process_list(self):
         disk = SimpleNamespace(total=100, used=70, free=30, percent=70.0)

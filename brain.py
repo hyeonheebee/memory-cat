@@ -177,7 +177,10 @@ def collect_metrics(language: str = LANGUAGE_KO) -> Dict[str, Any]:
         # 유지하되 알 수 없는 스왑을 사용 중이라고 추측하지 않는다.
         vm = psutil.virtual_memory()
         swap = SimpleNamespace(total=0, used=0, percent=0.0)
-        score = 0.6 * vm.percent
+        # 점수는 RAM 만 본다. 스왑을 못 읽었다고 값이 달라질 이유가 없다 —
+        # 이 자리는 metrics.safe_pressure_score 와 반드시 같은 답을 내야 하고,
+        # test_swap_fallback_agrees_with_the_shared_metrics_fallback 이 지킨다.
+        score = float(vm.percent)
         measurement_warnings.append("swap_unavailable")
     try:
         apps = top_memory_apps()
