@@ -88,11 +88,13 @@ when RAM runs out, macOS pushes pages to swap and pulls them back, and you feel
 the wait. Storage matters too: a full drive leaves swap no room to grow.
 
 > Swap usage is deliberately **not** part of the score. macOS creates and
-> removes swap files on demand, so `used / total` sits at 80–90% no matter what
-> and even moves the wrong way — when pressure rises and the kernel grows the
-> swap file, the ratio falls. Counting it made the cat slim down after a reboot
-> while the Mac was actually more pressured than before. The diagnosis still
-> reports swap; it just does not decide his size.
+> removes swap files on demand, so `used / total` mostly measures how big the
+> kernel decided to make the file — the denominator moves with the numerator,
+> and the ratio swings without your Mac's pressure changing. It can even move
+> the wrong way: when pressure rises and the kernel grows the swap file, the
+> ratio falls. Counting it made the cat slim down after a reboot while the Mac
+> was actually more pressured than before. The diagnosis still reports swap; it
+> just does not decide his size.
 
 The Windows build follows storage only.
 
