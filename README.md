@@ -50,9 +50,10 @@ automatically converts into a custom 40-frame desktop theme.
   pet's distinctive colors, markings, face, and ears while generating a
   six-stage horizontal sprite sheet. Memory Cat segments it and builds the full
   40-frame theme automatically.
-- **The complete chonk chart:** memory pressure moves your cat through **A fine boi →
-  He chomnk → A heckin' chonker → HEFTYCHONK → MEGACHONKER → OH LAWD HE
-  COMIN**.
+- **The complete chonk chart:** **A fine boi → He chomnk → A heckin' chonker →
+  HEFTYCHONK → MEGACHONKER → OH LAWD HE COMIN**. Everyday use keeps him in the
+  middle of the chart; the last two names are for a Mac that is genuinely out of
+  room, so seeing one means something.
 - **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
   computer feels slow, recommends safe cleanup targets, estimates reclaimable
   space, and gives one concise piece of advice. The Korean menu label is
