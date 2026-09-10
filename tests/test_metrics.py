@@ -154,15 +154,42 @@ class PressureScoreTests(unittest.TestCase):
             _, _, swap = metrics.pressure_score()
         self.assertEqual(swap.percent, 99.0)
 
-    def test_closing_a_big_app_moves_the_cat_visibly(self):
-        """실측 재현: 크롬(4GB)을 닫으면 vm.percent 가 80.0 → 63.8 로 떨어졌다.
 
-        40 프레임 테마에서 여섯 칸 넘게 움직여야 사람 눈에 보인다. 이 검사가
-        깨지면 "앱을 닫으면 홀쭉해진다" 는 약속이 깨진 것이다.
+class RamDisplayTests(unittest.TestCase):
+    """정보창의 "RAM 70% · 12.6 / 18.0 GB" 가 자기모순이 되지 않는지.
+
+    ``vm.used`` 는 macOS 에서 active+wired 라 압축 메모리를 빼는데,
+    ``vm.percent`` 는 포함한다. 둘을 한 줄에 나란히 두면 percent 와 GB 가
+    다른 것을 세게 되어 "RAM 70% · 9.0/18.0 GB"(=50%) 처럼 어긋난다.
+
+    맥판과 윈도우판이 이 계산을 각자 하고 있었다. 이 저장소는 맥/윈도우가
+    갈라져서 이미 두 번 사고를 냈으므로(v0.3.0 의 빈 정보창) 계산을 한 곳에
+    둔다.
+    """
+
+    def test_displayed_used_is_total_minus_available(self):
+        vm = SimpleNamespace(total=18_000_000_000, available=5_400_000_000,
+                             used=9_000_000_000, percent=70.0)
+        self.assertEqual(metrics.ram_used_for_display(vm), 12_600_000_000)
+
+    def test_displayed_used_agrees_with_the_percent_beside_it(self):
+        """GB 비율과 percent 가 같은 것을 세야 한다.
+
+        이 검사가 깨지면 사용자가 정보창에서 서로 안 맞는 두 숫자를 본다.
         """
-        frames = 40
-        moved = (80.0 - 63.8) / 100 * (frames - 1)
-        self.assertGreater(moved, 5.0, f"{moved:.1f}칸밖에 안 움직인다")
+        for percent in (12.5, 40.0, 63.7, 70.0, 91.0):
+            with self.subTest(percent=percent):
+                total = 18_000_000_000
+                available = int(total * (1 - percent / 100))
+                vm = SimpleNamespace(
+                    total=total,
+                    available=available,
+                    # vm.used 는 일부러 엉뚱한 값. 이걸 쓰면 검사가 깨져야 한다.
+                    used=int(total * 0.5),
+                    percent=percent,
+                )
+                shown = metrics.ram_used_for_display(vm)
+                self.assertAlmostEqual(shown / total * 100, percent, places=6)
 
 
 if __name__ == "__main__":

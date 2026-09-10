@@ -50,9 +50,10 @@ automatically converts into a custom 40-frame desktop theme.
   pet's distinctive colors, markings, face, and ears while generating a
   six-stage horizontal sprite sheet. Memory Cat segments it and builds the full
   40-frame theme automatically.
-- **The complete chonk chart:** memory pressure moves your cat through **A fine boi →
-  He chomnk → A heckin' chonker → HEFTYCHONK → MEGACHONKER → OH LAWD HE
-  COMIN**.
+- **The complete chonk chart:** **A fine boi → He chomnk → A heckin' chonker →
+  HEFTYCHONK → MEGACHONKER → OH LAWD HE COMIN**. Everyday use keeps him in the
+  middle of the chart; the last two names are for a Mac that is genuinely out of
+  room, so seeing one means something.
 - **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
   computer feels slow, recommends safe cleanup targets, estimates reclaimable
   space, and gives one concise piece of advice. The Korean menu label is
@@ -88,11 +89,13 @@ when RAM runs out, macOS pushes pages to swap and pulls them back, and you feel
 the wait. Storage matters too: a full drive leaves swap no room to grow.
 
 > Swap usage is deliberately **not** part of the score. macOS creates and
-> removes swap files on demand, so `used / total` sits at 80–90% no matter what
-> and even moves the wrong way — when pressure rises and the kernel grows the
-> swap file, the ratio falls. Counting it made the cat slim down after a reboot
-> while the Mac was actually more pressured than before. The diagnosis still
-> reports swap; it just does not decide his size.
+> removes swap files on demand, so `used / total` mostly measures how big the
+> kernel decided to make the file — the denominator moves with the numerator,
+> and the ratio swings without your Mac's pressure changing. It can even move
+> the wrong way: when pressure rises and the kernel grows the swap file, the
+> ratio falls. Counting it made the cat slim down after a reboot while the Mac
+> was actually more pressured than before. The diagnosis still reports swap; it
+> just does not decide his size.
 
 The Windows build follows storage only.
 

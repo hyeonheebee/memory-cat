@@ -33,8 +33,8 @@ if not exist "frames" (
     exit /b 1
 )
 
-REM i18n.py 는 저장소 루트에 있다. windows 폴더만 복사해 온 경우 여기서
-REM 걸러 준다. 없으면 빌드는 되지만 실행할 때 죽는다.
+REM i18n.py / metrics.py 는 저장소 루트에 있다. windows 폴더만 복사해 온
+REM 경우 여기서 걸러 준다. 없으면 빌드는 되지만 실행할 때 죽는다.
 if not exist "..\i18n.py" (
     echo.
     echo [X] ..\i18n.py 를 찾을 수 없습니다.
@@ -44,11 +44,23 @@ if not exist "..\i18n.py" (
     exit /b 1
 )
 
-REM i18n.py 는 저장소 루트에 있다. --paths 로 import 경로에 넣어 준다.
+if not exist "..\metrics.py" (
+    echo.
+    echo [X] ..\metrics.py 를 찾을 수 없습니다.
+    echo     windows 폴더만 복사하지 말고 저장소를 통째로 받아 주세요.
+    popd
+    pause
+    exit /b 1
+)
+
+REM i18n.py / metrics.py 는 저장소 루트에 있다. --paths 로 import 경로에
+REM 넣고, 이름을 --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기
+REM 시작하면 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
 pyinstaller --noconsole --onefile --name MemoryCat ^
     --add-data "frames;frames" ^
     --paths ".." ^
     --hidden-import i18n ^
+    --hidden-import metrics ^
     windows_cat.pyw
 if errorlevel 1 (
     echo.

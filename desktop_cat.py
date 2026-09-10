@@ -163,6 +163,62 @@ def size_percent(source=None, memory=None, disk=None):
     return max(_memory(), _disk())
 
 
+#: 메모리로 몸집을 정할 때의 바닥값. 이 아래는 전부 제일 홀쭉한 프레임.
+#:
+#: 메모리 사용률은 0 근처로 내려가지 않는다 — 도는 맥은 늘 절반쯤 쓰고 있다.
+#: 실측(18GB, macOS 15.4.1): 평상시 65~66%, 30초 동안 1.0 포인트 변동.
+#: 재부팅 직후에도 77~80% 였다. 0~100 을 그대로 40프레임에 옮기면 고양이가
+#: 23번대에 붙어 살고, 홀쭉한 쪽 절반을 영영 못 쓴다.
+MEMORY_FLOOR = 40.0
+
+
+def body_percent(source, percent):
+    """몸집을 정할 0~100. 메모리일 때만 눈금을 다시 매긴다.
+
+    디스크는 진짜로 0~100 을 다 쓴다(빈 디스크가 있다). 그래서 건드리지
+    않는다. ``max`` 는 "둘 중 더 찬 쪽" 이라 두 값을 같은 자로 재야 하므로
+    역시 건드리지 않는다.
+
+    화면에 적히는 숫자는 이 값이 아니다. 정보창의 "RAM 65%" 와 기분 줄은
+    잰 그대로를 쓴다 — 몸집을 보기 좋게 만들자고 숫자를 바꾸면 두 개가
+    서로 다른 말을 하게 된다.
+    """
+    # `size_percent` 와 같은 자를 써야 한다. 저쪽은 모르는 값을 기본값으로
+    # 바꿔서 계산하므로, 여기서 날값으로 비교하면 둘이 갈라진다.
+    if source not in SIZE_SOURCES:
+        source = DEFAULT["size_source"]
+    if source != SOURCE_MEMORY:
+        return percent
+    if percent <= MEMORY_FLOOR:
+        return 0.0
+    return (percent - MEMORY_FLOOR) / (100.0 - MEMORY_FLOOR) * 100.0
+
+
+def body_size_percent(source=None, memory=None, disk=None):
+    """몸집을 정할 0~100. **눈금을 맞춘 뒤에** 지표를 고른다.
+
+    :func:`size_percent` 와 순서가 다르다. 저쪽은 잰 값끼리 비교해서 "더 찬
+    쪽" 을 고르고, 이쪽은 각자 몸집 눈금으로 옮긴 다음 "더 뚱뚱한 쪽" 을
+    고른다. 순서를 섞으면 ``max`` 가 깨진다 — 메모리만 눈금을 다시 매긴
+    채로 잰 값끼리 비교하면, 고른 결과가 두 선택지 **어느 쪽보다도** 뚱뚱해
+    진다. 실측: 메모리 71.5% / 디스크 50% 에서 memory=20, disk=20 인데
+    max=28 이 나왔다. 메뉴에서 바꾸기만 했는데 고양이가 8프레임 부푼다.
+
+    화면에 적히는 숫자는 이 값이 아니다. 그건 :func:`size_percent` 가 내는
+    잰 값을 쓴다.
+    """
+    if source not in SIZE_SOURCES:
+        source = DEFAULT["size_source"]
+    mem = body_percent(
+        SOURCE_MEMORY, size_percent(SOURCE_MEMORY, memory=memory, disk=disk))
+    dsk = size_percent(SOURCE_DISK, memory=memory, disk=disk)
+    if source == SOURCE_MEMORY:
+        return mem
+    if source == SOURCE_DISK:
+        return dsk
+    return max(mem, dsk)
+
+
 def frame_index_for(theme, percent):
     """0~100 값을 그 테마의 프레임 번호로 옮긴다.
 
@@ -191,7 +247,8 @@ def alert_icon_path():
     except Exception:
         return FALLBACK_ALERT_ICON_PATH
     try:
-        index = frame_index_for(theme, size_percent(cfg.get("size_source")))
+        index = frame_index_for(
+            theme, body_size_percent(cfg.get("size_source")))
     except Exception:
         index = 0  # 측정에 실패해도 그 테마의 얼굴은 보여 준다.
     try:
@@ -821,12 +878,20 @@ class CatController(NSObject):
         self.score = pct
         self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
-        idx = frame_index_for(theme, pct)
+        # 몸집만 눈금을 다시 매긴다. 아래에 적히는 숫자들은 잰 그대로다.
+        body = body_size_percent(source, memory=score, disk=dpct)
+        idx = frame_index_for(theme, body)
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
         language = self.language
         # 큰 숫자가 몸집을 설명해야 한다. 메모리로 부풀었는데 디스크가 크게
         # 적혀 있으면 왜 뚱뚱한지 읽을 수 없다.
-        if source == SOURCE_DISK or (source == SOURCE_MAX and dpct >= score):
+        #
+        # 비교는 **몸집을 고른 것과 같은 자로** 해야 한다. 몸집은 눈금을
+        # 맞춘 뒤에 고르는데(body_size_percent) 여기서 잰 값끼리 비교하면,
+        # 디스크가 정한 몸집인데 첫 줄에는 메모리가 적히는 일이 생긴다.
+        if source == SOURCE_DISK or (
+                source == SOURCE_MAX
+                and dpct >= body_percent(SOURCE_MEMORY, score)):
             first = f"{tr(language, 'disk')} {dpct:.0f}%"
             second = f"{tr(language, 'ram')} {vm.percent:.0f}%"
         else:
@@ -839,11 +904,10 @@ class CatController(NSObject):
             tr(language, "mood_detail", mood=mood, percent=round(pct),
                source=tr(language, f"source_{source}")),
             tr(language, "disk_detail", percent=dpct, used=mc.human_gb(disk.used), total=mc.human_gb(disk.total), free=mc.human_gb(disk.free)),
-            # `vm.used` 를 쓰면 안 된다. macOS 에서 그건 active+wired 라
-            # 압축 메모리를 빼는데, `vm.percent` 는 포함한다. 한 줄에 나란히
-            # 두면 "RAM 70% · 9.0/18.0 GB"(=50%) 처럼 자기모순이 된다.
+            # 계산은 metrics.ram_used_for_display 가 한 곳에서 한다 —
+            # 맥과 윈도우가 각자 세면 갈라진다.
             tr(language, "ram_detail", percent=vm.percent,
-               used=mc.human_gb(vm.total - vm.available),
+               used=mc.human_gb(mc.ram_used_for_display(vm)),
                total=mc.human_gb(vm.total)),
         ]
         if sw.total > 0:

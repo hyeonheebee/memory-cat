@@ -68,6 +68,20 @@ def pressure_score():
     return float(vm.percent), vm, sw
 
 
+def ram_used_for_display(vm):
+    """정보창에 적을 "쓰는 중" 바이트. ``vm.percent`` 와 같은 것을 센다.
+
+    ``vm.used`` 를 쓰면 안 된다. macOS 에서 그건 active+wired 라 압축 메모리를
+    빼는데 ``vm.percent`` 는 포함한다. 한 줄에 나란히 두면 "RAM 70% ·
+    9.0/18.0 GB"(=50%) 처럼 자기모순이 된다.
+
+    맥판과 윈도우판이 각자 계산하던 것을 여기로 모았다. 이 저장소는 두 판이
+    갈라져서 이미 사고를 냈다 — v0.3.0 에서 공용 문구를 맥만 고치는 바람에
+    윈도우 정보창이 통째로 비었다.
+    """
+    return vm.total - vm.available
+
+
 def safe_pressure_score():
     """스왑 조회가 실패해도 같은 점수를 돌려준다.
 

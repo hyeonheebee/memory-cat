@@ -669,6 +669,64 @@ class InstallScriptTests(unittest.TestCase):
 
 
 
+class WindowsBuildScriptTests(unittest.TestCase):
+    """윈도우 exe 가 저장소 루트 모듈을 실제로 담는지.
+
+    `windows_cat.pyw` 는 `windows/` 안에 있는데 `i18n`·`metrics` 는 루트에
+    있다. PyInstaller 가 그것들을 담게 하려면 `build_exe.bat` 이
+    `--hidden-import` 로 이름을 대 줘야 한다. 안 대면 빌드는 멀쩡히 끝나고
+    exe 는 켜자마자 ImportError 로 죽는다 — 그것도 `--noconsole` 이라
+    화면에 아무것도 안 뜬 채로.
+
+    루트 모듈을 하나 더 쓰기 시작했는데 bat 을 안 고치는 것이 이 검사가
+    막으려는 일이다.
+    """
+
+    BAT = _REPO / "windows" / "build_exe.bat"
+    APP = _REPO / "windows" / "windows_cat.pyw"
+
+    def setUp(self):
+        for path in (self.BAT, self.APP):
+            if not path.is_file():
+                self.skipTest(f"파일이 없습니다: {path}")
+        self.bat = self.BAT.read_text(encoding="utf-8")
+
+    def _root_modules_imported(self):
+        """`windows_cat.pyw` 가 import 하는 것 중 저장소 루트에 있는 모듈."""
+        tree = ast.parse(self.APP.read_text(encoding="utf-8"), filename=str(self.APP))
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add(alias.name.split(".")[0])
+        return {n for n in names if (_REPO / f"{n}.py").is_file()}
+
+    def test_every_root_module_is_declared_to_pyinstaller(self):
+        missing = sorted(
+            name for name in self._root_modules_imported()
+            if f"--hidden-import {name}" not in self.bat
+        )
+        self.assertEqual(
+            missing, [],
+            "build_exe.bat 에 --hidden-import 가 빠졌습니다: "
+            + ", ".join(missing)
+            + " — exe 가 켜자마자 조용히 죽습니다",
+        )
+
+    def test_it_stops_early_when_a_root_module_is_missing(self):
+        """저장소를 통째로 안 받은 경우를 빌드 전에 걸러야 한다."""
+        missing = sorted(
+            name for name in self._root_modules_imported()
+            if f"..\\{name}.py" not in self.bat
+        )
+        self.assertEqual(
+            missing, [],
+            "build_exe.bat 이 존재 확인을 안 하는 루트 모듈: " + ", ".join(missing),
+        )
+
+
 class WindowsWorkflowTests(unittest.TestCase):
     """윈도우 워크플로가 빌드 방법을 베껴 적지 않았는지 본다.
 
