@@ -401,12 +401,13 @@ class RefreshPicksTheFrameTests(unittest.TestCase):
         적혀 있으면 왜 뚱뚱한지 읽을 수 없다". 몸집은 눈금을 맞춘 뒤에
         고르는데 첫 줄은 잰 값끼리 비교하면 둘이 갈라진다.
 
-        실측: 메모리 65.5% / 디스크 50% 면 몸집은 디스크가 정하는데
-        (42.5 < 50) 첫 줄에는 메모리가 나왔다.
+        메모리와 디스크가 같은 자를 쓰고 그 자가 단조증가하므로, 결국
+        잰 값이 큰 쪽이 몸집을 정한다. 자를 한쪽만 바꾸면 이 성질이 깨진다 —
+        그때 이 검사가 잡는다.
         """
-        for memory, disk, expected in ((65.5, 50.0, "디스크"),
+        for memory, disk, expected in ((65.5, 50.0, "램"),
                                        (71.5, 50.0, "램"),
-                                       (45.0, 40.0, "디스크"),
+                                       (45.0, 40.0, "램"),
                                        (30.0, 95.0, "디스크"),
                                        (95.0, 20.0, "램")):
             with self.subTest(memory=memory, disk=disk):
@@ -437,12 +438,11 @@ class RefreshPicksTheFrameTests(unittest.TestCase):
                     expected, first,
                     f"메모리 {memory}% 디스크 {disk}% 인데 첫 줄이 {first!r}")
 
-    def test_disk_is_left_on_the_raw_scale(self):
-        """디스크 50% 는 한가운데여야 한다. 눈금을 건드리면 안 된다."""
-        chosen = self._run_refresh(desktop_cat.SOURCE_DISK, 90.0, 50.0)
-        self.assertTrue(
-            chosen.endswith("cat_20.png"),
-            f"디스크 50% 가 {chosen} 를 골랐다 — 40프레임의 한가운데가 아니다")
+    def test_disk_uses_the_same_ruler_as_memory(self):
+        """자를 따로 쓰면 `max` 가 한쪽 전용이 된다."""
+        by_disk = self._run_refresh(desktop_cat.SOURCE_DISK, 0.0, 77.0)
+        by_memory = self._run_refresh(desktop_cat.SOURCE_MEMORY, 77.0, 0.0)
+        self.assertEqual(by_disk, by_memory)
 
     def test_the_numbers_on_screen_stay_as_measured(self):
         """몸집은 눈금을 바꿔도 적히는 숫자는 잰 그대로여야 한다.
@@ -475,6 +475,73 @@ class RefreshPicksTheFrameTests(unittest.TestCase):
         self.assertIn("66", shown, f"잰 값 65.5% 가 안 보인다: {shown}")
         # 다시 매긴 값(42.5%)이 화면에 새어 나오면 안 된다.
         self.assertNotIn("42", shown, f"눈금을 다시 매긴 값이 새어 나왔다: {shown}")
+
+
+class BodyFollowsChonkStagesTests(unittest.TestCase):
+    """몸집 눈금이 이름(chonk stage)과 같은 지점에서 바뀌는지.
+
+    사진으로 만든 테마는 **그림이 6장**이다. 40개 파일 중 34개는 복제본이다.
+    기본 테마 `cute`·`simple` 도, `vision_theme` 이 반려동물 사진으로 만드는
+    커스텀 테마도 전부 그렇다(`save_theme_frames` 가 `smooth=False` 로 가장
+    가까운 단계를 그대로 쓴다 — 섞으면 귀와 눈이 겹쳐 보인다).
+
+    그림이 6장뿐이면 "몇 프레임 움직이나" 는 뜻이 없다. **어느 그림을
+    보여주나** 가 전부다. 그러니 그림이 바뀌는 지점을 앱이 이미 정해 둔
+    이름 문턱에 맞춘다. "HEFTYCHONK" 이 뜨는 순간 몸이 그 그림이 된다.
+    """
+
+    #: 6장짜리 테마에서 한 그림이 차지하는 프레임 구간.
+    BUCKETS = ((0, 3), (4, 11), (12, 19), (20, 27), (28, 35), (36, 39))
+
+    def _picture(self, percent):
+        frame = desktop_cat.frame_index_for(
+            "cute", desktop_cat.body_size_percent(
+                desktop_cat.SOURCE_MEMORY, memory=percent, disk=0.0))
+        for i, (lo, hi) in enumerate(self.BUCKETS):
+            if lo <= frame <= hi:
+                return i
+        self.fail(f"프레임 {frame} 이 어느 그림에도 안 들어갑니다")
+
+    def test_the_picture_changes_exactly_where_the_name_changes(self):
+        picture_at = [self._picture(float(p)) for p in range(101)]
+        name_at = [i18n.chonk_stage(float(p), "en") for p in range(101)]
+        picture_edges = [p for p in range(1, 101)
+                         if picture_at[p] != picture_at[p - 1]]
+        name_edges = [p for p in range(1, 101)
+                      if name_at[p] != name_at[p - 1]]
+        self.assertEqual(
+            picture_edges, name_edges,
+            f"그림은 {picture_edges} 에서 바뀌는데 이름은 {name_edges} 에서 바뀝니다")
+
+    def test_every_picture_is_reachable(self):
+        """그림 6장이 다 쓰여야 한다. 안 쓰이는 그림이 있으면 낭비다."""
+        seen = {self._picture(float(p)) for p in range(101)}
+        self.assertEqual(
+            seen, set(range(6)),
+            f"안 쓰이는 그림: {sorted(set(range(6)) - seen)}")
+
+    def test_the_body_never_shrinks_as_memory_grows(self):
+        """메모리가 늘었는데 고양이가 홀쭉해지면 안 된다. v0.3.0 의 버그다."""
+        prev = -1
+        for p in range(101):
+            body = desktop_cat.body_size_percent(
+                desktop_cat.SOURCE_MEMORY, memory=float(p), disk=0.0)
+            self.assertGreaterEqual(body, prev, f"메모리 {p}% 에서 거꾸로 갔습니다")
+            prev = body
+
+    def test_a_forty_picture_theme_still_moves_below_the_first_threshold(self):
+        """`derpy` 처럼 진짜 40장인 테마는 60% 아래에서도 움직여야 한다.
+
+        6장짜리 테마는 60% 아래가 전부 "A fine boi" 한 장이다(앱이 그렇게
+        정의해 두었다). 하지만 그림이 40장 있는 테마까지 한 자리에 묶어 둘
+        이유는 없다.
+        """
+        frames = {desktop_cat.frame_index_for(
+            "derpy", desktop_cat.body_size_percent(
+                desktop_cat.SOURCE_MEMORY, memory=float(p), disk=0.0))
+            for p in range(0, 60)}
+        self.assertGreater(
+            len(frames), 1, "60% 아래에서 40장짜리 테마가 얼어붙습니다")
 
 
 class MaxSourceBodyTests(unittest.TestCase):
@@ -519,72 +586,61 @@ class MaxSourceBodyTests(unittest.TestCase):
 
 
 class BodyPercentTests(unittest.TestCase):
-    """메모리로 몸집을 정할 때 홀쭉한 쪽 절반을 쓸 수 있는지.
+    """잰 값을 몸집 값으로 옮기는 자. 메모리·디스크가 **같은 자**를 쓴다.
 
-    메모리 사용률은 0 근처로 내려가지 않는다. 도는 맥은 늘 절반쯤 쓰고
-    있다. 0~100 을 그대로 프레임에 옮기면 고양이가 뚱뚱한 쪽에 갇힌다.
-
-    실측(18GB, macOS 15.4.1): 평상시 65~66%. 40프레임 테마에서 25번 —
-    이미 뚱뚱한 쪽이고, 30초 동안 1.0 포인트밖에 안 움직였다.
+    실측(18GB, macOS 15.4.1): 관측된 메모리가 61~80% 였고 재부팅 직후에도
+    80% 였다. 0~100 을 그대로 옮기면 사진 테마의 그림 여섯 장 중 두 장밖에
+    안 보인다.
     """
 
-    def test_the_floor_maps_to_the_thinnest_frame(self):
-        self.assertEqual(
-            desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY,
-                                     desktop_cat.MEMORY_FLOOR),
-            0.0)
+    def test_an_empty_machine_maps_to_the_thinnest_frame(self):
+        self.assertEqual(desktop_cat.body_percent(0.0), 0.0)
 
-    def test_full_memory_still_maps_to_the_fattest_frame(self):
-        self.assertEqual(
-            desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 100.0), 100.0)
+    def test_a_full_machine_maps_to_the_fattest_frame(self):
+        self.assertEqual(desktop_cat.body_percent(100.0), 100.0)
 
-    def test_below_the_floor_does_not_go_negative(self):
-        self.assertEqual(
-            desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 5.0), 0.0)
-
-    def test_disk_is_left_alone(self):
-        """디스크는 진짜로 0~100 을 다 쓴다. 눈금을 건드리면 안 된다."""
-        for percent in (0.0, 37.0, 65.0, 100.0):
+    def test_it_never_leaves_the_zero_to_hundred_range(self):
+        """엉뚱한 값이 와도 프레임 번호가 될 수 있어야 한다."""
+        for percent in (-100.0, -1.0, 0.0, 50.0, 100.0, 100.1, 500.0):
             with self.subTest(percent=percent):
-                self.assertEqual(
-                    desktop_cat.body_percent(desktop_cat.SOURCE_DISK, percent),
-                    percent)
+                value = desktop_cat.body_percent(percent)
+                self.assertGreaterEqual(value, 0.0)
+                self.assertLessEqual(value, 100.0)
 
-    def test_max_compares_two_raw_percentages(self):
-        """`max` 는 "둘 중 더 찬 쪽" 이다. 한쪽만 눈금을 바꾸면 비교가 깨진다."""
-        for percent in (20.0, 65.0, 90.0):
+    def test_memory_and_disk_share_one_ruler(self):
+        """자를 따로 쓰면 `max` 가 깨진다.
+
+        메모리만 눈금을 다시 매기면 메모리 71.5% 가 디스크 50% 에 진다.
+        "둘 중 더 찬 쪽" 이 사실상 디스크 전용이 된다.
+        """
+        for percent in (10.0, 50.0, 65.0, 71.5, 90.0, 99.0):
             with self.subTest(percent=percent):
-                self.assertEqual(
-                    desktop_cat.body_percent(desktop_cat.SOURCE_MAX, percent),
-                    percent)
+                mem = desktop_cat.body_size_percent(
+                    desktop_cat.SOURCE_MEMORY, memory=percent, disk=0.0)
+                dsk = desktop_cat.body_size_percent(
+                    desktop_cat.SOURCE_DISK, memory=0.0, disk=percent)
+                self.assertEqual(mem, dsk)
 
     def test_an_unknown_source_falls_back_the_same_way_size_percent_does(self):
-        """`size_percent` 와 같은 자를 써야 한다.
+        """`size_percent` 는 모르는 `source` 를 기본값으로 바꿔서 계산한다.
 
-        `size_percent` 는 모르는 `source` 를 기본값(메모리)으로 바꿔서 값을
-        낸다. `body_percent` 가 날값으로 비교하면 둘이 갈라진다 — 몸집을
-        정하는 값은 메모리인데 눈금은 안 바뀌는 상태가 된다.
-
-        `alert_icon_path` 는 `cfg.get("size_source")` 를 기본값 없이 넘긴다.
-        화면 위 고양이와 알럿 아이콘이 다른 몸집이 되는 길이고, 그건 이
-        수정이 없애려던 바로 그 증상이다.
+        `alert_icon_path` 가 `cfg.get("size_source")` 를 기본값 없이 넘기므로,
+        여기서 갈라지면 화면 위 고양이와 알럿 아이콘이 다른 몸집이 된다.
         """
-        expected = desktop_cat.body_percent(
-            desktop_cat.DEFAULT["size_source"], 65.5)
+        expected = desktop_cat.body_size_percent(
+            desktop_cat.DEFAULT["size_source"], memory=65.5, disk=20.0)
         for source in (None, "cpu", "", "MEMORY"):
             with self.subTest(source=source):
                 self.assertEqual(
-                    desktop_cat.body_percent(source, 65.5), expected,
-                    f"source={source!r} 가 size_percent 와 다른 자를 쓴다")
+                    desktop_cat.body_size_percent(source, memory=65.5, disk=20.0),
+                    expected)
 
     def test_an_idle_mac_is_not_stuck_in_the_fat_half(self):
-        """평상시 메모리에서 고양이가 홀쭉한 쪽에 있어야 한다.
-
-        이 검사가 깨지면 "앱을 닫으면 홀쭉해진다" 를 사람이 볼 수 없다.
-        """
+        """평상시 메모리에서 고양이가 홀쭉한 쪽에 있어야 한다."""
         frames = desktop_cat.frame_count("cute")
         idle = desktop_cat.frame_index_for(
-            "cute", desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 65.5))
+            "cute", desktop_cat.body_size_percent(
+                desktop_cat.SOURCE_MEMORY, memory=65.5, disk=0.0))
         self.assertLess(
             idle, (frames - 1) / 2,
             f"평상시 메모리 65.5% 가 {frames}프레임 중 {idle}번 — 뚱뚱한 쪽이다")
@@ -599,9 +655,11 @@ class CatMovementTests(unittest.TestCase):
         실제로 프레임을 구한다.
         """
         before = desktop_cat.frame_index_for(
-            "cute", desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 80.0))
+            "cute", desktop_cat.body_size_percent(
+                desktop_cat.SOURCE_MEMORY, memory=80.0, disk=0.0))
         after = desktop_cat.frame_index_for(
-            "cute", desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 63.8))
+            "cute", desktop_cat.body_size_percent(
+                desktop_cat.SOURCE_MEMORY, memory=63.8, disk=0.0))
         moved = before - after
         # 눈금을 다시 매기기 전에는 6칸이었다. 사람 눈에 확실히 보이려면
         # 그보다 더 움직여야 한다.
@@ -1761,24 +1819,23 @@ class RevealTests(unittest.TestCase):
             # 값을 손으로 적어 둔다. 여기서 body_percent 를 다시 부르면
             # 제품 코드를 그대로 베낀 검사가 되어 아무것도 못 잡는다.
             #
-            # 메모리는 눈금을 다시 매긴다(MEMORY_FLOOR=40). 도는 맥은 메모리를
-            # 0 근처까지 비우지 않으므로, 40 아래를 전부 제일 홀쭉한 프레임에
-            # 몰아 두고 40~100 을 11프레임에 편다. 디스크는 진짜로 0~100 을
-            # 다 쓰므로 그대로 둔다.
-            cases_by_source = {
-                desktop_cat.SOURCE_MEMORY: {
-                    0.0: "cat_00.png",    # 바닥 아래 -> 제일 홀쭉
-                    50.0: "cat_02.png",   # (50-40)/60 = 16.7%
-                    91.0: "cat_08.png",   # (91-40)/60 = 85.0%
-                    100.0: "cat_10.png",
-                },
-                desktop_cat.SOURCE_DISK: {
-                    0.0: "cat_00.png", 50.0: "cat_05.png",
-                    91.0: "cat_09.png", 100.0: "cat_10.png",
-                },
+            # 메모리는 이름 문턱(60/70/80/90/96)에 맞춰 그림 구간에 옮긴다.
+            # 도는 맥은 메모리를 0 근처까지 비우지 않으므로 0~100 을 그대로
+            # 쓰면 그림 여섯 장 중 두 장밖에 안 보인다. 디스크는 진짜로
+            # 0~100 을 다 쓰므로 그대로 둔다.
+            # 값을 손으로 적어 둔다. 여기서 body_percent 를 다시 부르면
+            # 제품 코드를 그대로 베낀 검사가 되어 아무것도 못 잡는다.
+            #
+            # 이름 문턱(60/70/80/90/96)에 맞춰 그림 구간에 옮긴다. 메모리와
+            # 디스크가 같은 자를 쓰므로 표도 하나다.
+            cases = {
+                0.0: "cat_00.png",
+                50.0: "cat_01.png",   # 60% 아래 = 첫 그림 구간 안
+                91.0: "cat_07.png",   # 90~96 구간의 초입
+                100.0: "cat_10.png",
             }
-            # 아이콘도 설정이 고른 지표를 따라야 한다. 화면 위 고양이는 메모리로
-            # 부풀어 있는데 말 거는 창에는 홀쭉한 그림이 붙으면 따로 논다.
+            cases_by_source = {desktop_cat.SOURCE_MEMORY: cases,
+                               desktop_cat.SOURCE_DISK: cases}
             for source, cases in cases_by_source.items():
                 for percent, expected in cases.items():
                     with self.subTest(source=source, percent=percent):

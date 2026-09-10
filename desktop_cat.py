@@ -163,35 +163,57 @@ def size_percent(source=None, memory=None, disk=None):
     return max(_memory(), _disk())
 
 
-#: 메모리로 몸집을 정할 때의 바닥값. 이 아래는 전부 제일 홀쭉한 프레임.
-#:
-#: 메모리 사용률은 0 근처로 내려가지 않는다 — 도는 맥은 늘 절반쯤 쓰고 있다.
-#: 실측(18GB, macOS 15.4.1): 평상시 65~66%, 30초 동안 1.0 포인트 변동.
-#: 재부팅 직후에도 77~80% 였다. 0~100 을 그대로 40프레임에 옮기면 고양이가
-#: 23번대에 붙어 살고, 홀쭉한 쪽 절반을 영영 못 쓴다.
-MEMORY_FLOOR = 40.0
+#: 사진으로 만든 테마의 그림 여섯 장이 각각 차지하는 프레임 구간. 40개 파일
+#: 중 서로 다른 그림은 여섯 장뿐이고 나머지는 복제본이다. 기본 테마
+#: `cute`·`simple` 도, `vision_theme` 이 반려동물 사진으로 만드는 테마도
+#: 그렇다 — `import_theme.save_theme_frames` 가 `smooth=False` 로 가장 가까운
+#: 단계를 그대로 쓴다. 섞으면 귀와 눈이 겹쳐 유령처럼 보이기 때문이다.
+_PICTURE_FRAMES = ((0, 3), (4, 11), (12, 19), (20, 27), (28, 35), (36, 39))
+
+#: 그 여섯 장을 어느 메모리 값에서 바꿀지. `i18n.chonk_stage` 의 영어 문턱과
+#: **같은 값이다.** 몸과 이름이 같은 지점에서 바뀌어야 "HEFTYCHONK" 이 뜨는
+#: 순간 몸이 그 그림이 된다.
+_MEMORY_EDGES = (0.0, 60.0, 70.0, 80.0, 90.0, 96.0, 100.0)
+
+#: 프레임 번호를 0~100 으로 되돌릴 때 쓰는 마지막 번호. 사진 테마가 40장
+#: 파일로 나오므로 39 다.
+_LAST_FRAME = 39.0
 
 
-def body_percent(source, percent):
-    """몸집을 정할 0~100. 메모리일 때만 눈금을 다시 매긴다.
+def body_percent(percent):
+    """잰 값 0~100 을 몸집 0~100 으로 옮긴다. **메모리·디스크가 같은 자를 쓴다.**
 
-    디스크는 진짜로 0~100 을 다 쓴다(빈 디스크가 있다). 그래서 건드리지
-    않는다. ``max`` 는 "둘 중 더 찬 쪽" 이라 두 값을 같은 자로 재야 하므로
-    역시 건드리지 않는다.
+    메모리 사용률은 0 근처로 내려가지 않는다 — 도는 맥은 늘 절반쯤 쓰고
+    있다. 0~100 을 그대로 옮기면 그림 여섯 장 중 두 장밖에 안 쓰인다.
+    실측(18GB, macOS 15.4.1): 관측된 값이 61~80% 였고 재부팅 직후에도 80%
+    였다.
+
+    그래서 메모리 구간을 그림 구간에 하나씩 대응시킨다. 구간 경계를 이름
+    문턱에 맞춰 두었으므로 몸과 이름이 같은 지점에서 바뀐다. 구간 **안에서는**
+    직선이라 `derpy` 처럼 진짜 40장인 테마는 계속 부드럽게 움직인다.
+
+    디스크도 같은 자를 쓴다. 앱은 이미 디스크에도 같은 문턱으로 이름을
+    붙인다(`brain.collect_metrics` 가 `chonk_stage(disk.percent)`). 자를
+    따로 쓰면 ``max`` 가 깨진다 — 메모리 71.5% 가 디스크 50% 에 지고,
+    "둘 중 더 찬 쪽" 이 사실상 디스크 전용이 된다.
 
     화면에 적히는 숫자는 이 값이 아니다. 정보창의 "RAM 65%" 와 기분 줄은
     잰 그대로를 쓴다 — 몸집을 보기 좋게 만들자고 숫자를 바꾸면 두 개가
     서로 다른 말을 하게 된다.
     """
-    # `size_percent` 와 같은 자를 써야 한다. 저쪽은 모르는 값을 기본값으로
-    # 바꿔서 계산하므로, 여기서 날값으로 비교하면 둘이 갈라진다.
-    if source not in SIZE_SOURCES:
-        source = DEFAULT["size_source"]
-    if source != SOURCE_MEMORY:
-        return percent
-    if percent <= MEMORY_FLOOR:
-        return 0.0
-    return (percent - MEMORY_FLOOR) / (100.0 - MEMORY_FLOOR) * 100.0
+    percent = min(max(float(percent), 0.0), 100.0)
+    last = len(_PICTURE_FRAMES) - 1
+    for i, (first_frame, final_frame) in enumerate(_PICTURE_FRAMES):
+        lo, hi = _MEMORY_EDGES[i], _MEMORY_EDGES[i + 1]
+        # 경계값은 **위쪽** 구간이 가져간다. 이름도 그렇게 바뀐다
+        # (`chonk_stage` 가 `percent < 60` 이면 첫 단계다). 여기서 아래쪽이
+        # 가져가면 90% 에서 이름은 MEGACHONKER 인데 몸은 그 전 그림이 된다.
+        if percent < hi or i == last:
+            span = final_frame - first_frame
+            t = 0.0 if hi == lo else (percent - lo) / (hi - lo)
+            frame = first_frame + span * min(max(t, 0.0), 1.0)
+            return frame / _LAST_FRAME * 100.0
+    return 100.0
 
 
 def body_size_percent(source=None, memory=None, disk=None):
@@ -209,9 +231,8 @@ def body_size_percent(source=None, memory=None, disk=None):
     """
     if source not in SIZE_SOURCES:
         source = DEFAULT["size_source"]
-    mem = body_percent(
-        SOURCE_MEMORY, size_percent(SOURCE_MEMORY, memory=memory, disk=disk))
-    dsk = size_percent(SOURCE_DISK, memory=memory, disk=disk)
+    mem = body_percent(size_percent(SOURCE_MEMORY, memory=memory, disk=disk))
+    dsk = body_percent(size_percent(SOURCE_DISK, memory=memory, disk=disk))
     if source == SOURCE_MEMORY:
         return mem
     if source == SOURCE_DISK:
@@ -891,7 +912,7 @@ class CatController(NSObject):
         # 디스크가 정한 몸집인데 첫 줄에는 메모리가 적히는 일이 생긴다.
         if source == SOURCE_DISK or (
                 source == SOURCE_MAX
-                and dpct >= body_percent(SOURCE_MEMORY, score)):
+                and body_percent(dpct) >= body_percent(score)):
             first = f"{tr(language, 'disk')} {dpct:.0f}%"
             second = f"{tr(language, 'ram')} {vm.percent:.0f}%"
         else:
