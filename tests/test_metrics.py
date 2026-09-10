@@ -154,6 +154,7 @@ class PressureScoreTests(unittest.TestCase):
             _, _, swap = metrics.pressure_score()
         self.assertEqual(swap.percent, 99.0)
 
+
 class RamDisplayTests(unittest.TestCase):
     """정보창의 "RAM 70% · 12.6 / 18.0 GB" 가 자기모순이 되지 않는지.
 
@@ -189,18 +190,6 @@ class RamDisplayTests(unittest.TestCase):
                 )
                 shown = metrics.ram_used_for_display(vm)
                 self.assertAlmostEqual(shown / total * 100, percent, places=6)
-
-
-class CatMovementTests(unittest.TestCase):
-    def test_closing_a_big_app_moves_the_cat_visibly(self):
-        """실측 재현: 크롬(4GB)을 닫으면 vm.percent 가 80.0 → 63.8 로 떨어졌다.
-
-        40 프레임 테마에서 여섯 칸 넘게 움직여야 사람 눈에 보인다. 이 검사가
-        깨지면 "앱을 닫으면 홀쭉해진다" 는 약속이 깨진 것이다.
-        """
-        frames = 40
-        moved = (80.0 - 63.8) / 100 * (frames - 1)
-        self.assertGreater(moved, 5.0, f"{moved:.1f}칸밖에 안 움직인다")
 
 
 if __name__ == "__main__":

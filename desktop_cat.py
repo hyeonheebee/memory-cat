@@ -183,6 +183,10 @@ def body_percent(source, percent):
     잰 그대로를 쓴다 — 몸집을 보기 좋게 만들자고 숫자를 바꾸면 두 개가
     서로 다른 말을 하게 된다.
     """
+    # `size_percent` 와 같은 자를 써야 한다. 저쪽은 모르는 값을 기본값으로
+    # 바꿔서 계산하므로, 여기서 날값으로 비교하면 둘이 갈라진다.
+    if source not in SIZE_SOURCES:
+        source = DEFAULT["size_source"]
     if source != SOURCE_MEMORY:
         return percent
     if percent <= MEMORY_FLOOR:

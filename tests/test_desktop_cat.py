@@ -474,6 +474,25 @@ class BodyPercentTests(unittest.TestCase):
                     desktop_cat.body_percent(desktop_cat.SOURCE_MAX, percent),
                     percent)
 
+    def test_an_unknown_source_falls_back_the_same_way_size_percent_does(self):
+        """`size_percent` 와 같은 자를 써야 한다.
+
+        `size_percent` 는 모르는 `source` 를 기본값(메모리)으로 바꿔서 값을
+        낸다. `body_percent` 가 날값으로 비교하면 둘이 갈라진다 — 몸집을
+        정하는 값은 메모리인데 눈금은 안 바뀌는 상태가 된다.
+
+        `alert_icon_path` 는 `cfg.get("size_source")` 를 기본값 없이 넘긴다.
+        화면 위 고양이와 알럿 아이콘이 다른 몸집이 되는 길이고, 그건 이
+        수정이 없애려던 바로 그 증상이다.
+        """
+        expected = desktop_cat.body_percent(
+            desktop_cat.DEFAULT["size_source"], 65.5)
+        for source in (None, "cpu", "", "MEMORY"):
+            with self.subTest(source=source):
+                self.assertEqual(
+                    desktop_cat.body_percent(source, 65.5), expected,
+                    f"source={source!r} 가 size_percent 와 다른 자를 쓴다")
+
     def test_an_idle_mac_is_not_stuck_in_the_fat_half(self):
         """평상시 메모리에서 고양이가 홀쭉한 쪽에 있어야 한다.
 
