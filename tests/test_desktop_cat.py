@@ -394,6 +394,49 @@ class RefreshPicksTheFrameTests(unittest.TestCase):
             index, (frames - 1) / 2,
             f"메모리 65.5% 가 {frames}프레임 중 {index}번 — 뚱뚱한 쪽이다")
 
+    def test_the_first_line_names_whichever_decided_his_body(self):
+        """`max` 에서 큰 숫자가 몸집을 설명해야 한다.
+
+        코드 주석이 그렇게 못박고 있다 — "메모리로 부풀었는데 디스크가 크게
+        적혀 있으면 왜 뚱뚱한지 읽을 수 없다". 몸집은 눈금을 맞춘 뒤에
+        고르는데 첫 줄은 잰 값끼리 비교하면 둘이 갈라진다.
+
+        실측: 메모리 65.5% / 디스크 50% 면 몸집은 디스크가 정하는데
+        (42.5 < 50) 첫 줄에는 메모리가 나왔다.
+        """
+        for memory, disk, expected in ((65.5, 50.0, "디스크"),
+                                       (71.5, 50.0, "램"),
+                                       (45.0, 40.0, "디스크"),
+                                       (30.0, 95.0, "디스크"),
+                                       (95.0, 20.0, "램")):
+            with self.subTest(memory=memory, disk=disk):
+                vm = SimpleNamespace(percent=memory, total=0, available=0)
+                sw = SimpleNamespace(percent=0.0, used=0, total=0)
+                image_class = Mock()
+                image_class.alloc.return_value.initWithContentsOfFile_.return_value = Mock()
+                view = Mock()
+                controller = SimpleNamespace(
+                    cfg={"theme": "cute", "size_source": desktop_cat.SOURCE_MAX,
+                         "size": "보통"},
+                    language="ko", detail=[], score=0.0, view=view,
+                    _maybe_prompt_disk_full=lambda percent: None,
+                )
+                with (
+                    patch.object(desktop_cat, "NSImage", image_class),
+                    patch.object(desktop_cat.mc, "disk_usage",
+                                 return_value=SimpleNamespace(
+                                     percent=disk, used=0, total=0, free=0)),
+                    patch.object(desktop_cat.mc, "safe_pressure_score",
+                                 return_value=(memory, vm, sw)),
+                    patch.object(desktop_cat.mc, "top_memory_apps",
+                                 return_value=[]),
+                ):
+                    desktop_cat.CatController._refresh_once(controller)
+                first = view.updateImage_l1_l2_.call_args[0][1]
+                self.assertIn(
+                    expected, first,
+                    f"메모리 {memory}% 디스크 {disk}% 인데 첫 줄이 {first!r}")
+
     def test_disk_is_left_on_the_raw_scale(self):
         """디스크 50% 는 한가운데여야 한다. 눈금을 건드리면 안 된다."""
         chosen = self._run_refresh(desktop_cat.SOURCE_DISK, 90.0, 50.0)
@@ -432,6 +475,47 @@ class RefreshPicksTheFrameTests(unittest.TestCase):
         self.assertIn("66", shown, f"잰 값 65.5% 가 안 보인다: {shown}")
         # 다시 매긴 값(42.5%)이 화면에 새어 나오면 안 된다.
         self.assertNotIn("42", shown, f"눈금을 다시 매긴 값이 새어 나왔다: {shown}")
+
+
+class MaxSourceBodyTests(unittest.TestCase):
+    """`max` 는 "둘 중 배부른 쪽" 이다. 둘 다보다 뚱뚱하면 안 된다.
+
+    메뉴 문구가 "메모리·디스크 중 배부른 쪽" 이고 README 표도 그렇게
+    적혀 있다. 그런데 메모리만 눈금을 다시 매기고 `max` 는 잰 값끼리
+    비교하면, 고른 결과가 두 선택지 어느 쪽보다도 뚱뚱해진다.
+
+    실측 재현(40프레임): 메모리 71.5% / 디스크 50% 에서
+    memory=20, disk=20 인데 max=28 이 나왔다. 메뉴에서 max 로 바꾸면
+    아무것도 안 변했는데 고양이가 8프레임 부풀었다.
+    """
+
+    CASES = ((65.5, 50.0), (71.5, 50.0), (80.0, 45.0), (90.0, 30.0),
+             (30.0, 95.0), (92.0, 20.0), (20.0, 20.0), (99.0, 99.0))
+
+    def _frame(self, source, memory, disk):
+        return desktop_cat.frame_index_for(
+            "cute",
+            desktop_cat.body_size_percent(source, memory=memory, disk=disk))
+
+    def test_max_is_the_fatter_of_the_two_choices(self):
+        for memory, disk in self.CASES:
+            with self.subTest(memory=memory, disk=disk):
+                mem = self._frame(desktop_cat.SOURCE_MEMORY, memory, disk)
+                dsk = self._frame(desktop_cat.SOURCE_DISK, memory, disk)
+                mx = self._frame(desktop_cat.SOURCE_MAX, memory, disk)
+                self.assertEqual(
+                    mx, max(mem, dsk),
+                    f"memory={mem} disk={dsk} 인데 max={mx} — "
+                    "둘 중 하나여야 한다")
+
+    def test_switching_to_max_never_makes_him_fatter_than_both(self):
+        """설정만 바꿨는데 고양이가 부풀면 안 된다."""
+        for memory, disk in self.CASES:
+            with self.subTest(memory=memory, disk=disk):
+                mx = self._frame(desktop_cat.SOURCE_MAX, memory, disk)
+                both = max(self._frame(desktop_cat.SOURCE_MEMORY, memory, disk),
+                           self._frame(desktop_cat.SOURCE_DISK, memory, disk))
+                self.assertLessEqual(mx, both)
 
 
 class BodyPercentTests(unittest.TestCase):

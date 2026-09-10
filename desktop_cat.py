@@ -194,6 +194,31 @@ def body_percent(source, percent):
     return (percent - MEMORY_FLOOR) / (100.0 - MEMORY_FLOOR) * 100.0
 
 
+def body_size_percent(source=None, memory=None, disk=None):
+    """몸집을 정할 0~100. **눈금을 맞춘 뒤에** 지표를 고른다.
+
+    :func:`size_percent` 와 순서가 다르다. 저쪽은 잰 값끼리 비교해서 "더 찬
+    쪽" 을 고르고, 이쪽은 각자 몸집 눈금으로 옮긴 다음 "더 뚱뚱한 쪽" 을
+    고른다. 순서를 섞으면 ``max`` 가 깨진다 — 메모리만 눈금을 다시 매긴
+    채로 잰 값끼리 비교하면, 고른 결과가 두 선택지 **어느 쪽보다도** 뚱뚱해
+    진다. 실측: 메모리 71.5% / 디스크 50% 에서 memory=20, disk=20 인데
+    max=28 이 나왔다. 메뉴에서 바꾸기만 했는데 고양이가 8프레임 부푼다.
+
+    화면에 적히는 숫자는 이 값이 아니다. 그건 :func:`size_percent` 가 내는
+    잰 값을 쓴다.
+    """
+    if source not in SIZE_SOURCES:
+        source = DEFAULT["size_source"]
+    mem = body_percent(
+        SOURCE_MEMORY, size_percent(SOURCE_MEMORY, memory=memory, disk=disk))
+    dsk = size_percent(SOURCE_DISK, memory=memory, disk=disk)
+    if source == SOURCE_MEMORY:
+        return mem
+    if source == SOURCE_DISK:
+        return dsk
+    return max(mem, dsk)
+
+
 def frame_index_for(theme, percent):
     """0~100 값을 그 테마의 프레임 번호로 옮긴다.
 
@@ -222,9 +247,8 @@ def alert_icon_path():
     except Exception:
         return FALLBACK_ALERT_ICON_PATH
     try:
-        source = cfg.get("size_source")
         index = frame_index_for(
-            theme, body_percent(source, size_percent(source)))
+            theme, body_size_percent(cfg.get("size_source")))
     except Exception:
         index = 0  # 측정에 실패해도 그 테마의 얼굴은 보여 준다.
     try:
@@ -855,12 +879,19 @@ class CatController(NSObject):
         self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
         # 몸집만 눈금을 다시 매긴다. 아래에 적히는 숫자들은 잰 그대로다.
-        idx = frame_index_for(theme, body_percent(source, pct))
+        body = body_size_percent(source, memory=score, disk=dpct)
+        idx = frame_index_for(theme, body)
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
         language = self.language
         # 큰 숫자가 몸집을 설명해야 한다. 메모리로 부풀었는데 디스크가 크게
         # 적혀 있으면 왜 뚱뚱한지 읽을 수 없다.
-        if source == SOURCE_DISK or (source == SOURCE_MAX and dpct >= score):
+        #
+        # 비교는 **몸집을 고른 것과 같은 자로** 해야 한다. 몸집은 눈금을
+        # 맞춘 뒤에 고르는데(body_size_percent) 여기서 잰 값끼리 비교하면,
+        # 디스크가 정한 몸집인데 첫 줄에는 메모리가 적히는 일이 생긴다.
+        if source == SOURCE_DISK or (
+                source == SOURCE_MAX
+                and dpct >= body_percent(SOURCE_MEMORY, score)):
             first = f"{tr(language, 'disk')} {dpct:.0f}%"
             second = f"{tr(language, 'ram')} {vm.percent:.0f}%"
         else:
