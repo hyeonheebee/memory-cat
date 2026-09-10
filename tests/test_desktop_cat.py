@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -343,6 +344,166 @@ class DesktopCatTests(unittest.TestCase):
             path.write_text('{"theme": "cute"}', encoding="utf-8")
             loaded = desktop_cat.load_config(path)
         self.assertEqual(loaded["size_source"], desktop_cat.SOURCE_MEMORY)
+
+
+class RefreshPicksTheFrameTests(unittest.TestCase):
+    """화면 갱신이 실제로 눈금을 다시 매긴 프레임을 고르는지.
+
+    `_refresh_once` 안에서 나는 예외는 `refresh_` 가 삼킨다(의도된 설계다 —
+    한 틱 실패했다고 고양이가 사라지면 안 된다). 그래서 이 안이 깨져도
+    프로세스는 멀쩡히 살아 있고 고양이만 얼어붙는다. 독 아이콘도 없어서
+    화면에 아무 표시가 없다. 기존 검사는 `_refresh_once` 를 통째로 Mock 으로
+    바꿔 놓아서 이 본문을 한 번도 안 돌렸다.
+    """
+
+    def _run_refresh(self, source, memory_percent, disk_percent):
+        """진짜 `_refresh_once` 를 돌리고, 고른 프레임 경로를 돌려준다."""
+        vm = SimpleNamespace(percent=memory_percent, total=0, available=0)
+        sw = SimpleNamespace(percent=0.0, used=0, total=0)
+        image_class = Mock()
+        image_class.alloc.return_value.initWithContentsOfFile_.return_value = Mock()
+
+        controller = SimpleNamespace(
+            cfg={"theme": "cute", "size_source": source, "size": "보통"},
+            language="ko",
+            detail=[],
+            score=0.0,
+            view=Mock(),
+            _maybe_prompt_disk_full=lambda percent: None,
+        )
+
+        with (
+            patch.object(desktop_cat, "NSImage", image_class),
+            patch.object(desktop_cat.mc, "disk_usage",
+                         return_value=SimpleNamespace(
+                             percent=disk_percent, used=0, total=0, free=0)),
+            patch.object(desktop_cat.mc, "safe_pressure_score",
+                         return_value=(memory_percent, vm, sw)),
+            patch.object(desktop_cat.mc, "top_memory_apps", return_value=[]),
+        ):
+            desktop_cat.CatController._refresh_once(controller)
+
+        return image_class.alloc.return_value.initWithContentsOfFile_.call_args[0][0]
+
+    def test_memory_uses_the_rescaled_frame(self):
+        """평상시 메모리 65.5% 에서 고양이가 홀쭉한 쪽에 있어야 한다."""
+        chosen = self._run_refresh(desktop_cat.SOURCE_MEMORY, 65.5, 50.0)
+        frames = desktop_cat.frame_count("cute")
+        index = int(pathlib.Path(chosen).stem.split("_")[1])
+        self.assertLess(
+            index, (frames - 1) / 2,
+            f"메모리 65.5% 가 {frames}프레임 중 {index}번 — 뚱뚱한 쪽이다")
+
+    def test_disk_is_left_on_the_raw_scale(self):
+        """디스크 50% 는 한가운데여야 한다. 눈금을 건드리면 안 된다."""
+        chosen = self._run_refresh(desktop_cat.SOURCE_DISK, 90.0, 50.0)
+        self.assertTrue(
+            chosen.endswith("cat_20.png"),
+            f"디스크 50% 가 {chosen} 를 골랐다 — 40프레임의 한가운데가 아니다")
+
+    def test_the_numbers_on_screen_stay_as_measured(self):
+        """몸집은 눈금을 바꿔도 적히는 숫자는 잰 그대로여야 한다.
+
+        "RAM 65%" 옆에 다시 매긴 눈금 값이 적히면 두 숫자가 서로 다른
+        말을 하게 된다.
+        """
+        vm = SimpleNamespace(percent=65.5, total=0, available=0)
+        sw = SimpleNamespace(percent=0.0, used=0, total=0)
+        image_class = Mock()
+        image_class.alloc.return_value.initWithContentsOfFile_.return_value = Mock()
+        controller = SimpleNamespace(
+            cfg={"theme": "cute", "size_source": desktop_cat.SOURCE_MEMORY,
+                 "size": "보통"},
+            language="ko", detail=[], score=0.0, view=Mock(),
+            _maybe_prompt_disk_full=lambda percent: None,
+        )
+        with (
+            patch.object(desktop_cat, "NSImage", image_class),
+            patch.object(desktop_cat.mc, "disk_usage",
+                         return_value=SimpleNamespace(
+                             percent=50.0, used=0, total=0, free=0)),
+            patch.object(desktop_cat.mc, "safe_pressure_score",
+                         return_value=(65.5, vm, sw)),
+            patch.object(desktop_cat.mc, "top_memory_apps", return_value=[]),
+        ):
+            desktop_cat.CatController._refresh_once(controller)
+
+        shown = " ".join(controller.detail)
+        self.assertIn("66", shown, f"잰 값 65.5% 가 안 보인다: {shown}")
+        # 다시 매긴 값(42.5%)이 화면에 새어 나오면 안 된다.
+        self.assertNotIn("42", shown, f"눈금을 다시 매긴 값이 새어 나왔다: {shown}")
+
+
+class BodyPercentTests(unittest.TestCase):
+    """메모리로 몸집을 정할 때 홀쭉한 쪽 절반을 쓸 수 있는지.
+
+    메모리 사용률은 0 근처로 내려가지 않는다. 도는 맥은 늘 절반쯤 쓰고
+    있다. 0~100 을 그대로 프레임에 옮기면 고양이가 뚱뚱한 쪽에 갇힌다.
+
+    실측(18GB, macOS 15.4.1): 평상시 65~66%. 40프레임 테마에서 25번 —
+    이미 뚱뚱한 쪽이고, 30초 동안 1.0 포인트밖에 안 움직였다.
+    """
+
+    def test_the_floor_maps_to_the_thinnest_frame(self):
+        self.assertEqual(
+            desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY,
+                                     desktop_cat.MEMORY_FLOOR),
+            0.0)
+
+    def test_full_memory_still_maps_to_the_fattest_frame(self):
+        self.assertEqual(
+            desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 100.0), 100.0)
+
+    def test_below_the_floor_does_not_go_negative(self):
+        self.assertEqual(
+            desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 5.0), 0.0)
+
+    def test_disk_is_left_alone(self):
+        """디스크는 진짜로 0~100 을 다 쓴다. 눈금을 건드리면 안 된다."""
+        for percent in (0.0, 37.0, 65.0, 100.0):
+            with self.subTest(percent=percent):
+                self.assertEqual(
+                    desktop_cat.body_percent(desktop_cat.SOURCE_DISK, percent),
+                    percent)
+
+    def test_max_compares_two_raw_percentages(self):
+        """`max` 는 "둘 중 더 찬 쪽" 이다. 한쪽만 눈금을 바꾸면 비교가 깨진다."""
+        for percent in (20.0, 65.0, 90.0):
+            with self.subTest(percent=percent):
+                self.assertEqual(
+                    desktop_cat.body_percent(desktop_cat.SOURCE_MAX, percent),
+                    percent)
+
+    def test_an_idle_mac_is_not_stuck_in_the_fat_half(self):
+        """평상시 메모리에서 고양이가 홀쭉한 쪽에 있어야 한다.
+
+        이 검사가 깨지면 "앱을 닫으면 홀쭉해진다" 를 사람이 볼 수 없다.
+        """
+        frames = desktop_cat.frame_count("cute")
+        idle = desktop_cat.frame_index_for(
+            "cute", desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 65.5))
+        self.assertLess(
+            idle, (frames - 1) / 2,
+            f"평상시 메모리 65.5% 가 {frames}프레임 중 {idle}번 — 뚱뚱한 쪽이다")
+
+
+class CatMovementTests(unittest.TestCase):
+    def test_closing_a_big_app_moves_the_cat_more_than_it_used_to(self):
+        """실측 재현: 크롬(4GB)을 닫으면 vm.percent 가 80.0 -> 63.8 로 떨어졌다.
+
+        예전 검사는 이 숫자들로 산술만 하고 제품 코드를 한 줄도 안 불렀다.
+        `frame_index_for` 를 `return 0` 으로 만들어도 통과했다. 이제는
+        실제로 프레임을 구한다.
+        """
+        before = desktop_cat.frame_index_for(
+            "cute", desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 80.0))
+        after = desktop_cat.frame_index_for(
+            "cute", desktop_cat.body_percent(desktop_cat.SOURCE_MEMORY, 63.8))
+        moved = before - after
+        # 눈금을 다시 매기기 전에는 6칸이었다. 사람 눈에 확실히 보이려면
+        # 그보다 더 움직여야 한다.
+        self.assertGreater(
+            moved, 6, f"{moved}칸밖에 안 움직인다 — 데모에서 안 보인다")
 
 
 class SizeSourceTests(unittest.TestCase):
@@ -1494,11 +1655,28 @@ class RevealTests(unittest.TestCase):
             for index in range(11):
                 (root / "myotter" / f"cat_{index:02d}.png").write_bytes(b"png")
 
-            cases = {0.0: "cat_00.png", 50.0: "cat_05.png", 91.0: "cat_09.png",
-                     100.0: "cat_10.png"}
+            # 값을 손으로 적어 둔다. 여기서 body_percent 를 다시 부르면
+            # 제품 코드를 그대로 베낀 검사가 되어 아무것도 못 잡는다.
+            #
+            # 메모리는 눈금을 다시 매긴다(MEMORY_FLOOR=40). 도는 맥은 메모리를
+            # 0 근처까지 비우지 않으므로, 40 아래를 전부 제일 홀쭉한 프레임에
+            # 몰아 두고 40~100 을 11프레임에 편다. 디스크는 진짜로 0~100 을
+            # 다 쓰므로 그대로 둔다.
+            cases_by_source = {
+                desktop_cat.SOURCE_MEMORY: {
+                    0.0: "cat_00.png",    # 바닥 아래 -> 제일 홀쭉
+                    50.0: "cat_02.png",   # (50-40)/60 = 16.7%
+                    91.0: "cat_08.png",   # (91-40)/60 = 85.0%
+                    100.0: "cat_10.png",
+                },
+                desktop_cat.SOURCE_DISK: {
+                    0.0: "cat_00.png", 50.0: "cat_05.png",
+                    91.0: "cat_09.png", 100.0: "cat_10.png",
+                },
+            }
             # 아이콘도 설정이 고른 지표를 따라야 한다. 화면 위 고양이는 메모리로
             # 부풀어 있는데 말 거는 창에는 홀쭉한 그림이 붙으면 따로 논다.
-            for source in (desktop_cat.SOURCE_MEMORY, desktop_cat.SOURCE_DISK):
+            for source, cases in cases_by_source.items():
                 for percent, expected in cases.items():
                     with self.subTest(source=source, percent=percent):
                         vm = SimpleNamespace(percent=percent, used=0, total=0)

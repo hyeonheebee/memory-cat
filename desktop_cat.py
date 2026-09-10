@@ -163,6 +163,33 @@ def size_percent(source=None, memory=None, disk=None):
     return max(_memory(), _disk())
 
 
+#: 메모리로 몸집을 정할 때의 바닥값. 이 아래는 전부 제일 홀쭉한 프레임.
+#:
+#: 메모리 사용률은 0 근처로 내려가지 않는다 — 도는 맥은 늘 절반쯤 쓰고 있다.
+#: 실측(18GB, macOS 15.4.1): 평상시 65~66%, 30초 동안 1.0 포인트 변동.
+#: 재부팅 직후에도 77~80% 였다. 0~100 을 그대로 40프레임에 옮기면 고양이가
+#: 23번대에 붙어 살고, 홀쭉한 쪽 절반을 영영 못 쓴다.
+MEMORY_FLOOR = 40.0
+
+
+def body_percent(source, percent):
+    """몸집을 정할 0~100. 메모리일 때만 눈금을 다시 매긴다.
+
+    디스크는 진짜로 0~100 을 다 쓴다(빈 디스크가 있다). 그래서 건드리지
+    않는다. ``max`` 는 "둘 중 더 찬 쪽" 이라 두 값을 같은 자로 재야 하므로
+    역시 건드리지 않는다.
+
+    화면에 적히는 숫자는 이 값이 아니다. 정보창의 "RAM 65%" 와 기분 줄은
+    잰 그대로를 쓴다 — 몸집을 보기 좋게 만들자고 숫자를 바꾸면 두 개가
+    서로 다른 말을 하게 된다.
+    """
+    if source != SOURCE_MEMORY:
+        return percent
+    if percent <= MEMORY_FLOOR:
+        return 0.0
+    return (percent - MEMORY_FLOOR) / (100.0 - MEMORY_FLOOR) * 100.0
+
+
 def frame_index_for(theme, percent):
     """0~100 값을 그 테마의 프레임 번호로 옮긴다.
 
@@ -191,7 +218,9 @@ def alert_icon_path():
     except Exception:
         return FALLBACK_ALERT_ICON_PATH
     try:
-        index = frame_index_for(theme, size_percent(cfg.get("size_source")))
+        source = cfg.get("size_source")
+        index = frame_index_for(
+            theme, body_percent(source, size_percent(source)))
     except Exception:
         index = 0  # 측정에 실패해도 그 테마의 얼굴은 보여 준다.
     try:
@@ -821,7 +850,8 @@ class CatController(NSObject):
         self.score = pct
         self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
-        idx = frame_index_for(theme, pct)
+        # 몸집만 눈금을 다시 매긴다. 아래에 적히는 숫자들은 잰 그대로다.
+        idx = frame_index_for(theme, body_percent(source, pct))
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
         language = self.language
         # 큰 숫자가 몸집을 설명해야 한다. 메모리로 부풀었는데 디스크가 크게
