@@ -54,7 +54,7 @@ from pathlib import Path
 REPO = Path(SPECPATH).resolve().parent  # noqa: F821  (SPECPATH is injected)
 
 # 릴리스 태그와 반드시 같이 움직여야 하는 값. 태그를 올리면 여기도 올린다.
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 # 번들이 요구하는 최소 macOS. **아키텍처마다 다르다.**
 #
