@@ -1,5 +1,7 @@
 # 가상환경 / 캐시
 .venv/
+# 릴리스 zip 을 굽는 전용 venv (python.org 3.12). requirements-release.txt 참고
+.relvenv/
 __pycache__/
 *.pyc
 
