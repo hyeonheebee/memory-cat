@@ -5,6 +5,13 @@
 > Your memory pressure, visualized as a cat that gets chonkier as your Mac fills up.
 
 <p align="center">
+  <a href="https://github.com/hyeonheebee/memory-cat/releases/latest"><img src="https://img.shields.io/github/v/release/hyeonheebee/memory-cat?label=download&color=f0932b" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-11%2B-lightgrey" alt="macOS 11+">
+  <img src="https://img.shields.io/badge/Windows-x64-lightgrey" alt="Windows x64">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
+</p>
+
+<p align="center">
   <img src="./docs/chonk-loop.gif" alt="A cat getting rounder as memory fills up" width="300">
 </p>
 
@@ -14,7 +21,7 @@ the fuller your Mac's memory gets, the rounder your cat becomes.
 
 The killer demo feature makes that cat personal. Give Memory Cat one photo of
 your pet, and **gpt-image-2** creates a six-stage chonk progression that the app
-automatically converts into a custom 40-frame desktop theme.
+automatically converts into a custom desktop theme with six chonk stages.
 
 ## Screenshots
 
@@ -48,12 +55,13 @@ automatically converts into a custom 40-frame desktop theme.
 
 - **One pet photo → one custom animated theme:** gpt-image-2 preserves your
   pet's distinctive colors, markings, face, and ears while generating a
-  six-stage horizontal sprite sheet. Memory Cat segments it and builds the full
-  40-frame theme automatically.
+  six-stage horizontal sprite sheet. Memory Cat segments it and builds the
+  theme automatically.
 - **The complete chonk chart:** **A fine boi → He chomnk → A heckin' chonker →
   HEFTYCHONK → MEGACHONKER → OH LAWD HE COMIN**. Everyday use keeps him in the
   middle of the chart; the last two names are for a Mac that is genuinely out of
-  room, so seeing one means something.
+  room, so seeing one means something. Korean has its own six — see
+  [Where he changes shape](#where-he-changes-shape).
 - **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
   computer feels slow, recommends safe cleanup targets, estimates reclaimable
   space, and gives one concise piece of advice. The Korean menu label is
@@ -96,6 +104,26 @@ the wait. Storage matters too: a full drive leaves swap no room to grow.
 > ratio falls. Counting it made the cat slim down after a reboot while the Mac
 > was actually more pressured than before. The diagnosis still reports swap; it
 > just does not decide his size.
+
+### Where he changes shape
+
+He changes shape at the same points his name changes, in both languages, so the
+picture and the label never disagree.
+
+| Usage | English | 한국어 |
+|---|---|---|
+| under 60% | A fine boi | 아직 더 먹을 수 있어요 |
+| 60% | He chomnk | 살짝 배불러요 |
+| 70% | A heckin' chonker | 좀 더 배불러요 |
+| 80% | HEFTYCHONK | 이제 진짜 배불러요 |
+| 90% | MEGACHONKER | 슬슬 잠이 와요 |
+| 96% | OH LAWD HE COMIN | 졸려요 |
+
+A running Mac never empties its memory — mine sits between 61% and 80% — so
+mapping 0–100% straight onto the six pictures would have used only two of them.
+Each band gets its own picture instead. Inside a band the movement is linear, so
+themes that really are forty separate drawings, like *Wake-up call*, still
+animate smoothly.
 
 The Windows build follows storage only.
 
@@ -145,7 +173,8 @@ deleted.
 ## Download
 
 Prebuilt builds live on the [releases page](https://github.com/hyeonheebee/memory-cat/releases/latest).
-Nothing to install — unzip and run.
+Nothing to install — unzip it, drag `Memory Cat.app` into your **Applications**
+folder, and open it.
 
 | | File | Notes |
 |---|---|---|
@@ -177,13 +206,20 @@ in the dialog.
 
 You only have to do this once.
 
+### Starting it at login
+
+A downloaded build does not register a login item by itself. Open Memory Cat
+once, then switch it on in **System Settings → General → Login Items &
+Extensions**. ([Install on macOS](#install-on-macos) below sets this up for you
+instead.)
+
 ### Removing a downloaded build
 
 Move the app to the Trash. Your settings and any themes you made stay in
 `~/Library/Application Support/Memory Cat/` — delete that folder too if you want
-them gone. (Downloaded builds do not register a login item, so there is nothing
-else to clean up. The `uninstall_mac.command` mentioned below is only for
-installs made by `install_mac.command`.)
+them gone. (If you switched the login item on in System Settings, switch it off
+there as well. The `uninstall_mac.command` mentioned below is only for installs
+made by `install_mac.command`.)
 
 ## Install on macOS
 
@@ -336,7 +372,8 @@ python3 -m venv .venv
 
 `vision_theme.py` asks gpt-image-2 for six clearly separated versions of the
 same pet, from slim to extremely round. It then reuses the existing import
-pipeline to produce `cat_00.png` through `cat_39.png` under
+pipeline to write those six stages out as `cat_00.png` through `cat_39.png`
+under
 `~/Library/Application Support/Memory Cat/frames/my-pet/`, plus preview and raw
 debug images. Set `MEMORY_CAT_HOME` to write somewhere else.
 
@@ -411,7 +448,7 @@ repository. My workflow for every feature:
    diagnosis engine (`brain.py`), the safety-first trash pipeline (`safe_trash`
    with an allowlist + macOS Trash only), i18n, the personality system, and the
    killer feature — `vision_theme.py`, which turns one photo of your pet into a
-   40-frame chonk-progression theme via gpt-image-2.
+   six-stage chonk-progression theme via gpt-image-2.
 3. **Verify against the real API** — mocked tests all passed, but my review
    partner (Claude, which I used for planning, code review, and demo prep —
    never for the code itself) ran a live API call and caught a real bug:
