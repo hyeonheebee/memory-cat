@@ -16,6 +16,7 @@ import importlib.util
 import os
 import plistlib
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -724,6 +725,69 @@ class WindowsBuildScriptTests(unittest.TestCase):
         self.assertEqual(
             missing, [],
             "build_exe.bat 이 존재 확인을 안 하는 루트 모듈: " + ", ".join(missing),
+        )
+
+
+class WindowsSourceRunTests(unittest.TestCase):
+    """`windows_cat.pyw` 를 소스로 직접 실행해도 루트 모듈이 잡히는지.
+
+    `windows/README.txt` 가 **"방법 A (권장)"** 으로 안내하는 경로다 — 파이썬을
+    깔고 `windows_cat.pyw` 를 더블클릭하거나 `pythonw` 로 실행한다.
+
+    그런데 파이썬은 스크립트를 직접 실행할 때 `sys.path[0]` 에 **스크립트가
+    있는 폴더**를 넣는다. `windows_cat.pyw` 는 `windows/` 안에 있고
+    `i18n`·`metrics` 는 저장소 루트에 있다. 아무것도 안 해주면 어느
+    디렉터리에서 실행하든 `ModuleNotFoundError` 로 죽는다 — cwd 문제가
+    아니라서 "루트에서 실행" 으로도 안 풀린다.
+
+    exe 는 `build_exe.bat` 의 `--paths ".."` 덕에 멀쩡하고 그쪽은
+    `WindowsBuildScriptTests` 가 지킨다. 소스 실행 경로는 아무도 안 보고
+    있었다 — v0.2.0 부터 v0.3.3 까지 다섯 번의 릴리스가 깨진 채로 나갔다.
+    `.pyw` 라 더블클릭해도 에러창이 안 뜨고 조용히 아무 일도 안 일어난다.
+
+    맥 개발 환경에는 PySide6 가 없다. 그래서 Qt 와 psutil 을 가짜로 세워
+    `PYTHONPATH` 에 얹고, 스크립트가 루트 모듈 import 를 **지나서** Qt 를
+    만지는 지점까지 갔는지를 표식으로 확인한다.
+    """
+
+    APP = _REPO / "windows" / "windows_cat.pyw"
+    MARKER = "STUB-QT-REACHED"
+
+    def setUp(self):
+        if not self.APP.is_file():
+            self.skipTest(f"파일이 없습니다: {self.APP}")
+
+    def _stubs(self, parent):
+        """Qt·psutil 가짜. import 는 되고, 속성을 만지면 표식을 남기고 죽는다."""
+        stub = Path(parent) / "stubs"
+        (stub / "PySide6").mkdir(parents=True)
+        (stub / "psutil.py").write_text("", encoding="utf-8")
+        (stub / "PySide6" / "__init__.py").write_text("", encoding="utf-8")
+        for name in ("QtCore", "QtGui", "QtWidgets"):
+            (stub / "PySide6" / f"{name}.py").write_text(
+                f"def __getattr__(name):\n"
+                f"    raise SystemExit({self.MARKER!r})\n",
+                encoding="utf-8",
+            )
+        return stub
+
+    def test_root_modules_resolve_when_run_as_a_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(self._stubs(tmp))
+            proc = subprocess.run(
+                [sys.executable, str(self.APP)],
+                cwd=tmp,  # cwd 와 무관하다는 것까지 같이 본다
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        self.assertIn(
+            self.MARKER, proc.stderr,
+            "windows_cat.pyw 가 Qt 에 닿기도 전에 죽었습니다. 저장소 루트가 "
+            "import 경로에 없어서입니다 — 소스로 실행하는 사람은 전부 "
+            f"걸립니다:\n{proc.stderr}",
         )
 
 
