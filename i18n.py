@@ -18,14 +18,27 @@ CHONK_STAGES_EN = (
     "OH LAWD HE COMIN",
 )
 
+#: 한국어 단계. 영어의 chonk chart 는 밈이라 그대로 두고, 한국어는 배부름
+#: 비유로 간다. **개수와 문턱이 영어와 같아야 한다** — `desktop_cat.body_percent`
+#: 가 이 문턱(60/70/80/90/96)에서 그림을 바꾸므로, 한쪽만 단계를 줄이면
+#: 그림과 이름이 따로 논다. v0.3.2 까지 한국어가 4 단계라 실제로 그랬다.
+CHONK_STAGES_KO = (
+    "아직 더 먹을 수 있어요",
+    "살짝 배불러요",
+    "좀 더 배불러요",
+    "이제 진짜 배불러요",
+    "슬슬 잠이 와요",
+    "졸려요",
+)
+
 _STRINGS = {
     "ko": {
         "disk": "디스크",
         "ram": "램",
         "swap": "스왑",
         "free": "여유",
-        "mood": "기분",
-        "mood_detail": "기분: {mood}  ({source} {percent}%)",
+        "mood": "상태",
+        "mood_detail": "상태: {mood}  ({source} {percent}%)",
         "source_memory": "메모리",
         "source_disk": "디스크",
         "source_max": "메모리·디스크",
@@ -342,24 +355,24 @@ def pet_name(configured: Optional[str], language: str) -> str:
 
 
 def chonk_stage(percent: float, language: str) -> str:
-    """한국어는 기존 4단계를 유지하고 영어만 6단계 chonk chart를 쓴다."""
+    """두 언어 모두 6단계. 문턱은 60/70/80/90/96 으로 같다.
+
+    `desktop_cat.body_percent` 가 같은 문턱에서 그림을 바꾸므로, 이름이
+    바뀌는 지점과 몸이 바뀌는 지점이 언어와 상관없이 일치한다.
+    """
     if canonical_language(language) == LANGUAGE_KO:
-        if percent < 60:
-            return "여유"
-        if percent < 80:
-            return "포동"
-        if percent < 92:
-            return "배불러"
-        return "빵빵!"
+        stages = CHONK_STAGES_KO
+    else:
+        stages = CHONK_STAGES_EN
 
     if percent < 60:
-        return CHONK_STAGES_EN[0]
+        return stages[0]
     if percent < 70:
-        return CHONK_STAGES_EN[1]
+        return stages[1]
     if percent < 80:
-        return CHONK_STAGES_EN[2]
+        return stages[2]
     if percent < 90:
-        return CHONK_STAGES_EN[3]
+        return stages[3]
     if percent < 96:
-        return CHONK_STAGES_EN[4]
-    return CHONK_STAGES_EN[5]
+        return stages[4]
+    return stages[5]
