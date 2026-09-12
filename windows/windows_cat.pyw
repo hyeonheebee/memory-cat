@@ -15,6 +15,13 @@ import os
 import sys
 from types import SimpleNamespace
 
+# 이 파일은 windows/ 안에 있는데 i18n·metrics 는 저장소 루트에 있다. 파이썬은
+# 스크립트를 직접 실행할 때 sys.path[0] 에 스크립트 폴더만 넣으므로, 루트를
+# 직접 얹어 준다 — 안 그러면 어느 디렉터리에서 실행하든 ModuleNotFoundError 다.
+# exe(frozen) 는 build_exe.bat 의 `--paths ".."` 로 이미 담겨 와서 건드리지 않는다.
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import psutil
 from PySide6 import QtCore, QtGui, QtWidgets
 
