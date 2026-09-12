@@ -112,12 +112,20 @@ class I18nTests(unittest.TestCase):
         stages = [i18n.chonk_stage(value, "en") for value in (50, 65, 75, 85, 92, 99)]
         self.assertEqual(tuple(stages), i18n.CHONK_STAGES_EN)
 
+    def test_korean_chart_uses_all_six_exact_stage_names(self):
+        # 영어와 같은 표본값을 쓴다. 단계마다 하나씩 짚어야 문턱이 밀렸을 때
+        # 잡힌다 — 표본이 모자라면 안 불리는 단계가 검사 밖에 남는다.
+        stages = [i18n.chonk_stage(value, "ko") for value in (50, 65, 75, 85, 92, 99)]
+        self.assertEqual(tuple(stages), i18n.CHONK_STAGES_KO)
+
+    def test_the_two_languages_have_the_same_number_of_stages(self):
+        """개수가 갈라지면 한쪽 언어에서 그림과 이름이 따로 논다."""
+        self.assertEqual(len(i18n.CHONK_STAGES_KO), len(i18n.CHONK_STAGES_EN))
+
     def test_korean_growth_stages_carry_no_animal_emoji(self):
         # 사진으로 만든 테마는 고양이가 아닐 수 있다. 고양이 이모지가 붙어
         # 있으면 수달한테 냥이라고 부르는 꼴이 된다.
-        stages = [i18n.chonk_stage(value, "ko") for value in (50, 70, 85, 95)]
-        self.assertEqual(stages, ["여유", "포동", "배불러", "빵빵!"])
-        for stage in stages:
+        for stage in i18n.CHONK_STAGES_KO:
             with self.subTest(stage=stage):
                 self.assertTrue(all(ord(ch) < 0x1F300 for ch in stage))
 

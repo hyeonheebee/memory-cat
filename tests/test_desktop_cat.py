@@ -503,15 +503,24 @@ class BodyFollowsChonkStagesTests(unittest.TestCase):
         self.fail(f"프레임 {frame} 이 어느 그림에도 안 들어갑니다")
 
     def test_the_picture_changes_exactly_where_the_name_changes(self):
+        """두 언어를 다 본다.
+
+        v0.3.2 까지 한국어 이름은 4 단계(60/80/92)라 그림(60/70/80/90/96)과
+        따로 놀았다. 이 검사가 영어만 봐서 아무도 못 잡았다.
+        """
         picture_at = [self._picture(float(p)) for p in range(101)]
-        name_at = [i18n.chonk_stage(float(p), "en") for p in range(101)]
         picture_edges = [p for p in range(1, 101)
                          if picture_at[p] != picture_at[p - 1]]
-        name_edges = [p for p in range(1, 101)
-                      if name_at[p] != name_at[p - 1]]
-        self.assertEqual(
-            picture_edges, name_edges,
-            f"그림은 {picture_edges} 에서 바뀌는데 이름은 {name_edges} 에서 바뀝니다")
+        for language in ("en", "ko"):
+            with self.subTest(language=language):
+                name_at = [i18n.chonk_stage(float(p), language)
+                           for p in range(101)]
+                name_edges = [p for p in range(1, 101)
+                              if name_at[p] != name_at[p - 1]]
+                self.assertEqual(
+                    picture_edges, name_edges,
+                    f"[{language}] 그림은 {picture_edges} 에서 바뀌는데 "
+                    f"이름은 {name_edges} 에서 바뀝니다")
 
     def test_every_picture_is_reachable(self):
         """그림 6장이 다 쓰여야 한다. 안 쓰이는 그림이 있으면 낭비다."""
