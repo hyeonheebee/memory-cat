@@ -37,9 +37,18 @@ automatically converts into a custom desktop theme with six chonk stages.
     </td>
   </tr>
   <tr>
+    <td align="center">
+      <img src="./docs/screenshots/12-menu-en.png" alt="Memory Cat's menu in English" width="360"><br>
+      <sub>Memory Cat's menu in English.<br>Memory Cat의 영어 메뉴입니다.</sub>
+    </td>
+    <td align="center">
+      <img src="./docs/screenshots/06-menu-overview.png" alt="Memory Cat's menu in Korean" width="360"><br>
+      <sub>Memory Cat's menu in Korean.<br>Memory Cat의 한국어 메뉴입니다.</sub>
+    </td>
+  </tr>
+  <tr>
     <td align="center" colspan="2">
-      <img src="./context-menu.png" width="400"><br>
-      <sub>The chonk stage, disk, RAM, swap, top memory apps, the diagnosis, themes, personality, and language — all on right-click</sub>
+      <sub>The chonk stage, disk, RAM, swap, top memory apps, the diagnosis, themes, personality, and language — all on right-click<br>통통 단계, 디스크, RAM, 스왑, 메모리를 많이 사용하는 앱, 진단, 테마, 성격, 언어를 모두 우클릭 메뉴에서 확인할 수 있습니다.</sub>
     </td>
   </tr>
 </table>
@@ -51,32 +60,73 @@ automatically converts into a custom desktop theme with six chonk stages.
   <img src="./docs/screenshots/04-safe-cleanup.png" alt="Safe cleanup confirmation" width="48%">
 </p>
 
+### Live changes and personalization
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="./docs/screenshots/09-memory-cat-changes.gif" alt="The default cat changing size as memory usage changes" width="280"><br>
+      <sub>This is Cute, one of the four built-in themes. It gets rounder as memory fills up.<br>이건 기본 제공 네 가지 테마 중 하나인 Cute입니다. 메모리가 차오를수록 더 통통해집니다.</sub>
+    </td>
+    <td align="center">
+      <img src="./docs/screenshots/11-dog-hero.gif" alt="A custom dog pet theme in action" width="280"><br>
+      <sub>A custom pet theme in action.<br>커스텀 반려동물 테마가 작동하는 모습입니다.</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="./docs/screenshots/05-size-source.png" alt="Choosing memory, storage, or whichever is fuller" width="48%">
+</p>
+
 ## Highlights
 
 - **One pet photo → one custom animated theme:** gpt-image-2 preserves your
   pet's distinctive colors, markings, face, and ears while generating a
   six-stage horizontal sprite sheet. Memory Cat segments it and builds the
-  theme automatically.
+  theme automatically.<br>
+  반려동물 사진 한 장으로 고유한 특징을 살린 6단계 이미지를 생성하고,
+  앱이 이를 자동으로 데스크톱 테마로 변환합니다.
+
 - **The complete chonk chart:** **A fine boi → He chomnk → A heckin' chonker →
   HEFTYCHONK → MEGACHONKER → OH LAWD HE COMIN**. Everyday use keeps him in the
   middle of the chart; the last two names are for a Mac that is genuinely out of
   room, so seeing one means something. Korean has its own six — see
   [Where he changes shape](#where-he-changes-shape).
+
 - **“🐾 What did you eat?” diagnosis:** GPT-5.6 (`gpt-5.6-luna`) explains why the
   computer feels slow, recommends safe cleanup targets, estimates reclaimable
   space, and gives one concise piece of advice. The Korean menu label is
-  “🐾 뭘 먹은 거야?”.
+  “🐾 뭘 먹은 거야?”.<br>
+  컴퓨터가 느려진 이유를 설명하고, 안전한 정리 대상과 예상 확보 공간을
+  알려주며 한 줄 조언을 제공합니다.
+
 - **Safety-first cleanup:** only allowlisted browser caches, Trash contents,
   downloads older than 30 days, and Xcode DerivedData can be suggested. Every
   item requires confirmation and is moved through macOS Trash—never permanently
-  deleted.
+  deleted.<br>
+  허용 목록에 있는 항목만 정리 대상으로 제안하며, 각 항목은 사용자 확인 후
+  macOS 휴지통으로 이동합니다. 영구 삭제하지 않습니다.
+
 - **A cat with a personality:** choose a sassy, warm, or stoic voice, or describe
   a custom personality in natural language. The selected voice shapes the
   diagnosis.
+
 - **English and Korean:** macOS language is detected automatically, with a
   manual language override in the context menu.
+
 - **Useful at a glance:** disk, RAM, swap, and top memory-consuming apps appear
-  in the right-click menu. The cat can be dragged, resized, and rethemed.
+  in the right-click menu. The cat can be dragged, resized, and rethemed.<br>
+  우클릭 메뉴에서 디스크, RAM, 스왑, 메모리를 많이 사용하는 앱을 확인하고,
+  고양이를 이동하거나 크기와 테마를 바꿀 수 있습니다.
+
+- **Make it yours:** name the pet from the context menu and use a generated
+  theme such as an otter. For example, a generated theme may be stored under
+  an automatically assigned folder such as `mypet9`, while its display name can
+  be a name you choose, such as `수다리`.<br>
+  우클릭 메뉴에서 반려동물의 이름을 정하고 수달과 같은 생성 테마를 사용할
+  수 있습니다. 예를 들어 테마는 `mypet9`와 같은 자동 지정 폴더에 저장될 수
+  있고, 표시 이름은 `수다리`처럼 직접 정할 수 있습니다.
 
 The AI-powered items above are macOS only. See
 [Install on Windows](#install-on-windows) for what the Windows build covers.
@@ -125,7 +175,45 @@ Each band gets its own picture instead. Inside a band the movement is linear, so
 themes that really are forty separate drawings, like *Wake-up call*, still
 animate smoothly.
 
-The Windows build follows storage only.
+The Windows build follows storage only.<br>
+Windows 버전은 저장공간 사용량만을 기준으로 크기가 변합니다.
+
+## Give your pet a name
+
+On macOS, right-click the pet and choose **Give it a name…**. Leave the field
+empty to use the default name, or enter a name such as `수다리`.<br>
+macOS에서 반려동물을 우클릭하고 <strong>이름 지어주기…</strong>를 선택하세요. 입력란을
+비워두면 기본 이름을 사용하고, `수다리`와 같은 이름을 입력할 수 있습니다.
+
+For example, a generated theme may be stored under an automatically assigned
+folder such as `mypet9`, while its display name can be a name you choose, such
+as `수다리`.<br>
+예를 들어, 생성된 테마는 `mypet9`와 같이 자동으로 지정된 폴더에 저장될 수
+있고, 표시 이름은 `수다리`처럼 사용자가 직접 정할 수 있습니다.
+
+New themes generated from the menu are applied immediately. They are stored
+under the next available `mypet`, `mypet2`, … name so an existing theme is not
+overwritten, and they can be selected again from the **Theme** menu later.<br>
+메뉴에서 생성한 새 테마는 바로 적용됩니다. 기존 테마를 덮어쓰지 않도록
+다음으로 사용 가능한 `mypet`, `mypet2` 등의 이름으로 저장되며, 나중에
+**테마** 메뉴에서 다시 선택할 수 있습니다.
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="./docs/screenshots/07-name-default.png" alt="Choosing a display name for the pet" width="360">
+    </td>
+    <td align="center">
+      <img src="./docs/screenshots/08-name-sudari.png" alt="One example of a custom pet display name: 수다리" width="360">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="./docs/screenshots/10-sudari-changes.gif" alt="A custom otter pet changing size as memory usage changes" width="280"><br>
+      <sub>A custom pet theme in action. One example of a custom pet display name: 수다리.<br>커스텀 반려동물 테마가 작동하는 모습입니다. 커스텀 반려동물 표시 이름의 한 예는 수다리입니다.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Privacy
 
@@ -298,6 +386,15 @@ clone for development, a `.env` in the project root still works.
 > eat? diagnosis, custom pet themes, safe cleanup, and personalities. In
 > exchange the Windows build has no OpenAI dependency and makes no network
 > requests at all.
+>
+> **Windows 버전에 포함된 기능.** 디스크 사용량을 기준으로 변하는 고양이,
+> RAM·스왑 정보, 메모리를 많이 사용하는 앱 목록, 테마 및 크기 전환,
+> 한국어·영어 언어 전환을 제공합니다. 🐾 뭘 먹은 거야? 진단, 커스텀
+> 반려동물 테마, 안전한 정리, 성격 기능은 macOS 전용입니다. 대신 Windows
+> 버전은 OpenAI 의존성이 없고 네트워크 요청도 전혀 하지 않습니다.
+>
+> *Features planned (diagnosis and custom themes)*<br>
+> *기능 추가 예정 (진단 및 커스텀 테마)*
 
 See [`windows/README.txt`](windows/README.txt) for the full instructions. In
 short:
@@ -390,7 +487,9 @@ Themes are discovered automatically from two places: the four built-in themes
 inside the app bundle, and your own themes in
 `~/Library/Application Support/Memory Cat/frames/<name>/`. Newly generated
 themes always go to the second one, so reinstalling the app never deletes them.
-Reopen the right-click **Theme** menu to select a newly imported theme.
+Reopen the right-click **Theme** menu to select a newly imported theme. Themes
+generated from the menu use automatic folder names (`mypet`, `mypet2`, …);
+the pet's display name is set separately through **Give it a name…**.
 Code-generated built-in themes can be rebuilt with `python generate_frames.py`.
 
 ## Project structure
