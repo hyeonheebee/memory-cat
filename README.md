@@ -162,7 +162,7 @@ automatically converts into a custom desktop theme with six chonk stages.
 work on the Windows build with your own key — Windows only explains, and never
 deletes anything. Safety-first cleanup and personalities stay **macOS only**.
 See [Install on Windows](#install-on-windows) for what differs.<br>
-위 항목 중 **🐾 뭘 먹은 거야? 진단**과 **내 반려동물로 테마 만들기…**는 본인
+위 항목 중 **🐾 뭘 먹은 거야? 진단**과 <strong>내 반려동물로 테마 만들기…</strong>는 본인
 키만 있으면 Windows 버전에서도 됩니다 — 다만 Windows는 설명만 하고 파일을
 지우지 않습니다. 안전한 용량 정리와 성격 기능은 여전히 **macOS 전용**입니다.
 Windows 버전에서 달라지는 점은 [Windows 설치](#install-on-windows)를
