@@ -291,5 +291,115 @@ class BrainTests(unittest.TestCase):
             self.assertTrue(target.exists())
 
 
+class DiagnoseWithoutCleanupTests(unittest.TestCase):
+    """윈도우판은 파일을 지우지 않는다. 후보를 모으지도 않아야 한다."""
+
+    def setUp(self):
+        self.snapshot_85 = {
+            "disk": {
+                "total_bytes": 1000,
+                "used_bytes": 850,
+                "free_bytes": 150,
+                "percent": 85.0,
+            },
+            "ram": {
+                "total_bytes": 1000,
+                "available_bytes": 500,
+                "used_bytes": 500,
+                "percent": 50.0,
+                "pressure_score": 50.0,
+            },
+            "swap": {"total_bytes": 100, "used_bytes": 0, "percent": 0.0},
+            "top_memory_apps": [],
+        }
+
+    def test_it_never_touches_the_cleanup_scanner(self):
+        with patch.object(brain, "collect_cleanup_candidates") as scanner, \
+             patch.object(brain, "_load_api_key", return_value=None):
+            result = brain.diagnose(language="ko", include_cleanup=False)
+        scanner.assert_not_called()
+        self.assertEqual(result["cleanup_recommendations"], [])
+        self.assertEqual(result["estimated_reclaimable_bytes"], 0)
+
+    def test_the_explanation_still_comes_back(self):
+        with patch.object(brain, "_load_api_key", return_value=None):
+            result = brain.diagnose(language="ko", include_cleanup=False)
+        self.assertTrue(result["why_slow"], "왜 느린지 설명이 비었다")
+        self.assertTrue(result["one_line_advice"])
+
+    def test_the_default_still_collects(self):
+        """맥 동작이 바뀌면 안 된다."""
+        with patch.object(brain, "collect_cleanup_candidates",
+                          return_value=[]) as scanner, \
+             patch.object(brain, "_load_api_key", return_value=None):
+            brain.diagnose(language="ko")
+        scanner.assert_called_once()
+
+    def test_fallback_advice_omits_trash_and_allowlist_in_korean(self):
+        with patch.object(brain, "_load_api_key", return_value=None):
+            result = brain.diagnose(
+                self.snapshot_85, language="ko", include_cleanup=False
+            )
+        self.assertNotIn("휴지통", result["one_line_advice"])
+        self.assertNotIn("화이트리스트", result["one_line_advice"])
+
+    def test_fallback_advice_omits_trash_and_allowlist_in_english(self):
+        with patch.object(brain, "_load_api_key", return_value=None):
+            result = brain.diagnose(
+                self.snapshot_85, language="en", include_cleanup=False
+            )
+        self.assertNotIn("Trash", result["one_line_advice"])
+        self.assertNotIn("allowlist", result["one_line_advice"])
+
+    def test_default_include_cleanup_advice_is_byte_identical(self):
+        """맥 문구는 include_cleanup 파라미터가 생겨도 한 글자도 바뀌면 안 된다."""
+        with (
+            patch.object(brain, "_load_api_key", return_value=None),
+            patch.object(brain, "collect_cleanup_candidates", return_value=[]),
+        ):
+            result = brain.diagnose(self.snapshot_85, language="ko")
+        self.assertEqual(
+            result["one_line_advice"],
+            "큰 화이트리스트 항목부터 휴지통으로 옮긴 뒤 직접 확인하고 비우세요.",
+        )
+
+    def test_openai_prompt_gets_no_cleanup_notes_and_scanner_is_skipped(self):
+        parsed = brain._AIDiagnosis(
+            why_slow=["디스크 여유 공간이 적습니다."],
+            recommendations=[],
+            one_line_advice="용량을 많이 차지하는 파일과 앱부터 직접 확인해 보세요.",
+        )
+        fake_client = Mock()
+        fake_client.responses.parse.return_value = SimpleNamespace(output_parsed=parsed)
+        with (
+            patch.object(brain, "_load_api_key", return_value="test-key"),
+            patch.object(brain, "collect_cleanup_candidates") as scanner,
+            patch.object(brain, "OpenAI", return_value=fake_client),
+        ):
+            brain.diagnose(self.snapshot_85, language="ko", include_cleanup=False)
+
+        scanner.assert_not_called()
+        instructions = fake_client.responses.parse.call_args.kwargs["instructions"]
+        self.assertIn("이번 진단에는 정리 기능이 없습니다.", instructions)
+
+    def test_openai_prompt_is_unchanged_when_cleanup_is_included(self):
+        parsed = brain._AIDiagnosis(
+            why_slow=["디스크 여유 공간이 적습니다."],
+            recommendations=[],
+            one_line_advice="캐시부터 확인하세요.",
+        )
+        fake_client = Mock()
+        fake_client.responses.parse.return_value = SimpleNamespace(output_parsed=parsed)
+        with (
+            patch.object(brain, "_load_api_key", return_value="test-key"),
+            patch.object(brain, "collect_cleanup_candidates", return_value=[]),
+            patch.object(brain, "OpenAI", return_value=fake_client),
+        ):
+            brain.diagnose(self.snapshot_85, language="ko")
+
+        instructions = fake_client.responses.parse.call_args.kwargs["instructions"]
+        self.assertEqual(instructions, brain.system_prompt_for(language="ko"))
+
+
 if __name__ == "__main__":
     unittest.main()
