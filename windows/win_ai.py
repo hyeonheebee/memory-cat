@@ -31,8 +31,12 @@ def has_api_key() -> bool:
 
 
 def api_key_missing_message(language):
-    """API 키가 없을 때 보여줄 (제목, 본문). 본문에 ``.env`` 경로가 들어간다."""
-    path = apppaths.user_data_dir() / ".env"
+    """API 키가 없을 때 보여줄 (제목, 본문). 본문에 ``.env`` 경로가 들어간다.
+
+    ``ensure_user_data_dir`` 로 그 폴더를 실제로 만든다 — 아무도 안 만들면
+    안내가 존재하지 않는 폴더(%APPDATA%\\Memory Cat)를 가리키게 된다.
+    """
+    path = apppaths.ensure_user_data_dir() / ".env"
     return (
         tr(language, "missing_api_key_title"),
         tr(language, "missing_api_key_help", path=str(path)),

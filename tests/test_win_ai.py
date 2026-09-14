@@ -141,6 +141,20 @@ class ApiKeyMessageTests(unittest.TestCase):
                 self.assertTrue(title.strip())
                 self.assertIn(".env", body)
 
+    def test_the_folder_it_points_at_is_created(self):
+        """안내가 가리키는 %APPDATA%\\Memory Cat 폴더가 실제로 있어야 한다.
+
+        아무도 그 폴더를 안 만들면 안내는 존재하지 않는 곳을 가리킨다.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "not-yet-created"
+            with patch.dict(os.environ, {apppaths.HOME_ENV: str(home)}):
+                self.assertFalse(home.exists())
+                title, body = win_ai.api_key_missing_message("ko")
+            self.assertTrue(home.is_dir())
+            self.assertIn(str(home), body)
+            self.assertIn(".env", body)
+
 
 class PhotoCheckTests(unittest.TestCase):
     def test_heic_is_refused_with_a_clear_message(self):
