@@ -158,8 +158,15 @@ automatically converts into a custom desktop theme with six chonk stages.
   수 있습니다. 예를 들어 테마는 `mypet9`와 같은 자동 지정 폴더에 저장될 수
   있고, 표시 이름은 `수다리`처럼 직접 정할 수 있습니다.
 
-The AI-powered items above are macOS only. See
-[Install on Windows](#install-on-windows) for what the Windows build covers.
+**🐾 What did you eat? diagnosis** and **Make a theme from my pet…** above also
+work on the Windows build with your own key — Windows only explains, and never
+deletes anything. Safety-first cleanup and personalities stay **macOS only**.
+See [Install on Windows](#install-on-windows) for what differs.<br>
+위 항목 중 **🐾 뭘 먹은 거야? 진단**과 **내 반려동물로 테마 만들기…**는 본인
+키만 있으면 Windows 버전에서도 됩니다 — 다만 Windows는 설명만 하고 파일을
+지우지 않습니다. 안전한 용량 정리와 성격 기능은 여전히 **macOS 전용**입니다.
+Windows 버전에서 달라지는 점은 [Windows 설치](#install-on-windows)를
+참고하세요.
 
 <a id="what-makes-him-chonky"></a>
 
@@ -275,18 +282,33 @@ Two features reach the network, and only when you click them yourself:
   naming OpenAI appears first, and nothing is uploaded until you approve it.
 
 Both features need your own `OPENAI_API_KEY`. **Without a key the app still
-works**: the diagnosis falls back to a local, rules-based explanation and only
-custom theme generation is unavailable. See
+works**: on macOS the diagnosis falls back to a local, rules-based explanation
+and only custom theme generation is unavailable; on Windows both menu items
+just say a key is needed, and neither reaches the network. See
 [Turning on AI features](#turning-on-ai-features) to add one.<br>
 두 기능 모두 본인의 `OPENAI_API_KEY`가 필요합니다. **키가 없어도 앱은 정상적으로
-동작합니다.** 진단은 기기 안에서 규칙 기반 설명으로 대신하고, 커스텀 테마 만들기만
-쓸 수 없습니다. 키를 넣는 방법은 [AI 기능 켜기](#turning-on-ai-features)를 참고하세요.
+동작합니다.** macOS에서는 진단이 기기 안에서 규칙 기반 설명으로 대신하고
+커스텀 테마 만들기만 쓸 수 없습니다. Windows에서는 두 메뉴 모두 키가
+필요하다는 안내만 뜨고, 네트워크 요청도 하지 않습니다. 키를 넣는 방법은
+[AI 기능 켜기](#turning-on-ai-features)를 참고하세요.
 
 Cleanup can only ever touch four allowlisted locations — browser caches, the
 Trash, downloads older than 30 days, and Xcode DerivedData. That list is fixed
 in code and the model cannot extend it. Every item is confirmed individually
 with its full path shown, and items are moved to the macOS Trash rather than
 deleted.
+
+**On Windows, the diagnosis only explains — it never deletes or moves
+files.** There's no standard, reversible trash API to use instead, and the
+cache folders it would need to touch live inside the user profile in ways
+that don't map cleanly onto macOS's allowlist. This isn't a safer version of
+the Windows build, it's a different one — the result ends with a warning to
+check and delete anything yourself.<br>
+**Windows에서 진단은 설명만 하며, 파일을 지우거나 옮기지 않습니다.** 되돌릴
+수 있는 표준 휴지통 API가 없고, 건드려야 할 캐시 폴더가 사용자 프로필
+안쪽에 있어 macOS의 허용 목록을 그대로 옮길 수도 없습니다. 이는 macOS보다
+안전한 버전이 아니라 다른 버전입니다 — 결과 끝에 지운 파일은 되돌릴 수
+없으니 직접 확인하고 지워 달라는 경고가 붙습니다.
 
 <a id="runtime-models"></a>
 
@@ -318,7 +340,7 @@ folder, and open it.
 |---|---|---|
 | macOS (Apple Silicon) | `Memory-Cat-macOS-AppleSilicon.zip` | macOS 11 or later |
 | macOS (Intel) | `Memory-Cat-macOS-Intel.zip` | macOS 10.13 or later |
-| Windows | `MemoryCat.exe` | x64. No AI features — and no network requests at all |
+| Windows | `MemoryCat.exe` | x64. Diagnosis and custom pet themes are optional and need your own OpenAI key; without one the app makes no network requests. |
 
 Prefer to build it yourself, or want it to start automatically at login?
 Use [Install on macOS](#install-on-macos) below instead.
@@ -371,8 +393,14 @@ API 키가 없어도 뚱냥이는 정상적으로 동작합니다. 디스크와 
 - **Make a theme from my pet…**<br>
   **내 반려동물로 테마 만들기…**
 
-These are **macOS only**. The Windows build has no AI features.<br>
-**macOS 전용**입니다. Windows 버전에는 AI 기능이 없습니다.
+Both also work on Windows, with your own key. Windows only explains, though —
+it never deletes anything — and without a key it just says one is needed,
+with no local fallback like macOS has. Personalities and safe cleanup stay
+**macOS only**.<br>
+두 기능 모두 본인 키가 있으면 Windows에서도 켜집니다. 다만 Windows는 설명만
+하고 파일을 지우지는 않으며, 키가 없으면 맥처럼 규칙 기반 설명 대신 키가
+필요하다는 안내만 뜹니다. 성격 기능과 안전한 용량 정리는 여전히 **macOS
+전용**입니다.
 
 **The key is yours, and so is the bill.** Requests are charged to your own
 OpenAI account. Create a key at
@@ -420,6 +448,47 @@ photo picker opens, the key was found.<br>
 | *An API key is needed*<br>*API 키가 필요해요* | The file isn't named exactly `.env`, or it is in a different folder<br>파일 이름이 정확히 `.env`가 아니거나, 다른 폴더에 있습니다 |
 | *Couldn't make the theme*<br>*테마를 만들지 못했어요* | The key was found but doesn't work: quotes, a typo, or no credit on the account<br>키는 찾았지만 작동하지 않습니다: 따옴표, 오타, 계정 크레딧 부족 |
 | You changed the key and nothing changed<br>키를 바꿨는데 그대로입니다 | Quit and reopen. A running app keeps the old key<br>종료 후 다시 켜세요. 켜져 있는 앱은 예전 키를 계속 씁니다 |
+
+**On Windows**, the file goes in `%APPDATA%\Memory Cat\.env` instead. Paste
+these two lines into PowerShell:<br>
+**Windows에서는** 파일 위치가 `%APPDATA%\Memory Cat\.env`로 다릅니다.
+PowerShell에 아래 두 줄을 붙여 넣으세요.
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\Memory Cat" | Out-Null
+notepad "$env:APPDATA\Memory Cat\.env"
+```
+
+If Notepad asks to create a new file, choose **Yes**. Paste the same
+`OPENAI_API_KEY=sk-...` line, no quotes, save with **Ctrl+S**, and check the
+file didn't become `.env.txt`. Right-click the cat → **Quit**, then run it
+again.<br>
+메모장이 새 파일을 만들지 물으면 **예**를 누릅니다. 같은
+`OPENAI_API_KEY=sk-...` 줄을 따옴표 없이 붙여 넣고 **Ctrl+S**로 저장한 뒤,
+파일 이름이 `.env.txt`가 되지 않았는지 확인하세요. 고양이 우클릭 → **종료**한
+뒤 다시 실행하세요.
+
+**These stay macOS only:** personalities, and safe cleanup. On Windows,
+**🐾 What did you eat? diagnosis** only explains — it never deletes or moves
+files — and without a key it just says one is needed, with no local fallback
+like macOS has. If a request reaches OpenAI but fails (no internet, a
+timeout), the result opens with an offline-diagnosis notice before the same
+local explanation. Theme photos must be PNG, JPEG, or WebP; HEIC isn't
+supported, so convert an iPhone photo to JPEG first.<br>
+**macOS 전용으로 남는 기능:** 성격 기능과 안전한 용량 정리입니다. Windows에서
+**🐾 뭘 먹은 거야? 진단**은 설명만 하며 파일을 지우거나 옮기지 않고, 키가
+없으면 맥처럼 규칙 기반 설명 대신 키가 필요하다는 안내만 뜹니다. 요청이
+OpenAI까지는 갔지만 실패하면(인터넷 끊김, 시간 초과 등) 결과 맨 앞에 오프라인
+진단 안내가 붙고, 그 뒤에 같은 방식의 로컬 설명이 이어집니다. 테마 사진은
+PNG·JPEG·WebP만 가능합니다. HEIC는 지원하지 않으니 아이폰 사진은 먼저
+JPEG로 바꿔서 올려주세요.
+
+**If the exe can't load its AI modules** (a broken build), both menu items
+are hidden entirely rather than shown broken, and the error is logged to
+`%APPDATA%\Memory Cat\Logs\ai-features-unavailable.log`.<br>
+**exe가 AI 모듈을 불러오지 못하면**(빌드 문제) 두 메뉴 항목이 아예 보이지
+않으며, 오류는 `%APPDATA%\Memory Cat\Logs\ai-features-unavailable.log`에
+기록됩니다.
 
 <a id="removing-a-downloaded-build"></a>
 
@@ -517,19 +586,23 @@ GPT-5.6 진단과 커스텀 반려동물 테마를 켜려면 [AI 기능 켜기](
 
 > **What the Windows build includes.** The disk-driven cat, RAM and swap
 > readouts, top memory consumers, theme and size switching, and the Korean /
-> English language toggle. The AI features are macOS only: the 🐾 What did you
-> eat? diagnosis, custom pet themes, safe cleanup, and personalities. In
-> exchange the Windows build has no OpenAI dependency and makes no network
-> requests at all.
+> English language toggle. **🐾 What did you eat? diagnosis** and **custom pet
+> theme** creation are here too, optional, and need your own
+> `OPENAI_API_KEY` — see [Turning on AI features](#turning-on-ai-features).
+> Windows only explains: it never deletes or moves anything, and without a
+> key those two menu items just say one is needed. Safe cleanup and
+> personalities stay **macOS only**. With no key, the Windows build makes no
+> network requests at all.
 >
 > **Windows 버전에 포함된 기능.** 디스크 사용량을 기준으로 변하는 고양이,
 > RAM·스왑 정보, 메모리를 많이 사용하는 앱 목록, 테마 및 크기 전환,
-> 한국어·영어 언어 전환을 제공합니다. 🐾 뭘 먹은 거야? 진단, 커스텀
-> 반려동물 테마, 안전한 용량 정리, 성격 기능은 macOS 전용입니다. 대신 Windows
-> 버전은 OpenAI 의존성이 없고 네트워크 요청도 전혀 하지 않습니다.
->
-> *Features planned (diagnosis and custom themes)*<br>
-> *기능 추가 예정 (진단 및 커스텀 테마)*
+> 한국어·영어 언어 전환을 제공합니다. **🐾 뭘 먹은 거야? 진단**과 **커스텀
+> 반려동물 테마** 만들기도 있으며, 둘 다 선택 사항으로 본인의
+> `OPENAI_API_KEY`가 필요합니다 — [AI 기능 켜기](#turning-on-ai-features)를
+> 참고하세요. Windows는 설명만 할 뿐 아무것도 지우거나 옮기지 않으며, 키가
+> 없으면 두 메뉴 모두 키가 필요하다는 안내만 뜹니다. 안전한 용량 정리와 성격
+> 기능은 **macOS 전용**입니다. 키가 없으면 Windows 버전은 네트워크 요청을
+> 전혀 하지 않습니다.
 
 See [`windows/README.txt`](windows/README.txt) for the full instructions. In
 short:
