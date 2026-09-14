@@ -13,6 +13,7 @@ import json
 import math
 import os
 import sys
+import traceback
 from types import SimpleNamespace
 
 # 이 파일은 windows/ 안에 있는데 i18n·metrics 는 저장소 루트에 있다. 파이썬은
@@ -43,11 +44,21 @@ import apppaths
 # 진단·테마 만들기는 선택 기능이다. openai·Pillow 같은 의존성이 없는 소스 실행
 # 환경(예: 업데이트 후 pip 를 다시 안 돌린 경우)에서도 고양이는 떠야 한다.
 # .pyw 는 import 가 실패하면 창 하나 없이 조용히 끝나기 때문이다.
-# exe 는 build_exe.bat 의 --hidden-import 로 항상 담긴다.
+# exe 는 build_exe.bat 의 --hidden-import 로 항상 담긴다. PyInstaller 가
+# pydantic_core·jiter·numpy 같은 간접 의존성의 DLL 을 놓치는 경우가
+# 있어서, 실패하면 흔적이라도 남긴다 — 안 그러면 메뉴가 기록 없이
+# 조용히 사라져서 사용자도 우리도 이유를 알 방법이 없다.
 try:
     import win_ai_ui
 except ImportError:
     win_ai_ui = None
+    try:
+        log_path = apppaths.log_dir() / "ai-features-unavailable.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(traceback.format_exc(), encoding="utf-8")
+    except OSError:
+        # 로그 기록은 부가 정보일 뿐이다 — 못 써도 고양이는 떠야 한다.
+        pass
 
 # 빌드(.exe)면 frames 는 번들 안, config 는 exe 옆에 둔다
 if getattr(sys, "frozen", False):

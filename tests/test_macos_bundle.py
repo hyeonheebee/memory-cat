@@ -829,6 +829,83 @@ class WindowsSourceRunTests(unittest.TestCase):
         )
 
 
+class WindowsOptionalImportLoggingTests(unittest.TestCase):
+    """R7(선택 import)이 흔적 없이 사라지지 않는지 본다.
+
+    exe 가 pydantic_core·jiter·numpy DLL 을 못 담으면 ``win_ai_ui`` import
+    가 실패한다. windows_cat.pyw 는 그걸 삼키고 고양이를 계속 띄우는데
+    (R7), 지금까지는 그 실패가 어디에도 안 남았다 — 메뉴가 그냥 조용히
+    사라질 뿐이었다.
+
+    ``WindowsSourceRunTests`` 의 Qt 표식은 의존성이 다 있어서 ``win_ai_ui``
+    안까지 들어갔을 때 켜진다. 여기서는 정반대를 본다 — ``openai`` 를
+    ImportError 로 죽는 가짜로 세워 ``win_ai_ui`` import **자체**가
+    실패하게 만든 뒤에도, (1) 고양이가 Qt 표식까지 도달하는지(선택 import
+    실패가 앱을 안 죽인다는 R7 의 증거)와 (2) 그 실패가
+    ``ai-features-unavailable.log`` 에 남는지를 함께 확인한다.
+    """
+
+    APP = _REPO / "windows" / "windows_cat.pyw"
+    MARKER = "STUB-QT-REACHED"
+
+    def setUp(self):
+        if not self.APP.is_file():
+            self.skipTest(f"파일이 없습니다: {self.APP}")
+
+    def _stubs(self, parent):
+        """Qt·psutil 가짜 + import 만 해도 ImportError 로 죽는 가짜 openai."""
+        stub = Path(parent) / "stubs"
+        (stub / "PySide6").mkdir(parents=True)
+        (stub / "psutil.py").write_text("", encoding="utf-8")
+        (stub / "PySide6" / "__init__.py").write_text("", encoding="utf-8")
+        for name in ("QtCore", "QtGui", "QtWidgets"):
+            (stub / "PySide6" / f"{name}.py").write_text(
+                f"def __getattr__(name):\n"
+                f"    raise SystemExit({self.MARKER!r})\n",
+                encoding="utf-8",
+            )
+        (stub / "openai").mkdir(parents=True)
+        (stub / "openai" / "__init__.py").write_text(
+            "raise ImportError('stubbed: no openai in this test')\n",
+            encoding="utf-8",
+        )
+        return stub
+
+    def test_broken_optional_import_is_logged_and_the_cat_still_starts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(self._stubs(tmp))
+            # PYTHONPATH 가 site-packages 보다 먼저라 가짜 openai 가 진짜를
+            # 가린다 — apppaths.log_dir() 은 맥에서 MEMORY_CAT_HOME 을
+            # 무시하고 Path.home() 을 쓰므로, HOME 을 임시 폴더로 옮긴다.
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [sys.executable, str(self.APP)],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertIn(
+                self.MARKER, proc.stderr,
+                "win_ai_ui import 가 실패하자 고양이가 Qt 에 닿기도 전에 "
+                f"죽었습니다(R7 위반):\n{proc.stderr}",
+            )
+            log_path = (
+                home / "Library" / "Logs" / "Memory Cat"
+                / "ai-features-unavailable.log"
+            )
+            self.assertTrue(
+                log_path.is_file(),
+                f"win_ai_ui import 실패가 로그로 안 남았습니다: {log_path}\n"
+                f"stderr:\n{proc.stderr}",
+            )
+            self.assertIn("ImportError", log_path.read_text(encoding="utf-8"))
+
+
 class WindowsWorkflowTests(unittest.TestCase):
     """윈도우 워크플로가 빌드 방법을 베껴 적지 않았는지 본다.
 
