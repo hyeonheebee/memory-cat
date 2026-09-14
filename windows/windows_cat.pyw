@@ -450,7 +450,19 @@ def main():
     app.setQuitOnLastWindowClosed(True)
     cat = Cat()
     cat.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    if worker_running(cat._diagnosis_worker) or worker_running(cat._theme_worker):
+        # AI 워커가 아직 돌고 있으면 정상 종료 경로를 타지 않고 곧바로 끝낸다.
+        # - sys.exit 로 가면 cat 과 함께 도는 QThread 가 파괴되고, ~QThread 가
+        #   qFatal("Destroyed while thread is still running") 로 abort 한다.
+        #   파이썬 종료 중 워커가 GIL 을 다시 잡으려다 창 없이 멈출 수도 있다.
+        # - wait() 로 기다리면 OpenAI 호출은 중간에 끊을 수 없어서 최대 1~2분
+        #   아무 반응 없이 멈춘다.
+        # 설정은 바뀔 때마다 save_config 로 이미 저장했으니 잃는 것이 없다.
+        # 만들다 만 테마가 남더라도 점으로 시작하는 임시 폴더(.building)라서
+        # discover_themes 가 건너뛴다.
+        os._exit(code)
+    sys.exit(code)
 
 
 if __name__ == "__main__":
