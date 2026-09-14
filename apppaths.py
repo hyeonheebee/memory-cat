@@ -7,7 +7,8 @@
 
 * **번들 자원** — `desktop_cat.py` 옆에 있는 것들. 기본 테마 4종이 여기 있다.
   앱을 다시 설치하면 통째로 덮어써진다.
-* **사용자 데이터** — ``~/Library/Application Support/Memory Cat/``.
+* **사용자 데이터** — 맥은 ``~/Library/Application Support/Memory Cat/``,
+  윈도우는 ``%APPDATA%\\Memory Cat``.
   설정(``config.json``), 직접 만든 펫 테마(``frames/mypet*``), API 키(``.env``)가
   여기 있다. 앱을 지워도, 저장소 폴더를 지워도 남는다.
 
@@ -61,10 +62,20 @@ def bundled_frames_dir() -> Path:
 
 
 def user_data_dir() -> Path:
-    """설정·커스텀 테마·API 키가 사는 곳. 없으면 만들지는 않는다."""
+    """설정·커스텀 테마·API 키가 사는 곳. 없으면 만들지는 않는다.
+
+    맥은 ``~/Library/Application Support/Memory Cat``,
+    윈도우는 ``%APPDATA%\\Memory Cat`` 을 쓴다. 윈도우판이 exe 옆에 설정을
+    두던 방식은 Program Files 처럼 쓰기 권한이 없는 곳에 깔리면 깨진다.
+    """
     override = os.environ.get(HOME_ENV)
     if override:
         return Path(override).expanduser()
+    if sys.platform == "win32":
+        roaming = os.environ.get("APPDATA")
+        if roaming:
+            return Path(roaming) / APP_NAME
+        return Path.home() / "AppData" / "Roaming" / APP_NAME
     return Path.home() / "Library" / "Application Support" / APP_NAME
 
 
@@ -88,6 +99,8 @@ def config_file() -> Path:
 
 
 def log_dir() -> Path:
+    if sys.platform == "win32":
+        return user_data_dir() / "Logs"
     return Path.home() / "Library" / "Logs" / APP_NAME
 
 
