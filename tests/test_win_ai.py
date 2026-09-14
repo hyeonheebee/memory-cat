@@ -58,6 +58,81 @@ class DiagnosisLinesTests(unittest.TestCase):
         trash.assert_not_called()
 
 
+class DiagnosisSourceNoticeTests(unittest.TestCase):
+    """API 오류로 규칙 기반 결과가 나오면, 진단창이 AI 진단인 척하면 안 된다.
+
+    맥판(``desktop_cat.diagnosis_result_content``)이 하는 것과 같은 매핑을
+    쓴다 — ``fallback_reason`` 이 없거나 모르는 값이면 ``fallback_unknown``.
+    """
+
+    FAKE_OPENAI = {
+        "why_slow": ["램이 거의 찼습니다."],
+        "one_line_advice": "탭을 좀 닫아 보세요.",
+        "cleanup_recommendations": [],
+        "estimated_reclaimable_bytes": 0,
+        "source": "openai",
+    }
+
+    def _fallback(self, reason):
+        return {
+            "why_slow": ["램이 거의 찼습니다."],
+            "one_line_advice": "탭을 좀 닫아 보세요.",
+            "cleanup_recommendations": [],
+            "estimated_reclaimable_bytes": 0,
+            "source": "fallback",
+            "fallback_reason": reason,
+        }
+
+    def test_fallback_api_error_shows_the_reason_first(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language), \
+                 patch.object(win_ai.brain, "diagnose",
+                              return_value=self._fallback("api_error")):
+                lines = win_ai.diagnosis_lines(language)
+            reason = i18n.tr(language, "fallback_api_error")
+            notice = i18n.tr(
+                language, "diagnosis_source_fallback", reason=reason)
+            self.assertEqual(lines[0], notice)
+
+    def test_fallback_missing_api_key_maps_to_its_own_reason(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self._fallback("missing_api_key")):
+            lines = win_ai.diagnosis_lines("ko")
+        reason = i18n.tr("ko", "fallback_missing_api_key")
+        notice = i18n.tr("ko", "diagnosis_source_fallback", reason=reason)
+        self.assertEqual(lines[0], notice)
+
+    def test_unknown_fallback_reason_falls_back_to_the_unknown_string(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self._fallback("something_new")):
+            lines = win_ai.diagnosis_lines("ko")
+        reason = i18n.tr("ko", "fallback_unknown")
+        notice = i18n.tr("ko", "diagnosis_source_fallback", reason=reason)
+        self.assertEqual(lines[0], notice)
+
+    def test_openai_source_has_no_fallback_notice(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self.FAKE_OPENAI):
+            lines = win_ai.diagnosis_lines("ko")
+        self.assertEqual(lines[0], self.FAKE_OPENAI["why_slow"][0])
+
+    def test_the_delete_warning_is_last_even_with_a_fallback_notice(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self._fallback("api_error")):
+            lines = win_ai.diagnosis_lines("ko")
+        self.assertEqual(lines[-1], i18n.tr("ko", "windows_delete_warning"))
+
+
+class HasApiKeyTests(unittest.TestCase):
+    def test_true_when_a_key_is_loaded(self):
+        with patch.object(win_ai.brain, "_load_api_key", return_value="sk-abc"):
+            self.assertTrue(win_ai.has_api_key())
+
+    def test_false_when_no_key_is_loaded(self):
+        with patch.object(win_ai.brain, "_load_api_key", return_value=None):
+            self.assertFalse(win_ai.has_api_key())
+
+
 class ApiKeyMessageTests(unittest.TestCase):
     def test_the_message_names_the_env_file(self):
         for language in ("ko", "en"):

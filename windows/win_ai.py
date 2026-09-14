@@ -39,10 +39,30 @@ def api_key_missing_message(language):
     )
 
 
+#: 맥판 ``desktop_cat.diagnosis_result_content`` 과 같은 매핑. API 오류로
+#: 규칙 기반 결과가 나왔을 때 어떤 문구를 보여줄지는 여기서 하나로 정한다.
+_FALLBACK_REASON_KEYS = {
+    "missing_api_key": "fallback_missing_api_key",
+    "api_error": "fallback_api_error",
+    "worker_error": "fallback_worker_error",
+}
+
+
 def diagnosis_lines(language):
-    """결과창에 그대로 뿌릴 줄 목록. 마지막 줄은 **항상** 삭제 경고다."""
+    """결과창에 그대로 뿌릴 줄 목록. 마지막 줄은 **항상** 삭제 경고다.
+
+    ``source`` 가 ``"fallback"`` 이면(API 키 없음·네트워크 오류 등) 첫 줄에
+    안내를 넣는다. 안 넣으면 규칙 기반 결과가 AI 진단인 것처럼 보인다.
+    """
     result = brain.diagnose(language=language, include_cleanup=False)
-    lines = list(result.get("why_slow", []))
+    lines = []
+    if result.get("source") == "fallback":
+        reason_key = _FALLBACK_REASON_KEYS.get(
+            result.get("fallback_reason"), "fallback_unknown")
+        lines.append(tr(
+            language, "diagnosis_source_fallback",
+            reason=tr(language, reason_key)))
+    lines.extend(result.get("why_slow", []))
     advice = result.get("one_line_advice")
     if advice:
         lines.append("")
