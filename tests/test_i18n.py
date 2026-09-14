@@ -25,6 +25,7 @@ class FormatArgumentTests(unittest.TestCase):
         "desktop_cat.py",
         "windows/windows_cat.pyw",
         "windows/win_ai.py",
+        "windows/win_ai_ui.py",
         "brain.py",
         "personality.py",
         "vision_theme.py",

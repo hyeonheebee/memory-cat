@@ -35,6 +35,19 @@ from i18n import (
 # metrics 는 저장소 루트의 플랫폼 공통 모듈이다(GUI 의존 없음). i18n 과 같은
 # 방식으로 닿는다 — build_exe.bat 의 `--paths ".."` 와 `--hidden-import`.
 from metrics import ram_used_for_display
+# apppaths 도 루트의 가벼운 모듈이다(os·sys·pathlib 만). 사용자가 만든 테마가
+# 사는 곳(%APPDATA%\Memory Cat\frames)을 여기서 받는다 — exe 옆이나 번들
+# frames 에는 쓸 수 없어서 새 테마는 늘 그쪽에 생긴다.
+import apppaths
+
+# 진단·테마 만들기는 선택 기능이다. openai·Pillow 같은 의존성이 없는 소스 실행
+# 환경(예: 업데이트 후 pip 를 다시 안 돌린 경우)에서도 고양이는 떠야 한다.
+# .pyw 는 import 가 실패하면 창 하나 없이 조용히 끝나기 때문이다.
+# exe 는 build_exe.bat 의 --hidden-import 로 항상 담긴다.
+try:
+    import win_ai_ui
+except ImportError:
+    win_ai_ui = None
 
 # 빌드(.exe)면 frames 는 번들 안, config 는 exe 옆에 둔다
 if getattr(sys, "frozen", False):
@@ -94,13 +107,43 @@ def save_config(cfg):
         pass
 
 
+def theme_roots():
+    """테마를 찾을 폴더들: 번들 frames, 그리고 사용자가 만든 테마가 사는 곳.
+
+    번들만 보면 "내 반려동물로 테마 만들기" 로 만든 테마가 메뉴에 안 뜨고,
+    재시작하면 __init__ 이 설정의 테마를 themes[0] 으로 되돌려 버린다.
+    """
+    return (FRAMES_DIR, str(apppaths.user_frames_dir()))
+
+
+def theme_dir(theme):
+    """테마 이름 -> 폴더. 사용자 쪽에 그 폴더가 있으면 사용자 쪽이 이긴다.
+
+    맥의 apppaths.theme_dir 와 같은 규칙이다. 어느 쪽에도 없으면 번들 쪽을
+    돌려준다 — 호출부가 listdir 실패와 없는 그림을 이미 견딘다.
+    """
+    user = os.path.join(str(apppaths.user_frames_dir()), theme)
+    if os.path.isdir(user):
+        return user
+    return os.path.join(FRAMES_DIR, theme)
+
+
 def discover_themes():
-    found = []
-    if os.path.isdir(FRAMES_DIR):
-        for n in sorted(os.listdir(FRAMES_DIR)):
-            d = os.path.join(FRAMES_DIR, n)
+    found = set()
+    for root in theme_roots():
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for n in names:
+            # vision_theme 은 ".building" 같은 점 폴더에서 만든 뒤 옮긴다.
+            # 만드는 중인 테마가 메뉴에 뜨면 안 된다.
+            if n.startswith("."):
+                continue
+            d = os.path.join(root, n)
             if os.path.isdir(d) and os.path.exists(os.path.join(d, "cat_00.png")):
-                found.append(n)
+                found.add(n)
+    found = sorted(found)
     return ([t for t in THEME_ORDER if t in found]
             + [t for t in found if t not in THEME_ORDER])
 
@@ -116,7 +159,7 @@ def size_label(key, language):
 
 
 def frame_count(theme):
-    d = os.path.join(FRAMES_DIR, theme)
+    d = theme_dir(theme)
     try:
         return max(1, len([f for f in os.listdir(d)
                            if f.startswith("cat_") and f.endswith(".png")]))
@@ -127,7 +170,7 @@ def frame_count(theme):
 def frame_path(theme, idx):
     n = frame_count(theme)
     idx = max(0, min(n - 1, idx))
-    return os.path.join(FRAMES_DIR, theme, f"cat_{idx:02d}.png")
+    return os.path.join(theme_dir(theme), f"cat_{idx:02d}.png")
 
 
 def disk_usage():
@@ -159,6 +202,11 @@ def top_memory_apps(limit=5):
     return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
 
 
+def worker_running(worker):
+    """AI 워커가 아직 도는지. 없거나 끝났으면 False."""
+    return worker is not None and worker.isRunning()
+
+
 class Cat(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -181,6 +229,10 @@ class Cat(QtWidgets.QWidget):
         self.phase = 0.0
         self.score = 0.0
         self._drag = None
+        # AI 워커(QThread) 참조. 지역 변수로 두면 GC 가 도는 스레드를 거둬 가서
+        # 앱이 죽거나 작업이 조용히 멈춘다. 메뉴의 "진행 중" 표시도 이걸 본다.
+        self._diagnosis_worker = None
+        self._theme_worker = None
 
         cat = self.cat_size()
         w, h = cat + 24, cat + CATBOTTOM + 8
@@ -330,10 +382,51 @@ class Cat(QtWidgets.QWidget):
             a.setChecked(choice == self.cfg["language"])
             a.triggered.connect(lambda _=False, c=choice: self.set_language(c))
 
+        if win_ai_ui is not None:
+            menu.addSeparator()
+            if worker_running(self._diagnosis_worker):
+                a = menu.addAction(tr(language, "menu_diagnosing"))
+                a.setEnabled(False)
+            else:
+                a = menu.addAction(tr(language, "menu_diagnose"))
+                a.triggered.connect(lambda _=False: self._start_diagnosis(language))
+            if worker_running(self._theme_worker):
+                a = menu.addAction(tr(language, "menu_pet_theme_running"))
+                a.setEnabled(False)
+            else:
+                a = menu.addAction(tr(language, "menu_pet_theme"))
+                a.triggered.connect(lambda _=False: self._start_theme(language))
+
         menu.addSeparator()
         menu.addAction(tr(language, "menu_refresh"), self.refresh)
         menu.addAction(tr(language, "menu_quit"), QtWidgets.QApplication.quit)
         menu.exec(e.globalPos())
+
+    # ---------------------------------------------------------- AI
+    # 메뉴 슬롯에서 예외가 새어 나가면 PySide6 버전에 따라 앱이 그대로 종료된다
+    # (refresh 의 주석과 같은 이유). 그렇다고 삼키면 사용자는 아무 일도 안
+    # 일어난 줄 안다 — 잡아서 보여 준다.
+    def _start_diagnosis(self, language):
+        try:
+            self._diagnosis_worker = win_ai_ui.show_diagnosis(self, language)
+        except Exception as error:
+            QtWidgets.QMessageBox.warning(
+                self, tr(language, "diagnosis_title"), str(error))
+
+    def _start_theme(self, language):
+        try:
+            self._theme_worker = win_ai_ui.make_theme(
+                self, language, FRAMES_DIR, self._apply_new_theme)
+        except Exception as error:
+            QtWidgets.QMessageBox.warning(
+                self, tr(language, "pet_theme_error_title"), str(error))
+
+    def _apply_new_theme(self, name):
+        # 워커 시그널이 QueuedConnection 으로 GUI 스레드에서 부른다. 새 테마는
+        # 사용자 frames 에 생기고, theme_roots() 가 그쪽도 보므로 바로 잡힌다.
+        self.cfg["theme"] = name
+        save_config(self.cfg)
+        self.refresh()
 
     def set_language(self, choice):
         self.cfg["language"] = choice

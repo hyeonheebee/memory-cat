@@ -670,9 +670,14 @@ class InstallScriptTests(unittest.TestCase):
 
 
 
-ROOT_MODULES_THE_WINDOWS_APP_IMPORTS = (
+#: exe 에 반드시 담겨야 하는 모듈. 저장소 루트 모듈만이 아니다 —
+#: `win_ai`·`win_ai_ui` 는 `windows/` 안에 있지만, `windows_cat.pyw` 가
+#: `try/except ImportError` 로 가져오므로 PyInstaller 가 못 담으면 빌드는
+#: 멀쩡하고 exe 에서 AI 메뉴만 소리 없이 사라진다.
+MODULES_THE_WINDOWS_EXE_MUST_BUNDLE = (
     "i18n", "metrics", "apppaths", "brain", "personality",
     "vision_theme", "import_theme",
+    "win_ai", "win_ai_ui",
 )
 
 
@@ -690,8 +695,9 @@ class WindowsBuildScriptTests(unittest.TestCase):
 
     위 `_root_modules_imported()` 기반 검사는 `windows_cat.pyw` 가 **직접**
     import 하는 것만 본다 — `win_ai` 를 거쳐 들어오는 `brain`·`vision_theme`
-    같은 루트 모듈은 AST 에 안 잡힌다. 그런 모듈은
-    `ROOT_MODULES_THE_WINDOWS_APP_IMPORTS` 명시 목록이 대신 지킨다.
+    같은 루트 모듈은 AST 에 안 잡히고, `windows/` 안의 `win_ai`·`win_ai_ui`
+    는 루트 모듈이 아니라서 안 잡힌다. 그런 모듈은
+    `MODULES_THE_WINDOWS_EXE_MUST_BUNDLE` 명시 목록이 대신 지킨다.
     """
 
     BAT = _REPO / "windows" / "build_exe.bat"
@@ -741,7 +747,7 @@ class WindowsBuildScriptTests(unittest.TestCase):
     def test_every_root_module_is_hidden_imported(self):
         """PyInstaller 는 --paths 만으로는 루트 모듈을 안 끌고 간다.
         빠뜨리면 --noconsole 이라 오류 한 줄 없이 죽는다."""
-        for module in ROOT_MODULES_THE_WINDOWS_APP_IMPORTS:
+        for module in MODULES_THE_WINDOWS_EXE_MUST_BUNDLE:
             with self.subTest(module=module):
                 self.assertIn(f"--hidden-import {module}", self.bat)
 
