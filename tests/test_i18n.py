@@ -24,6 +24,7 @@ class FormatArgumentTests(unittest.TestCase):
     SOURCES = (
         "desktop_cat.py",
         "windows/windows_cat.pyw",
+        "windows/win_ai.py",
         "brain.py",
         "personality.py",
         "vision_theme.py",
