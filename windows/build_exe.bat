@@ -53,14 +53,21 @@ if not exist "..\metrics.py" (
     exit /b 1
 )
 
-REM i18n.py / metrics.py 는 저장소 루트에 있다. --paths 로 import 경로에
-REM 넣고, 이름을 --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기
-REM 시작하면 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
+REM i18n.py / metrics.py 는 저장소 루트에 있다. apppaths.py / brain.py /
+REM personality.py / vision_theme.py / import_theme.py (진단·커스텀 테마 AI 기능)
+REM 도 마찬가지다. --paths 로 import 경로에 넣고, 이름을
+REM --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기 시작하면
+REM 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
 pyinstaller --noconsole --onefile --name MemoryCat ^
     --add-data "frames;frames" ^
     --paths ".." ^
     --hidden-import i18n ^
     --hidden-import metrics ^
+    --hidden-import apppaths ^
+    --hidden-import brain ^
+    --hidden-import personality ^
+    --hidden-import vision_theme ^
+    --hidden-import import_theme ^
     windows_cat.pyw
 if errorlevel 1 (
     echo.

@@ -7,3 +7,11 @@
 # UnicodeDecodeError (cp949) on a Korean-language Windows install.
 PySide6>=6.5,<7
 psutil>=5.9,<8
+
+# Optional AI features: diagnosis (brain.py) and custom pet themes
+# (vision_theme.py). The app still runs without an OPENAI_API_KEY.
+openai>=2.46,<3
+pydantic>=2.9,<3
+python-dotenv>=1.2,<2
+Pillow>=10,<13
+numpy>=1.24,<3

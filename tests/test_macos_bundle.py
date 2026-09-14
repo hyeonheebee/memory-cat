@@ -670,6 +670,12 @@ class InstallScriptTests(unittest.TestCase):
 
 
 
+ROOT_MODULES_THE_WINDOWS_APP_IMPORTS = (
+    "i18n", "metrics", "apppaths", "brain", "personality",
+    "vision_theme", "import_theme",
+)
+
+
 class WindowsBuildScriptTests(unittest.TestCase):
     """윈도우 exe 가 저장소 루트 모듈을 실제로 담는지.
 
@@ -681,6 +687,11 @@ class WindowsBuildScriptTests(unittest.TestCase):
 
     루트 모듈을 하나 더 쓰기 시작했는데 bat 을 안 고치는 것이 이 검사가
     막으려는 일이다.
+
+    위 `_root_modules_imported()` 기반 검사는 `windows_cat.pyw` 가 **직접**
+    import 하는 것만 본다 — `win_ai` 를 거쳐 들어오는 `brain`·`vision_theme`
+    같은 루트 모듈은 AST 에 안 잡힌다. 그런 모듈은
+    `ROOT_MODULES_THE_WINDOWS_APP_IMPORTS` 명시 목록이 대신 지킨다.
     """
 
     BAT = _REPO / "windows" / "build_exe.bat"
@@ -726,6 +737,27 @@ class WindowsBuildScriptTests(unittest.TestCase):
             missing, [],
             "build_exe.bat 이 존재 확인을 안 하는 루트 모듈: " + ", ".join(missing),
         )
+
+    def test_every_root_module_is_hidden_imported(self):
+        """PyInstaller 는 --paths 만으로는 루트 모듈을 안 끌고 간다.
+        빠뜨리면 --noconsole 이라 오류 한 줄 없이 죽는다."""
+        for module in ROOT_MODULES_THE_WINDOWS_APP_IMPORTS:
+            with self.subTest(module=module):
+                self.assertIn(f"--hidden-import {module}", self.bat)
+
+    def test_requirements_stay_ascii(self):
+        """한국어 윈도우(cp949)에서 pip 가 UnicodeDecodeError 로 죽는다."""
+        raw = (_REPO / "windows" / "requirements.txt").read_bytes()
+        try:
+            raw.decode("ascii")
+        except UnicodeDecodeError as exc:
+            self.fail(f"windows/requirements.txt 에 ASCII 가 아닌 바이트가 있습니다: {exc}")
+
+    def test_the_ai_packages_are_listed(self):
+        text = (_REPO / "windows" / "requirements.txt").read_text(encoding="ascii")
+        for package in ("openai", "pydantic", "python-dotenv", "Pillow", "numpy"):
+            with self.subTest(package=package):
+                self.assertIn(package, text)
 
 
 class WindowsSourceRunTests(unittest.TestCase):
