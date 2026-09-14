@@ -91,6 +91,61 @@ class MetricsTests(unittest.TestCase):
         self.assertIs(measured_vm, vm)
         self.assertEqual((swap.total, swap.used, swap.percent), (0, 0, 0.0))
 
+    def test_windows_tries_the_system_drive_first(self):
+        """exe 를 D:\\Downloads 에서 띄워도 C: 를 봐야 한다.
+
+        ``"/"`` 는 윈도우에서 현재 작업 디렉터리가 있는 드라이브의 루트라,
+        cwd 가 다른 드라이브면 windows_cat 의 C: 라벨과 어긋난다.
+        """
+        measured = DiskUsage(total=1000, used=250, free=750, percent=25.0)
+        seen_paths = []
+
+        def fake_disk_usage(path):
+            seen_paths.append(path)
+            return measured
+
+        with (
+            patch.object(metrics.sys, "platform", "win32"),
+            patch.dict("os.environ", {"SystemDrive": "D:"}, clear=False),
+            patch.object(metrics.psutil, "disk_usage", side_effect=fake_disk_usage),
+        ):
+            metrics.disk_usage()
+
+        self.assertEqual(seen_paths[0], "D:\\")
+
+    def test_windows_falls_back_to_c_drive_when_systemdrive_is_unset(self):
+        measured = DiskUsage(total=1000, used=250, free=750, percent=25.0)
+        seen_paths = []
+
+        def fake_disk_usage(path):
+            seen_paths.append(path)
+            return measured
+
+        with (
+            patch.object(metrics.sys, "platform", "win32"),
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(metrics.psutil, "disk_usage", side_effect=fake_disk_usage),
+        ):
+            metrics.disk_usage()
+
+        self.assertEqual(seen_paths[0], "C:\\")
+
+    def test_darwin_path_order_is_unchanged(self):
+        measured = DiskUsage(total=1000, used=250, free=750, percent=25.0)
+        seen_paths = []
+
+        def fake_disk_usage(path):
+            seen_paths.append(path)
+            return measured
+
+        with (
+            patch.object(metrics.sys, "platform", "darwin"),
+            patch.object(metrics.psutil, "disk_usage", side_effect=fake_disk_usage),
+        ):
+            metrics.disk_usage()
+
+        self.assertEqual(seen_paths[0], "/System/Volumes/Data")
+
     def test_safe_pressure_score_passes_swap_through_when_available(self):
         vm = SimpleNamespace(total=8, used=4, percent=50.0)
         sw = SimpleNamespace(total=2, used=1, percent=25.0)

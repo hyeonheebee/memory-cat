@@ -2,6 +2,7 @@
 """메모리/디스크 측정 공유 모듈 (플랫폼 공통, GUI 의존 없음)."""
 import math
 import os
+import sys
 from types import SimpleNamespace
 
 import psutil
@@ -12,9 +13,20 @@ def human_gb(n):
 
 
 def disk_usage():
-    """하드 용량. macOS APFS는 데이터 볼륨이 사용자가 보는 값."""
+    """하드 용량. macOS APFS는 데이터 볼륨이 사용자가 보는 값.
+
+    윈도우의 ``"/"`` 는 현재 작업 디렉터리가 있는 드라이브의 루트다. exe 를
+    D:\\Downloads 에서 띄우면 D: 를 보게 되는데, windows_cat 은 C: 라벨을
+    쓰므로 디스크 수치와 진단이 서로 다른 드라이브를 보고 어긋난다.
+    ``SystemDrive`` (보통 C:) 를 먼저 본다.
+    """
     usage = None
-    for path in ("/System/Volumes/Data", "/"):
+    if sys.platform == "win32":
+        paths = (os.environ.get("SystemDrive", "C:") + "\\",
+                 "/System/Volumes/Data", "/")
+    else:
+        paths = ("/System/Volumes/Data", "/")
+    for path in paths:
         try:
             usage = psutil.disk_usage(path)
             break
