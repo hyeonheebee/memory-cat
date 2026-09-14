@@ -121,6 +121,13 @@ _STRINGS = {
         "menu_theme": "테마",
         "menu_pet_theme": "내 반려동물로 테마 만들기…",
         "menu_pet_theme_running": "테마 만드는 중…",
+        "diagnosis_title": "🐾 뭘 먹었냐면",
+        "windows_delete_warning": (
+            "윈도우판은 파일을 지우지 않습니다. 지운 파일은 되돌릴 수 없으니 "
+            "위 항목은 직접 확인하고 지워 주세요."
+        ),
+        "theme_working": "테마를 만드는 중이에요… 1~2분 걸립니다.",
+        "theme_error_format": "PNG, JPEG, WebP 파일만 됩니다.",
         "pet_theme_consent_title": "사진 전송 안내",
         "pet_theme_consent_body": "선택한 사진이 테마 생성을 위해 OpenAI로 전송됩니다",
         "pet_theme_continue": "진행",
@@ -244,6 +251,13 @@ _STRINGS = {
         "menu_theme": "Theme",
         "menu_pet_theme": "Make a theme from my pet…",
         "menu_pet_theme_running": "Making theme…",
+        "diagnosis_title": "🐾 Here's what he ate",
+        "windows_delete_warning": (
+            "The Windows build does not delete anything. Deleting a file "
+            "cannot be undone, so please check and remove these yourself."
+        ),
+        "theme_working": "Building your theme… this takes a minute or two.",
+        "theme_error_format": "Only PNG, JPEG, and WebP files work.",
         "pet_theme_consent_title": "Photo upload notice",
         "pet_theme_consent_body": "Your photo will be sent to OpenAI to generate the theme",
         "pet_theme_continue": "Continue",

@@ -97,6 +97,30 @@ class FormatArgumentTests(unittest.TestCase):
         self.assertEqual(en - ko, set(), f"한국어에 없는 키: {sorted(en - ko)}")
 
 
+#: 윈도우 AI 기능이 쓰는 문구. 새로 넣은 것과 맥과 함께 쓰는 것 모두.
+WINDOWS_AI_KEYS = (
+    "diagnosis_title", "windows_delete_warning", "theme_working", "theme_error_format",
+    "menu_diagnose", "menu_pet_theme", "missing_api_key_title", "missing_api_key_help",
+    "pet_theme_consent_title", "pet_theme_consent_body", "pet_theme_error_title",
+)
+
+
+class WindowsFeatureStringsTests(unittest.TestCase):
+    def test_every_new_key_exists_in_both_languages(self):
+        """한쪽만 넣으면 그 언어에서 창이 통째로 빈다. v0.3.0 의 사고다."""
+        for key in WINDOWS_AI_KEYS:
+            for language in ("ko", "en"):
+                with self.subTest(key=key, language=language):
+                    self.assertIn(key, i18n._STRINGS[language])
+                    self.assertTrue(i18n._STRINGS[language][key].strip())
+
+    def test_the_delete_warning_says_it_cannot_be_undone(self):
+        ko = i18n.tr("ko", "windows_delete_warning")
+        en = i18n.tr("en", "windows_delete_warning")
+        self.assertIn("되돌릴 수 없", ko)
+        self.assertIn("cannot be undone", en.lower())
+
+
 class I18nTests(unittest.TestCase):
     def test_system_language_is_korean_only_for_korean_primary_language(self):
         self.assertEqual(i18n.detect_system_language(["ko-KR", "en-US"]), "ko")
