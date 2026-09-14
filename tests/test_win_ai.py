@@ -11,7 +11,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "windows"))
+_WINDOWS_DIR = str(Path(__file__).resolve().parent.parent / "windows")
+if _WINDOWS_DIR not in sys.path:
+    sys.path.insert(0, _WINDOWS_DIR)
 
 import apppaths
 import i18n
@@ -22,8 +24,9 @@ class DiagnosisLinesTests(unittest.TestCase):
     FAKE = {
         "why_slow": ["램이 거의 찼습니다.", "크롬이 4GB 를 쓰고 있어요."],
         "one_line_advice": "탭을 좀 닫아 보세요.",
-        "recommendations": [],
-        "estimated_bytes": 0,
+        "cleanup_recommendations": [],
+        "estimated_reclaimable_bytes": 0,
+        "source": "openai",
     }
 
     def test_it_asks_for_a_diagnosis_without_cleanup(self):
