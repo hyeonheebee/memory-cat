@@ -54,6 +54,8 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                # 진짜 .env 로 가는 길을 막는다.
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "OpenAI", return_value=client) as ctor,
             ):
                 result = vision_theme.generate_sheet(photo)
@@ -97,6 +99,8 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                # 진짜 .env 로 가는 길을 막는다.
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "OpenAI", return_value=client),
             ):
                 with self.assertRaisesRegex(
@@ -250,6 +254,8 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                # 진짜 .env 로 가는 길을 막는다.
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "FRAMES_DIR", frames_dir),
                 patch.object(vision_theme, "OpenAI", return_value=client),
             ):
@@ -382,6 +388,8 @@ class PhotoFormatTests(unittest.TestCase):
 
         with (
             patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            # 진짜 .env 로 가는 길을 막는다.
+            patch.object(vision_theme, "load_dotenv_candidates"),
             patch.object(vision_theme, "OpenAI", return_value=client),
         ):
             vision_theme.generate_sheet(FIXTURES / "pet.heic")
