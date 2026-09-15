@@ -104,6 +104,7 @@ WINDOWS_AI_KEYS = (
     "diagnosis_title", "windows_delete_warning", "theme_working", "theme_error_format",
     "menu_diagnose", "menu_pet_theme", "missing_api_key_title", "missing_api_key_help",
     "pet_theme_consent_title", "pet_theme_consent_body", "pet_theme_error_title",
+    "windows_diagnosis_source_fallback",
 )
 
 

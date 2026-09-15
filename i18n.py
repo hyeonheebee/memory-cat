@@ -70,6 +70,9 @@ _STRINGS = {
         "diagnosis_running_title": "🐾 살펴보는 중…",
         "diagnosis_running_body": "{pet}가 얼마나 배부른지 살펴보고 있어요.",
         "diagnosis_source_fallback": "⚠️ 오프라인 진단 · 성격 미적용 · {reason}",
+        # 윈도우판엔 성격 기능이 없다. 맥 문구를 그대로 쓰면 없는 기능이
+        # 빠졌다는 듯 읽힌다 — 따로 둔다.
+        "windows_diagnosis_source_fallback": "⚠️ 오프라인 진단 · {reason}",
         "diagnosis_result_openai_title": "{personality} {pet}가 배부른 이유예요.",
         "diagnosis_result_fallback_title": "{pet}가 배부른 이유예요.",
         "fallback_missing_api_key": "API 키 없음",
@@ -200,6 +203,9 @@ _STRINGS = {
         "diagnosis_running_title": "🐾 Checking…",
         "diagnosis_running_body": "{pet} is checking how full things feel.",
         "diagnosis_source_fallback": "⚠️ Offline diagnosis · Personality not applied · {reason}",
+        # The Windows build has no personality feature. Reusing the Mac
+        # string would imply a missing feature, so it gets its own key.
+        "windows_diagnosis_source_fallback": "⚠️ Offline diagnosis · {reason}",
         "diagnosis_result_openai_title": "Here’s why your {personality} {pet} feels full.",
         "diagnosis_result_fallback_title": "Here’s why {pet} feels full.",
         "fallback_missing_api_key": "API key missing",

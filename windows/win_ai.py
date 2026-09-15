@@ -64,7 +64,7 @@ def diagnosis_lines(language):
         reason_key = _FALLBACK_REASON_KEYS.get(
             result.get("fallback_reason"), "fallback_unknown")
         lines.append(tr(
-            language, "diagnosis_source_fallback",
+            language, "windows_diagnosis_source_fallback",
             reason=tr(language, reason_key)))
     lines.extend(result.get("why_slow", []))
     advice = result.get("one_line_advice")

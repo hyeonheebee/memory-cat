@@ -89,9 +89,10 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
                  patch.object(win_ai.brain, "diagnose",
                               return_value=self._fallback("api_error")):
                 lines = win_ai.diagnosis_lines(language)
+
             reason = i18n.tr(language, "fallback_api_error")
             notice = i18n.tr(
-                language, "diagnosis_source_fallback", reason=reason)
+                language, "windows_diagnosis_source_fallback", reason=reason)
             self.assertEqual(lines[0], notice)
 
     def test_fallback_missing_api_key_maps_to_its_own_reason(self):
@@ -99,7 +100,7 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
                           return_value=self._fallback("missing_api_key")):
             lines = win_ai.diagnosis_lines("ko")
         reason = i18n.tr("ko", "fallback_missing_api_key")
-        notice = i18n.tr("ko", "diagnosis_source_fallback", reason=reason)
+        notice = i18n.tr("ko", "windows_diagnosis_source_fallback", reason=reason)
         self.assertEqual(lines[0], notice)
 
     def test_unknown_fallback_reason_falls_back_to_the_unknown_string(self):
@@ -107,8 +108,31 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
                           return_value=self._fallback("something_new")):
             lines = win_ai.diagnosis_lines("ko")
         reason = i18n.tr("ko", "fallback_unknown")
-        notice = i18n.tr("ko", "diagnosis_source_fallback", reason=reason)
+        notice = i18n.tr("ko", "windows_diagnosis_source_fallback", reason=reason)
         self.assertEqual(lines[0], notice)
+
+    def test_windows_fallback_notice_never_mentions_personality(self):
+        """윈도우엔 성격 기능이 없다 — 맥 문구를 그대로 쓰면 안 된다."""
+        for language in ("ko", "en"):
+            with self.subTest(language=language), \
+                 patch.object(win_ai.brain, "diagnose",
+                              return_value=self._fallback("api_error")):
+                lines = win_ai.diagnosis_lines(language)
+            self.assertNotIn("성격", lines[0])
+            self.assertNotIn("Personality", lines[0])
+            reason = i18n.tr(language, "fallback_api_error")
+            self.assertIn(reason, lines[0])
+
+    def test_mac_fallback_key_text_is_untouched(self):
+        """회귀 방지: 맥판이 쓰는 diagnosis_source_fallback 원문은 한 글자도 안 바뀐다."""
+        self.assertEqual(
+            i18n._STRINGS["ko"]["diagnosis_source_fallback"],
+            "⚠️ 오프라인 진단 · 성격 미적용 · {reason}",
+        )
+        self.assertEqual(
+            i18n._STRINGS["en"]["diagnosis_source_fallback"],
+            "⚠️ Offline diagnosis · Personality not applied · {reason}",
+        )
 
     def test_openai_source_has_no_fallback_notice(self):
         with patch.object(win_ai.brain, "diagnose",
