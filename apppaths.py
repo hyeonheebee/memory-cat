@@ -109,6 +109,26 @@ def dotenv_candidates():
     return (user_data_dir() / ".env", _SOURCE_DIR / ".env")
 
 
+def dotenv_encoding(path):
+    """.env 를 읽을 인코딩. 파일이 없거나 못 열면 None.
+
+    윈도우 메모장은 UTF-8(BOM 포함)이나 UTF-16("유니코드")으로 저장할 수 있다.
+    python-dotenv 는 기본 utf-8 로 읽어서 BOM 이 키 이름에 붙거나(키를 못 찾음)
+    UTF-16 에서 UnicodeDecodeError 로 죽는다. 앞 몇 바이트로 고른다.
+
+    반환값은 문자열이거나 ``None`` 이다(이 모듈은 typing 을 쓰지 않는다).
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(2)
+    except OSError:
+        return None
+    if head[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return "utf-16"
+    # BOM 이 있으면 떼고, 없으면 utf-8 과 같다 — 맥 파일은 결과가 바뀌지 않는다.
+    return "utf-8-sig"
+
+
 def theme_roots():
     """테마를 찾을 폴더들. 뒤쪽이 앞쪽을 가린다(사용자 테마 우선)."""
     return (bundled_frames_dir(), user_frames_dir())

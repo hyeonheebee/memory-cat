@@ -14,11 +14,11 @@ from contextvars import ContextVar
 from io import BytesIO
 from pathlib import Path
 
-from dotenv import load_dotenv
 from openai import OpenAI
 from PIL import Image
 
 import apppaths
+from brain import load_dotenv_candidates
 from import_theme import cut_background, fit_square, save_theme_frames, segments
 
 
@@ -165,8 +165,9 @@ def generate_sheet(photo_path, retry_prompt=False) -> Image.Image:
     if not photo.is_file():
         raise ThemeGenerationError(f"Pet photo not found: {photo}")
 
-    for candidate in apppaths.dotenv_candidates():
-        load_dotenv(candidate, override=False)
+    # 메모장이 BOM·UTF-16 으로 저장한 .env 도 읽는 공용 루프. brain._load_api_key
+    # 와 중복을 없애려고 brain 쪽에 하나만 둔다(순환 import 없음).
+    load_dotenv_candidates()
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ThemeGenerationError(

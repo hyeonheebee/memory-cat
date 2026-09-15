@@ -535,11 +535,35 @@ def _assemble_result(
     }
 
 
+def load_dotenv_candidates() -> None:
+    """``apppaths.dotenv_candidates()`` 순서대로 ``.env`` 를 읽어 환경에 채운다.
+
+    윈도우 메모장은 ``.env`` 를 UTF-8(BOM 포함)이나 UTF-16("유니코드")으로도
+    저장한다. 후보마다 :func:`apppaths.dotenv_encoding` 으로 인코딩을 고른
+    뒤 그 인코딩으로 연다 — 기본 utf-8 로 읽으면 BOM 이 키 이름 앞에 붙어
+    ``OPENAI_API_KEY`` 를 못 찾거나(BOM), ``UnicodeDecodeError`` 로 죽는다
+    (UTF-16). 디코딩할 수 없는 후보는 건너뛴다(다음 후보를 본다) — 여기서
+    죽으면 경고창에 코덱 오류 원문이 뜬다. override=False 라서 먼저 읽힌
+    값이 이긴다.
+
+    ``vision_theme.generate_sheet`` 도 이 함수를 그대로 쓴다 — 같은 루프를
+    두 곳에 두지 않으려고 여기 하나로 모았다(``vision_theme`` 은 ``brain``
+    을 순환 없이 import 할 수 있다).
+    """
+    for candidate in apppaths.dotenv_candidates():
+        encoding = apppaths.dotenv_encoding(candidate)
+        if encoding is None:
+            continue
+        try:
+            load_dotenv(candidate, override=False, encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+
+
 def _load_api_key() -> Optional[str]:
     # 설치된 앱은 사용자 폴더의 .env 를, 저장소에서 바로 돌릴 때는 소스 옆의
-    # .env 를 읽는다. override=False 라서 먼저 읽힌 쪽이 이긴다.
-    for candidate in apppaths.dotenv_candidates():
-        load_dotenv(candidate, override=False)
+    # .env 를 읽는다.
+    load_dotenv_candidates()
     return os.getenv("OPENAI_API_KEY")
 
 

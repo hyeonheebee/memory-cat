@@ -9,6 +9,7 @@ from unittest.mock import Mock, call, patch
 
 from PIL import Image, ImageDraw
 
+import apppaths
 import desktop_cat
 import vision_theme
 
@@ -77,7 +78,7 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {}, clear=True),
-                patch.object(vision_theme, "load_dotenv"),
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "OpenAI") as client_class,
             ):
                 with self.assertRaisesRegex(
@@ -103,6 +104,7 @@ class VisionThemeTests(unittest.TestCase):
                     "OpenAI image generation failed: network unavailable",
                 ):
                     vision_theme.generate_sheet(photo)
+
 
     def test_build_theme_turns_six_detected_stages_into_a_complete_theme(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -284,6 +286,46 @@ class VisionThemeTests(unittest.TestCase):
             stderr.getvalue(),
             "Error: OpenAI request failed: network unavailable\n",
         )
+
+
+class GenerateSheetDotenvEncodingTests(unittest.TestCase):
+    """메모장이 UTF-16("유니코드")으로 저장한 ``.env`` 도 읽어야 한다.
+
+    ⛔ 값은 절대 출력하지 않는다 — assertTrue(x == FAKE, ...) 만 쓴다.
+    ``apppaths.dotenv_candidates`` 를 임시 파일로 패치해 진짜 ``.env`` 로는
+    넘어가지 않는다.
+    """
+
+    FAKE = "sk-test-fake-encoding"
+
+    def test_utf16_env_key_reaches_the_openai_client(self):
+        generated = Image.new("RGB", (1536, 1024), "white")
+        response = SimpleNamespace(
+            data=[SimpleNamespace(b64_json=_png_b64(generated))]
+        )
+        client = Mock()
+        client.images.edit.return_value = response
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            photo = Path(temp_dir) / "pet.jpg"
+            Image.new("RGB", (64, 64), "brown").save(photo)
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text(f"OPENAI_API_KEY={self.FAKE}\n", encoding="utf-16")
+            missing = Path(temp_dir) / "missing" / ".env"
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                patch.object(apppaths, "dotenv_candidates",
+                             return_value=(env_path, missing)),
+                patch.object(vision_theme, "OpenAI", return_value=client) as ctor,
+            ):
+                # UnicodeDecodeError 가 나면 여기서 예외로 테스트가 실패한다.
+                vision_theme.generate_sheet(photo)
+
+        self.assertTrue(
+            ctor.call_args.kwargs["api_key"] == self.FAKE,
+            "UTF-16 .env 에서 읽은 키가 OpenAI 클라이언트로 전달되지 않음",
+        )
+
 
 FIXTURES = Path(__file__).with_name("fixtures")
 

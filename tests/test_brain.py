@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import apppaths
 import brain
 import metrics
 from personality import CUSTOM_PERSONALITY
@@ -399,6 +400,62 @@ class DiagnoseWithoutCleanupTests(unittest.TestCase):
 
         instructions = fake_client.responses.parse.call_args.kwargs["instructions"]
         self.assertEqual(instructions, brain.system_prompt_for(language="ko"))
+
+
+class LoadApiKeyEncodingTests(unittest.TestCase):
+    """메모장이 저장하는 세 인코딩 모두에서 키를 읽는다.
+
+    ⛔ 값은 절대 출력하지 않는다 — assertTrue(x == FAKE, ...) 만 쓴다.
+    ``apppaths.dotenv_candidates`` 를 임시 폴더 경로로 패치해 진짜 .env 로는
+    절대 넘어가지 않는다.
+    """
+
+    FAKE = "sk-test-fake-encoding"
+
+    def _write(self, path, encoding):
+        path.write_text(f"OPENAI_API_KEY={self.FAKE}\n", encoding=encoding)
+
+    def _load_with_candidates(self, candidates):
+        with patch.object(apppaths, "dotenv_candidates", return_value=tuple(candidates)), \
+             patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENAI_API_KEY", None)
+            return brain._load_api_key()
+
+    def test_reads_utf8_without_bom(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            candidate = Path(temp_dir) / ".env"
+            self._write(candidate, "utf-8")
+            missing = Path(temp_dir) / "missing" / ".env"
+            result = self._load_with_candidates((candidate, missing))
+        self.assertTrue(result == self.FAKE, "UTF-8(BOM 없음) .env 에서 키를 못 읽음")
+
+    def test_reads_utf8_with_bom(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            candidate = Path(temp_dir) / ".env"
+            self._write(candidate, "utf-8-sig")
+            missing = Path(temp_dir) / "missing" / ".env"
+            result = self._load_with_candidates((candidate, missing))
+        self.assertTrue(result == self.FAKE, "UTF-8(BOM 있음) .env 에서 키를 못 읽음")
+
+    def test_reads_utf16_notepad_unicode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            candidate = Path(temp_dir) / ".env"
+            self._write(candidate, "utf-16")
+            missing = Path(temp_dir) / "missing" / ".env"
+            result = self._load_with_candidates((candidate, missing))
+        self.assertTrue(result == self.FAKE, "UTF-16(메모장 유니코드) .env 에서 키를 못 읽음")
+
+    def test_undecodable_first_candidate_is_skipped_without_raising(self):
+        """첫 후보가 깨진 인코딩이어도 죽지 않고 두 번째 후보에서 읽는다."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bad = Path(temp_dir) / "bad.env"
+            # utf-8-sig 로 디코드가 실패하는 내용(BOM 은 아니라 utf-8-sig 로
+            # 고른 뒤 깨진다).
+            bad.write_bytes(b"OPENAI_API_KEY=\xff\xfe\xfa")
+            good = Path(temp_dir) / "good.env"
+            self._write(good, "utf-8")
+            result = self._load_with_candidates((bad, good))
+        self.assertTrue(result == self.FAKE, "두 번째(정상) 후보에서 키를 못 읽음")
 
 
 if __name__ == "__main__":
