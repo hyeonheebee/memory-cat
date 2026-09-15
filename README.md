@@ -460,13 +460,14 @@ notepad "$env:APPDATA\Memory Cat\.env"
 ```
 
 If Notepad asks to create a new file, choose **Yes**. Paste the same
-`OPENAI_API_KEY=sk-...` line, no quotes, save with **Ctrl+S**, and check the
+`OPENAI_API_KEY=sk-...` line, no quotes, save with **Ctrl+S** (keep the
+encoding at **UTF-8**, shown at the bottom right of Notepad), and check the
 file didn't become `.env.txt`. Right-click the cat → **Quit**, then run it
 again.<br>
 메모장이 새 파일을 만들지 물으면 **예**를 누릅니다. 같은
-`OPENAI_API_KEY=sk-...` 줄을 따옴표 없이 붙여 넣고 **Ctrl+S**로 저장한 뒤,
-파일 이름이 `.env.txt`가 되지 않았는지 확인하세요. 고양이 우클릭 → **종료**한
-뒤 다시 실행하세요.
+`OPENAI_API_KEY=sk-...` 줄을 따옴표 없이 붙여 넣고 **Ctrl+S**로 저장한 뒤(메모장
+오른쪽 아래 인코딩은 **UTF-8** 그대로 두세요), 파일 이름이 `.env.txt`가 되지
+않았는지 확인하세요. 고양이 우클릭 → **종료**한 뒤 다시 실행하세요.
 
 **These stay macOS only:** personalities, and safe cleanup. On Windows,
 **🐾 What did you eat? diagnosis** only explains — it never deletes or moves
