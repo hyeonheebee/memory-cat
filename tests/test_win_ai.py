@@ -241,6 +241,17 @@ class NextThemeNameTests(unittest.TestCase):
 
 
 class CreateThemeTests(unittest.TestCase):
+    """``create_theme`` 실패 경로는 이제 로그를 남긴다 — 실제 사용자 로그
+    폴더(``~/Library/Logs``)에 쓰지 않도록 매 테스트에서 임시 폴더로 바꿔 끼운다."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
     def test_heic_is_blocked_before_calling_build_theme(self):
         with patch.object(win_ai.vision_theme, "build_theme") as build:
             with self.assertRaises(win_ai.ThemeError):
@@ -261,6 +272,234 @@ class CreateThemeTests(unittest.TestCase):
             result = win_ai.create_theme(Path("cat.png"), "mypet")
         build.assert_called_once_with(Path("cat.png"), "mypet", quality="medium")
         self.assertEqual(result, "mypet")
+
+
+def _make_fake_photo(directory):
+    """진짜(하지만 아주 작은) PNG 를 만든다 — ``vision_theme`` 은 패치하므로
+    내용은 안 쓰이지만, 경로가 실제 파일을 가리켜야 자연스럽다."""
+    from PIL import Image
+
+    path = Path(directory) / "cat.png"
+    Image.new("RGB", (2, 2), color=(1, 2, 3)).save(path)
+    return path
+
+
+class FakeAuthError(Exception):
+    """openai 의 ``AuthenticationError`` 흉내 — ``status_code`` 속성만 있으면 된다."""
+    status_code = 401
+
+
+def _raise_401_from_vision_theme(*args, **kwargs):
+    """``vision_theme.generate_sheet`` 이 401 을 감싸는 것과 같은 모양으로
+    ``ThemeGenerationError`` 를 내되, ``__cause__`` 에 진짜(가짜) openai 예외를 남긴다."""
+    cause = FakeAuthError(
+        "Error code: 401 - {'error': {'message': "
+        "'Incorrect API key provided: sk-proj-FAKE****wxyz', 'type': "
+        "'invalid_request_error'}}"
+    )
+    try:
+        raise cause
+    except FakeAuthError as exc:
+        raise win_ai.vision_theme.ThemeGenerationError(
+            f"OpenAI image generation failed: {exc}"
+        ) from exc
+
+
+class ThemeErrorSecretRedactionTests(unittest.TestCase):
+    """G-1·F-2: 화면엔 번역 문구만, 원문(키 조각 포함)은 로그로만."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+        self._photo_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._photo_tmp.cleanup)
+        self.photo = _make_fake_photo(self._photo_tmp.name)
+
+    def _log_text(self):
+        log_path = Path(self._log_tmp.name) / "ai-errors.log"
+        self.assertTrue(log_path.is_file(), "로그 파일이 생기지 않았습니다")
+        return log_path.read_text(encoding="utf-8")
+
+    def test_401_shows_translated_invalid_key_guidance(self):
+        env_path = apppaths.ensure_user_data_dir() / ".env"
+        for language in ("ko", "en"):
+            with self.subTest(language=language), \
+                 patch.object(win_ai.vision_theme, "build_theme",
+                              side_effect=_raise_401_from_vision_theme):
+                with self.assertRaises(win_ai.ThemeError) as ctx:
+                    win_ai.create_theme(self.photo, "mypet", language)
+            expected = i18n.tr(language, "theme_error_invalid_key", path=str(env_path))
+            self.assertEqual(str(ctx.exception), expected)
+
+    def test_401_message_has_none_of_the_raw_fragments(self):
+        with patch.object(win_ai.vision_theme, "build_theme",
+                           side_effect=_raise_401_from_vision_theme):
+            with self.assertRaises(win_ai.ThemeError) as ctx:
+                win_ai.create_theme(self.photo, "mypet", "ko")
+        message = str(ctx.exception)
+        for fragment in ("wxyz", "sk-", "401", "Incorrect"):
+            self.assertNotIn(fragment, message)
+
+    def test_401_failure_is_logged_with_the_secret_redacted(self):
+        with patch.object(win_ai.vision_theme, "build_theme",
+                           side_effect=_raise_401_from_vision_theme):
+            with self.assertRaises(win_ai.ThemeError):
+                win_ai.create_theme(self.photo, "mypet", "ko")
+        log_text = self._log_text()
+        self.assertNotIn("wxyz", log_text)
+        self.assertNotIn("FAKE", log_text)
+        self.assertIn("[REDACTED]", log_text)        # 가림 표시
+        self.assertIn("theme", log_text)              # 어떤 작업이었는지
+
+    def test_non_401_failure_gets_the_generic_message(self):
+        for error in (ValueError("이상한 응답"), RuntimeError("네트워크 오류")):
+            with self.subTest(error=type(error).__name__), \
+                 patch.object(win_ai.vision_theme, "build_theme", side_effect=error):
+                with self.assertRaises(win_ai.ThemeError) as ctx:
+                    win_ai.create_theme(self.photo, "mypet", "ko")
+            expected = i18n.tr(
+                "ko", "theme_error_generic", path=str(win_ai._ai_error_log_path()))
+            self.assertEqual(str(ctx.exception), expected)
+            self.assertNotIn("네트워크 오류", str(ctx.exception))
+            self.assertNotIn("이상한 응답", str(ctx.exception))
+
+    def test_non_401_failure_is_still_logged_with_the_raw_text_redacted(self):
+        with patch.object(win_ai.vision_theme, "build_theme",
+                           side_effect=RuntimeError("token sk-proj-FAKE****zzzz leaked")):
+            with self.assertRaises(win_ai.ThemeError):
+                win_ai.create_theme(self.photo, "mypet", "ko")
+        log_text = self._log_text()
+        self.assertIn("token", log_text)
+        self.assertNotIn("zzzz", log_text)
+        self.assertIn("sk-***", log_text)
+
+    def test_a_status_500_error_is_not_treated_as_an_invalid_key(self):
+        class FakeServerError(Exception):
+            status_code = 500
+
+        with patch.object(win_ai.vision_theme, "build_theme",
+                           side_effect=FakeServerError("boom")):
+            with self.assertRaises(win_ai.ThemeError) as ctx:
+                win_ai.create_theme(self.photo, "mypet", "ko")
+        expected = i18n.tr(
+            "ko", "theme_error_generic", path=str(win_ai._ai_error_log_path()))
+        self.assertEqual(str(ctx.exception), expected)
+
+    def test_log_write_failure_does_not_leak_into_a_new_exception(self):
+        """로그 경로 아래가 사실 파일이면(폴더를 못 만들면) OSError 가 나지만,
+        ``create_theme`` 은 여전히 번역된 ``ThemeError`` 로 끝나야 한다."""
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("이 자리는 폴더가 아니라 파일입니다")
+        with patch.object(win_ai.apppaths, "log_dir",
+                           return_value=blocked / "logs"), \
+             patch.object(win_ai.vision_theme, "build_theme",
+                          side_effect=RuntimeError("boom")):
+            with self.assertRaises(win_ai.ThemeError) as ctx:
+                win_ai.create_theme(self.photo, "mypet", "ko")
+        expected = i18n.tr(
+            "ko", "theme_error_generic",
+            path=str(blocked / "logs" / "ai-errors.log"))
+        self.assertEqual(str(ctx.exception), expected)
+
+
+class RedactSecretsTests(unittest.TestCase):
+    def test_sk_prefixed_tokens_are_redacted_to_the_end(self):
+        text = "key=sk-proj-FAKE1234.abcd_efgh-ijkl****wxyz done"
+        redacted = win_ai.redact_secrets(text)
+        self.assertNotIn("wxyz", redacted)
+        self.assertIn("sk-***", redacted)
+
+    def test_sk_token_glued_after_another_letter_is_still_redacted(self):
+        """`ssk-proj…` 처럼 앞에 다른 글자가 붙어도 `sk-` 이후는 가려진다."""
+        text = "token ssk-proj-FAKE****wxyz end"
+        redacted = win_ai.redact_secrets(text)
+        self.assertNotIn("wxyz", redacted)
+        self.assertIn("sk-***", redacted)
+
+    def test_incorrect_api_key_provided_value_is_redacted_without_sk_prefix(self):
+        text = "Incorrect API key provided: abcdefgh12345, please check"
+        redacted = win_ai.redact_secrets(text)
+        self.assertNotIn("abcdefgh12345", redacted)
+        self.assertIn("Incorrect API key provided:", redacted)
+
+    def test_bearer_tokens_are_redacted(self):
+        text = "Authorization: Bearer abc123XYZ.def456"
+        redacted = win_ai.redact_secrets(text)
+        self.assertNotIn("abc123XYZ", redacted)
+
+    def test_plain_sentences_without_secrets_are_untouched(self):
+        text = "네트워크 연결이 잠시 끊겼어요. 다시 시도해 주세요."
+        self.assertEqual(win_ai.redact_secrets(text), text)
+
+    def test_empty_text_is_returned_as_is(self):
+        self.assertEqual(win_ai.redact_secrets(""), "")
+        self.assertIsNone(win_ai.redact_secrets(None))
+
+
+class ThemeFailureMessageTests(unittest.TestCase):
+    """``_ThemeWorker`` 가 (있을 수 없지만) ``ThemeError`` 가 아닌 예외를 받았을 때
+    쓸 문구를 정하는 판단 — Qt 없는 쪽에 둬서 테스트할 수 있게 한다."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+    def test_a_theme_error_is_passed_through_unchanged(self):
+        error = win_ai.ThemeError("이미 번역된 안내 문구")
+        self.assertEqual(
+            win_ai.theme_failure_message(error, "ko"), "이미 번역된 안내 문구")
+
+    def test_any_other_exception_gets_the_generic_message(self):
+        error = RuntimeError("boom, 원문 노출 금지")
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                message = win_ai.theme_failure_message(error, language)
+            expected = i18n.tr(
+                language, "theme_error_generic",
+                path=str(win_ai._ai_error_log_path()))
+            self.assertEqual(message, expected)
+            self.assertNotIn("boom", message)
+
+
+class LogAiFailureTests(unittest.TestCase):
+    """진단 실패에도 같은 로그 함수를 쓴다(``win_ai_ui`` 의 ``_DiagnosisWorker``).
+    Qt 를 거치지 않고 함수 자체를 검사한다."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+    def test_it_writes_the_kind_and_a_redacted_message(self):
+        try:
+            raise ValueError("Incorrect API key provided: sk-proj-FAKE****abcd")
+        except ValueError as error:
+            win_ai.log_ai_failure("diagnosis", error)
+        log_path = Path(self._log_tmp.name) / "ai-errors.log"
+        text = log_path.read_text(encoding="utf-8")
+        self.assertIn("diagnosis", text)
+        self.assertNotIn("abcd", text)
+
+    def test_it_never_raises_when_the_log_folder_cannot_be_created(self):
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("파일")
+        with patch.object(win_ai.apppaths, "log_dir", return_value=blocked / "logs"):
+            try:
+                raise RuntimeError("boom")
+            except RuntimeError as error:
+                win_ai.log_ai_failure("theme", error)          # 예외가 새면 실패
 
 
 if __name__ == "__main__":

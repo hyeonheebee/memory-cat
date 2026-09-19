@@ -10,6 +10,9 @@
 옮길 수도 없다. 설명만 한다.
 """
 
+import datetime
+import re
+import traceback
 from pathlib import Path
 
 import apppaths
@@ -24,6 +27,95 @@ SUPPORTED_PHOTO_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 class ThemeError(Exception):
     """커스텀 테마 생성 중 생긴 문제를 UI 에 보여줄 한 자리로 모은다."""
+
+
+#: 로그 파일 이름. ``apppaths.log_dir()`` 아래에 둔다.
+_AI_LOG_FILE_NAME = "ai-errors.log"
+
+#: ``sk-`` 로 시작하는 토큰. 앞에 다른 글자가 붙어도(``ssk-proj…``) ``sk-``
+#: 부터는 가려진다 — 앵커를 걸지 않았기 때문이다. ``*`` 는 openai 가 키를
+#: 가운데만 지워 보여줄 때(``sk-proj****abcd``) 쓰는 문자라 포함한다.
+_SK_TOKEN_RE = re.compile(r"sk-[A-Za-z0-9_.\-*]+")
+
+#: OpenAI 가 401 응답에 함께 주는 문장의 값 부분. 키가 ``sk-`` 로 시작하지
+#: 않아도 이 패턴이 값을 가린다(따옴표·쉼표 전까지).
+_INCORRECT_KEY_RE = re.compile(r"(Incorrect API key provided:)\s*[^'\",]*")
+
+#: ``Authorization: Bearer <토큰>`` 형태.
+_BEARER_RE = re.compile(r"Bearer\s+\S+")
+
+
+def redact_secrets(text):
+    """로그에 쓰기 전에 키 조각을 가린다.
+
+    최소한 세 가지를 가린다: ``sk-`` 로 시작하는 토큰(중간에 ``*``·``.``·
+    ``-``·``_`` 가 섞여도 끝까지), ``Incorrect API key provided: <값>`` 의
+    값 부분(키가 ``sk-`` 로 시작하지 않아도), ``Bearer <토큰>``.
+    가린 자리는 ``sk-***``·``[REDACTED]`` 처럼 알아볼 수 있는 표시로 남는다.
+    """
+    if not text:
+        return text
+    result = str(text)
+    result = _SK_TOKEN_RE.sub("sk-***", result)
+    result = _INCORRECT_KEY_RE.sub(r"\1 [REDACTED]", result)
+    result = _BEARER_RE.sub("Bearer [REDACTED]", result)
+    return result
+
+
+def _exception_chain(error):
+    """``error`` 부터 ``__cause__``·``__context__`` 를 따라가며 예외를 하나씩 낸다.
+
+    두 사슬을 섞어 따라가므로(먼저 ``__cause__``, 없으면 ``__context__``)
+    ``raise X from Y`` 로도, 그냥 ``except`` 안에서 다시 ``raise`` 로도 이어진
+    사슬을 모두 본다. 순환은 ``id()`` 로 걸러 무한 루프를 막는다.
+    """
+    seen = set()
+    current = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _is_invalid_key_error(error):
+    """예외 사슬 어딘가에 ``status_code == 401`` 인 예외가 있는지.
+
+    openai 의 ``AuthenticationError`` 가 이 속성을 가진다. ``vision_theme`` 은
+    원래 예외를 문자열로 감싸 버리므로(``ThemeGenerationError``), 감싸인
+    원본은 ``__cause__`` 를 따라가야 보인다.
+    """
+    return any(
+        getattr(item, "status_code", None) == 401
+        for item in _exception_chain(error)
+    )
+
+
+def _ai_error_log_path():
+    return apppaths.log_dir() / _AI_LOG_FILE_NAME
+
+
+def log_ai_failure(kind, error):
+    """AI 실패 원문을(키 조각을 가린 뒤) 로그 파일에 덧붙여 쓴다.
+
+    ``kind`` 는 "theme"·"diagnosis" 처럼 어떤 작업이었는지 나타내는 한 단어.
+    로그 쓰기가 실패해도(폴더를 못 만들거나 파일을 못 열어도) 예외를 새로
+    내지 않는다 — 사용자가 보는 흐름(번역된 안내창)은 그대로 이어져야 한다.
+    """
+    try:
+        log_path = _ai_error_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            detail = "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            )
+        except Exception:
+            detail = f"{type(error).__name__}: {error}"
+        timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+        entry = f"[{timestamp}] {kind}\n{redact_secrets(detail)}\n"
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(entry + "\n")
+    except OSError:
+        pass
 
 
 def has_api_key() -> bool:
@@ -111,6 +203,9 @@ def create_theme(photo_path, name, language="ko"):
 
     이름이 비슷하지만 다른 함수다 — 이쪽은 윈도우 UI 가 쓰는 껍데기고,
     실제 생성은 ``vision_theme.build_theme`` 이 한다.
+
+    실패하면 원문(키 조각 포함)은 로그로만 보내고, 화면엔 번역된 안내만
+    올린다 — 원문을 그대로 띄우면 버그 신고 스크린샷에 키 끝자리가 찍힌다.
     """
     problem = check_photo(photo_path, language)
     if problem:
@@ -118,5 +213,24 @@ def create_theme(photo_path, name, language="ko"):
     try:
         vision_theme.build_theme(Path(photo_path), name, quality="medium")
     except Exception as error:          # 네트워크·API·이미지 오류를 한 자리로
-        raise ThemeError(str(error)) from error
+        log_ai_failure("theme", error)
+        if _is_invalid_key_error(error):
+            path = str(apppaths.ensure_user_data_dir() / ".env")
+            message = tr(language, "theme_error_invalid_key", path=path)
+        else:
+            message = tr(
+                language, "theme_error_generic", path=str(_ai_error_log_path()))
+        raise ThemeError(message) from error
     return name
+
+
+def theme_failure_message(error, language):
+    """테마 실패창에 올릴 문구를 정한다.
+
+    ``create_theme`` 이 낸 ``ThemeError`` 는 이미 번역까지 끝낸 메시지이니
+    그대로 쓴다. 그 밖의(있어선 안 되는) 예외가 워커까지 새 나온 경우를
+    대비한 방어선 — 원문 대신 일반 안내로 감춘다.
+    """
+    if isinstance(error, ThemeError):
+        return str(error)
+    return tr(language, "theme_error_generic", path=str(_ai_error_log_path()))

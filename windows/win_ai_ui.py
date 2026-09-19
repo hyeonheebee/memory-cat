@@ -45,6 +45,9 @@ class _DiagnosisWorker(QtCore.QThread):
         try:
             lines = win_ai.diagnosis_lines(self._language)
         except Exception as error:
+            # 원문은 로그로만 보낸다 — 로그 함수 자체는 예외를 내지 않으므로
+            # 워커 스레드에서 새 예외가 생길 걱정은 없다.
+            win_ai.log_ai_failure("diagnosis", error)
             self.failed.emit(str(error))
             return
         self.finished_ok.emit(lines)
@@ -64,7 +67,12 @@ class _ThemeWorker(QtCore.QThread):
         try:
             name = win_ai.create_theme(self._photo, self._name, self._language)
         except Exception as error:
-            self.failed.emit(str(error))
+            # create_theme 이 내는 ThemeError 는 이미 번역된 메시지다. 그 밖의
+            # (있어선 안 되는) 예외가 새 나오면 원문 대신 일반 안내로 감춘다
+            # — 판단은 win_ai.theme_failure_message 가, 여기서는 결과만 emit.
+            if not isinstance(error, win_ai.ThemeError):
+                win_ai.log_ai_failure("theme", error)
+            self.failed.emit(win_ai.theme_failure_message(error, self._language))
             return
         self.finished_ok.emit(name)
 
@@ -75,10 +83,10 @@ def _show_diagnosis(parent, language, lines):
 
 
 def _show_diagnosis_failure(parent, language, message):
-    body = tr(language, "diagnosis_error")
-    if message:
-        body = f"{body}\n\n{message}"
-    QtWidgets.QMessageBox.warning(parent, tr(language, "diagnosis_title"), body)
+    # 원문(message)은 화면에 붙이지 않는다 — 로그(win_ai.log_ai_failure)로만
+    # 보낸다. 여기서는 번역된 안내 한 줄만 보여준다.
+    QtWidgets.QMessageBox.warning(
+        parent, tr(language, "diagnosis_title"), tr(language, "diagnosis_error"))
 
 
 def show_diagnosis(parent, language):

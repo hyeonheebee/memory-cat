@@ -131,6 +131,18 @@ _STRINGS = {
         ),
         "theme_working": "테마를 만드는 중이에요… 1~2분 걸립니다.",
         "theme_error_format": "PNG, JPEG, WebP 파일만 됩니다.",
+        "theme_error_invalid_key": (
+            "API 키가 올바르지 않아요. 키가 틀렸거나 만료됐거나 결제에 문제가 "
+            "있을 수 있어요.\n"
+            "아래 파일의 키를 확인해 주세요.\n"
+            "{path}\n\n"
+            "고친 뒤 뚱냥이를 껐다 켜 주세요."
+        ),
+        "theme_error_generic": (
+            "테마를 만들지 못했어요. 잠시 뒤 다시 해 주세요.\n\n"
+            "자세한 오류는 아래 파일에 기록됩니다.\n"
+            "{path}"
+        ),
         "pet_theme_consent_title": "사진 전송 안내",
         "pet_theme_consent_body": "선택한 사진이 테마 생성을 위해 OpenAI로 전송됩니다",
         "pet_theme_continue": "진행",
@@ -264,6 +276,18 @@ _STRINGS = {
         ),
         "theme_working": "Building your theme… this takes a minute or two.",
         "theme_error_format": "Only PNG, JPEG, and WebP files work.",
+        "theme_error_invalid_key": (
+            "The API key isn't valid. It may be wrong, expired, or have a "
+            "billing problem.\n"
+            "Please check the key in this file.\n"
+            "{path}\n\n"
+            "Then quit and reopen Memory Cat."
+        ),
+        "theme_error_generic": (
+            "Couldn't make the theme. Please try again shortly.\n\n"
+            "The details were logged to this file.\n"
+            "{path}"
+        ),
         "pet_theme_consent_title": "Photo upload notice",
         "pet_theme_consent_body": "Your photo will be sent to OpenAI to generate the theme",
         "pet_theme_continue": "Continue",
