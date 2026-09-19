@@ -10,6 +10,63 @@ import 하는 필수 모듈이라서, 여기서 무거운 의존성을 끌어오
 
 from pathlib import Path
 
+# apppaths 는 저장소 루트의 가벼운 모듈이다(os·sys·pathlib 만) — Qt 도 없고
+# 무거운 의존성도 없어서 이 "Qt 없는" 모듈에서도 그대로 쓸 수 있다. 잠금
+# 파일이 살 폴더(맥과 같은 %APPDATA%\Memory Cat)를 여기서 받는다.
+import apppaths
+
+#: 맥의 desktop_cat.INSTANCE_LOCK_NAME 과 같은 이름 — 잠금은 플랫폼마다
+#: 따로지만(맥은 fcntl.flock, 윈도우는 QLockFile) 파일 이름은 맞춰 둔다.
+INSTANCE_LOCK_NAME = "memory-cat.lock"
+
+
+def instance_lock_path():
+    """중복 실행 방지 잠금 파일 경로. ``apppaths.ensure_user_data_dir()``
+    (%APPDATA%\\Memory Cat) 아래 ``memory-cat.lock``.
+
+    ``ensure_user_data_dir()`` 을 써서 폴더가 없으면 만든다 — ``QLockFile``
+    은 파일을 열 폴더가 이미 있어야 한다(스스로 만들지 않는다).
+    """
+    return str(apppaths.ensure_user_data_dir() / INSTANCE_LOCK_NAME)
+
+
+def claim_single_instance(lock, lock_failed_error):
+    """뚱냥이가 이 컴퓨터에 한 마리만 뜨도록 판정한다. ``True`` 면 계속
+    실행해도 된다(=내가 유일하거나, 판정을 못 믿을 상황).
+
+    ``lock`` 은 ``QtCore.QLockFile`` 과 같은 모양이면 된다
+    (``setStaleLockTime(ms)``, ``tryLock(timeout_ms) -> bool``,
+    ``error()``) — Qt 를 직접 import 하지 않고 테스트하기 위해서다.
+    ``lock_failed_error`` 자리에는 호출부가
+    ``QtCore.QLockFile.LockError.LockFailedError`` 를 넘긴다.
+
+    판정 순서:
+
+    1. ``setStaleLockTime(0)`` — "0 밀리초"는 시간으로 오래됐다고 보지
+       않는다는 뜻이 아니라, ``QLockFile`` 이 잠금을 쥔 PID 가 **아직
+       살아 있는지**만으로 죽은 잠금을 스스로 회수하게 한다는 뜻이다.
+       이전 실행이 ``main()`` 의 ``os._exit()`` 처럼 잠금 파일을 정리할
+       틈 없이 끝나도(강제 종료 포함), 다음 실행의 ``tryLock`` 이 그
+       PID 가 이미 죽었다는 걸 보고 잠금을 되찾는다.
+    2. ``tryLock(0)`` 이 성공하면(=이 프로세스가 잠금을 쥐면) ``True``.
+    3. 실패했는데 ``error() == lock_failed_error`` (진짜 다른 뚱냥이가
+       살아서 잠금을 쥐고 있음)면 ``False`` — 이번 실행은 막는다.
+    4. 그 밖의 실패(권한 오류, 지원 안 하는 파일 시스템 등)는 ``True`` —
+       판정 자체를 못 믿는 환경이면 막지 않는다. 맥의
+       ``desktop_cat.acquire_instance_lock`` 과 같은 원칙: 두 마리가
+       뜨는 것보다 한 마리도 안 뜨는 쪽이 나쁘다.
+    5. ``lock`` 의 어떤 호출이든 예외를 내면(예상 못 한 PySide6 동작)
+       ``True`` — 잠금 판정 자체가 고양이를 못 띄우는 이유가 되면 안
+       된다.
+    """
+    try:
+        lock.setStaleLockTime(0)
+        if lock.tryLock(0):
+            return True
+        return lock.error() != lock_failed_error
+    except Exception:
+        return True
+
 
 def migrate_legacy_config(legacy_path, target_path):
     """구버전 config.json(exe 옆)을 새 위치(``apppaths.config_file()``)로

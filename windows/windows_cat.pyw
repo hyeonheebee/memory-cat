@@ -469,12 +469,30 @@ class Cat(QtWidgets.QWidget):
         self.apply_layout()
 
 
+#: 중복 실행 방지 잠금(QLockFile). 지역 변수로만 두면 main() 이 끝나기도
+#: 전에 GC 가 거둬 가서(다음 줄에서 열린 파일 핸들의 참조가 하나뿐이라)
+#: 잠금이 풀려 버린다 — 모듈 전역에 붙잡아 프로세스가 끝날 때까지 살려 둔다.
+_instance_lock = None
+
+
 def main():
+    global _instance_lock
     # 모듈 import 시점이 아니라 여기서 부른다 — 그래야 import 만으로는 아무
     # 파일도 안 써서 테스트(WindowsSourceRunTests 등)가 실제 사용자 폴더를
     # 건드리지 않는다. Cat() 이 load_config() 로 CONFIG 를 읽기 전에 옛
     # 설정이 있으면 옮겨 둬야 첫 실행에 반영된다.
     win_app.migrate_legacy_config(LEGACY_CONFIG, CONFIG)
+
+    # exe 를 두 번 실행하면 고양이가 두 마리 뜬다(실기 확인됨). QApplication
+    # 을 만들기 전에 잠가서, 이미 다른 뚱냥이가 살아 있으면 창 하나 없이
+    # 조용히 끝낸다 — 맥의 desktop_cat.acquire_instance_lock 과 같은 원칙
+    # (win_app.claim_single_instance 의 docstring 참고): 잠금 판정을 못
+    # 믿을 상황이면 막지 않는다.
+    _instance_lock = QtCore.QLockFile(win_app.instance_lock_path())
+    if not win_app.claim_single_instance(
+            _instance_lock, QtCore.QLockFile.LockError.LockFailedError):
+        return
+
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
     cat = Cat()

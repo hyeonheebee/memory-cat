@@ -6,6 +6,7 @@ PySide6 는 맥 개발 환경에 없어서 ``windows_cat.pyw`` 자체는 못 돌
 와의 배선은 소스를 정적으로 검사해서 확인한다(직접 실행은 안 된다).
 """
 import ast
+import os
 import sys
 import tempfile
 import unittest
@@ -165,6 +166,98 @@ class MigrateLegacyConfigTests(unittest.TestCase):
             self.assertFalse(result)
 
 
+class _RecordingLock:
+    """``QtCore.QLockFile`` 과 같은 모양(``setStaleLockTime``·``tryLock``·
+    ``error``)을 흉내내는 가짜. 호출 순서·인자를 기록해 둔다."""
+
+    def __init__(self, try_lock_result=True, error_value=None, raise_on=None):
+        self.calls = []
+        self._try_lock_result = try_lock_result
+        self._error_value = error_value
+        self._raise_on = raise_on  # 이 이름의 메서드가 불리면 예외를 던진다.
+
+    def setStaleLockTime(self, ms):
+        if self._raise_on == "setStaleLockTime":
+            raise RuntimeError("simulated failure (test)")
+        self.calls.append(("setStaleLockTime", ms))
+
+    def tryLock(self, timeout_ms):
+        if self._raise_on == "tryLock":
+            raise RuntimeError("simulated failure (test)")
+        self.calls.append(("tryLock", timeout_ms))
+        return self._try_lock_result
+
+    def error(self):
+        if self._raise_on == "error":
+            raise RuntimeError("simulated failure (test)")
+        self.calls.append(("error",))
+        return self._error_value
+
+
+#: QtCore.QLockFile.LockError.LockFailedError 자리에 넣는 표식. 진짜 enum 값이
+#: 무엇이든 상관없이 "이 값과 같은지"만 비교하는 로직인지를 검사한다.
+_LOCK_FAILED = object()
+
+
+class ClaimSingleInstanceTests(unittest.TestCase):
+    """``win_app.claim_single_instance`` — Qt 없이 판정 로직만 검사한다."""
+
+    def test_returns_true_when_the_lock_is_acquired(self):
+        lock = _RecordingLock(try_lock_result=True)
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_sets_stale_lock_time_to_zero_before_trying_the_lock(self):
+        lock = _RecordingLock(try_lock_result=True)
+        win_app.claim_single_instance(lock, _LOCK_FAILED)
+        self.assertEqual(
+            lock.calls[0], ("setStaleLockTime", 0),
+            "setStaleLockTime(0) 을 tryLock 보다 먼저 부르지 않습니다.",
+        )
+
+    def test_try_lock_is_called_with_a_zero_timeout(self):
+        lock = _RecordingLock(try_lock_result=True)
+        win_app.claim_single_instance(lock, _LOCK_FAILED)
+        self.assertIn(("tryLock", 0), lock.calls)
+
+    def test_returns_false_when_another_instance_already_holds_the_lock(self):
+        lock = _RecordingLock(try_lock_result=False, error_value=_LOCK_FAILED)
+        self.assertFalse(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_for_any_other_lock_error(self):
+        """권한 오류 등 LockFailedError 가 아닌 실패는 막지 않는다."""
+        other_error = object()
+        lock = _RecordingLock(try_lock_result=False, error_value=other_error)
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_when_try_lock_raises(self):
+        lock = _RecordingLock(raise_on="tryLock")
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_when_set_stale_lock_time_raises(self):
+        lock = _RecordingLock(raise_on="setStaleLockTime")
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_when_error_raises(self):
+        lock = _RecordingLock(try_lock_result=False, raise_on="error")
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+
+class InstanceLockPathTests(unittest.TestCase):
+    """``win_app.instance_lock_path`` — 맥의 ``memory-cat.lock`` 과 같은 이름."""
+
+    def test_lock_file_lives_under_memory_cat_home_and_the_folder_is_made(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "mchome"  # 일부러 안 만든다 — 만들어지는지 본다.
+            with patch.dict(os.environ, {"MEMORY_CAT_HOME": str(home)}):
+                result = win_app.instance_lock_path()
+
+            self.assertEqual(Path(result), home / "memory-cat.lock")
+            self.assertTrue(
+                home.is_dir(),
+                "instance_lock_path() 가 사용자 데이터 폴더를 안 만듭니다.",
+            )
+
+
 class WindowsCatWiringTests(unittest.TestCase):
     """``windows_cat.pyw`` 는 못 돌리니 소스를 정적으로 검사한다."""
 
@@ -254,6 +347,112 @@ class WindowsCatWiringTests(unittest.TestCase):
         self.assertNotIn(
             "migrate_legacy_config", top_level_call_names,
             "migrate_legacy_config 가 모듈 최상위(함수 밖)에서 불립니다.",
+        )
+
+    def test_claim_single_instance_runs_before_qapplication_is_built(self):
+        """``ast.walk`` 는 너비 우선이라, ``if not win_app.claim_single_
+        instance(...):`` 처럼 조건문 안에 중첩된 호출은 실제로는 앞줄인데도
+        같은 깊이의 다른 statement 보다 늦게 나온다 — 그래서 순서는
+        ``ast.walk`` 가 뱉는 순서가 아니라 소스 위치(``lineno``,
+        ``col_offset``)로 판단한다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        calls = []
+        for node in ast.walk(main):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    name = func.id
+                elif isinstance(func, ast.Attribute):
+                    name = func.attr
+                else:
+                    continue
+                calls.append((node.lineno, node.col_offset, name))
+        calls.sort()
+        call_names = [name for _, _, name in calls]
+
+        self.assertIn(
+            "instance_lock_path", call_names,
+            "main() 안에서 win_app.instance_lock_path() 를 부르지 않습니다.",
+        )
+        self.assertIn(
+            "claim_single_instance", call_names,
+            "main() 안에서 win_app.claim_single_instance 를 부르지 않습니다.",
+        )
+        self.assertIn(
+            "QApplication", call_names,
+            "main() 안에서 QApplication(...) 을 만들지 않습니다.",
+        )
+        self.assertLess(
+            call_names.index("instance_lock_path"),
+            call_names.index("QApplication"),
+            "instance_lock_path 는 QApplication 을 만들기 전에 불러야 합니다.",
+        )
+        self.assertLess(
+            call_names.index("claim_single_instance"),
+            call_names.index("QApplication"),
+            "claim_single_instance 는 QApplication 을 만들기 전에 불러야 합니다 — "
+            "안 그러면 두 번째 인스턴스도 이벤트 루프까지 만들어 버립니다.",
+        )
+
+    def test_uses_the_exact_qlockfile_lock_failed_error_enum(self):
+        self.assertIn(
+            "QtCore.QLockFile.LockError.LockFailedError", self.source,
+            "PySide6 6.x 의 정확한 enum 이름"
+            "(QtCore.QLockFile.LockError.LockFailedError)을 쓰지 않습니다.",
+        )
+
+    def test_instance_lock_object_is_kept_alive_at_module_level(self):
+        """지역 변수로만 두면 GC 가 열려 있는 QLockFile 을 거둬 가서 잠금이
+        풀린다 — main() 안에서 global 로 선언하고 모듈 최상위에서도
+        초기화해야 프로세스가 끝날 때까지 붙잡혀 있다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        declares_global = any(
+            isinstance(node, ast.Global) and "_instance_lock" in node.names
+            for node in ast.walk(main)
+        )
+        self.assertTrue(
+            declares_global,
+            "main() 안에서 `_instance_lock` 을 global 로 선언하지 않습니다 — "
+            "지역 변수로 두면 GC 가 QLockFile 을 거둬 가서 잠금이 풀립니다.",
+        )
+
+        module_level_declared = any(
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_instance_lock"
+                    for t in node.targets)
+            for node in self.tree.body
+        )
+        self.assertTrue(
+            module_level_declared,
+            "`_instance_lock` 이 모듈 최상위에서 초기화되지 않습니다.",
+        )
+
+    def test_instance_lock_is_not_created_at_module_top_level(self):
+        """import 시점에 QLockFile 을 만들면 WindowsSourceRunTests 스텁
+        실행이 실제 파일 시스템에 잠금 파일을 만들 수 있다 — 반드시 main()
+        안에서만 만들어야 한다."""
+        top_level_call_names = []
+        for node in self.tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    func = sub.func
+                    if isinstance(func, ast.Name):
+                        top_level_call_names.append(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        top_level_call_names.append(func.attr)
+        self.assertNotIn(
+            "QLockFile", top_level_call_names,
+            "QLockFile 이 모듈 최상위(함수 밖)에서 만들어집니다.",
+        )
+        self.assertNotIn(
+            "claim_single_instance", top_level_call_names,
+            "claim_single_instance 가 모듈 최상위(함수 밖)에서 불립니다.",
         )
 
 
