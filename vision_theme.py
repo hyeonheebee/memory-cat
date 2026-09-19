@@ -90,6 +90,43 @@ def _one_line(value: object) -> str:
     return " ".join(str(value).split())
 
 
+#: ISO BMFF(HEIF/HEIC 계열) 브랜드. 주 브랜드나 호환 브랜드 목록에 이 중
+#: 하나라도 있으면 HEIC/HEIF 로 본다.
+_HEIF_BRANDS = frozenset({
+    b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs",
+    b"mif1", b"msf1",
+})
+
+
+def looks_like_heic(path) -> bool:
+    """파일 앞부분만 보고 HEIC/HEIF(ISO BMFF) 컨테이너인지 확인한다.
+
+    Pillow 로 못 여는 파일이 전부 HEIC 는 아니다 — 깨진 파일에도 "HEIC 라서
+    안 된다"고 안내하면 오해를 준다. ``ftyp`` 상자(바이트 4~8)가 있고, 주
+    브랜드(8~12)나 호환 브랜드 목록(16 바이트부터 4 바이트씩, 상자 크기 안)
+    에 HEIF 계열 브랜드가 있으면 True. 읽지 못하거나(없는 파일 등) 형식이
+    안 맞으면 예외 없이 False.
+    """
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(4096)
+    except OSError:
+        return False
+    if len(data) < 12 or data[4:8] != b"ftyp":
+        return False
+    box_size = int.from_bytes(data[0:4], "big")
+    if box_size <= 0 or box_size > len(data):
+        box_size = len(data)  # 상자 크기가 이상하면 읽은 만큼으로 제한한다
+    if data[8:12] in _HEIF_BRANDS:
+        return True
+    offset = 16
+    while offset + 4 <= box_size:
+        if data[offset:offset + 4] in _HEIF_BRANDS:
+            return True
+        offset += 4
+    return False
+
+
 def _is_api_ready(photo: Path) -> bool:
     """이미지 API 가 그대로 받아주는 포맷인지 내용으로 확인한다.
 
@@ -111,9 +148,16 @@ def _rewrite_as_jpeg(photo: Path, destination: Path) -> None:
     가져다 쓴다. ``brain._trash_via_foundation`` 과 같은 지연 import 방식.
     """
     if sys.platform != "darwin":
+        # 윈도우엔 HEIC 를 풀어 줄 OS 해독기가 없다. 진짜 HEIC 인지 그냥 깨진
+        # 파일인지에 따라 다른 안내를 낸다 — 둘 다 macOS 는 언급하지 않는다.
+        if looks_like_heic(photo):
+            raise ThemeGenerationError(
+                "HEIC photos can't be used here. Save the photo as JPEG "
+                "and try again."
+            )
         raise ThemeGenerationError(
-            "This photo format can only be converted on macOS; "
-            "use a PNG, JPEG, or WebP file instead."
+            f"Could not read the photo: {photo.name}. "
+            "Use a PNG, JPEG, or WebP file."
         )
 
     from AppKit import (

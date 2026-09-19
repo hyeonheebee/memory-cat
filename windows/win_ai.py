@@ -15,6 +15,8 @@ import re
 import traceback
 from pathlib import Path
 
+from PIL import Image
+
 import apppaths
 import brain
 import vision_theme
@@ -23,6 +25,10 @@ from i18n import tr
 #: 이미지 API 가 받는 포맷. HEIC 는 여기 없다 — 아이폰 기본 포맷이라
 #: 변환 없이 올리면 이유 모를 실패로 보인다.
 SUPPORTED_PHOTO_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+#: HEIC/HEIF 확장자. 이 목록에 걸리면 내용을 열어 보지 않고 바로 안내한다
+#: — 확장자가 이미 맞는데 굳이 Pillow 로 열어 실패를 확인할 이유가 없다.
+_HEIC_SUFFIXES = (".heic", ".heif")
 
 
 class ThemeError(Exception):
@@ -177,10 +183,29 @@ def theme_target_dir():
 
 
 def check_photo(path, language="ko"):
-    """열 수 없는 형식이면 보여줄 문구를, 괜찮으면 ``None`` 을 돌려준다."""
-    if Path(path).suffix.lower() not in SUPPORTED_PHOTO_SUFFIXES:
+    """업로드·동의 **전** 판정. 열 수 없는 형식이면 보여줄 문구를, 괜찮으면
+    ``None`` 을 돌려준다.
+
+    확장자만 보지 않고 내용도 연다 — ``vision_theme._is_api_ready`` 는
+    Pillow 로 못 여는 파일을 전부 False 로 돌려주고, 그러면 변환 경로로
+    가서(윈도우에선 항상 실패) "HEIC 라서 안 된다"는 안내가 뜬다. 그냥 깨진
+    파일도 HEIC 취급을 받는 오분류를 여기서 막는다.
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix in _HEIC_SUFFIXES:
+        return tr(language, "theme_error_heic")
+    if suffix not in SUPPORTED_PHOTO_SUFFIXES:
         return tr(language, "theme_error_format")
-    return None
+    try:
+        with Image.open(path) as image:
+            if image.format in vision_theme.API_IMAGE_FORMATS:
+                return None
+    except Exception:
+        pass
+    if vision_theme.looks_like_heic(path):
+        return tr(language, "theme_error_heic")
+    return tr(language, "theme_error_unreadable")
 
 
 def next_theme_name(bundled_frames_dir):
@@ -222,6 +247,15 @@ def create_theme(photo_path, name, language="ko"):
                 language, "theme_error_generic", path=str(_ai_error_log_path()))
         raise ThemeError(message) from error
     return name
+
+
+def consent_button_labels(language):
+    """사진 전송 동의창의 (진행, 취소) 버튼 문구.
+
+    새 키를 만들지 않는다 — 맥 동의창(``desktop_cat``)이 이미 쓰는 공용 키
+    ``pet_theme_continue``·``cancel`` 을 그대로 쓴다.
+    """
+    return tr(language, "pet_theme_continue"), tr(language, "cancel")
 
 
 def theme_failure_message(error, language):

@@ -181,17 +181,70 @@ class ApiKeyMessageTests(unittest.TestCase):
 
 
 class PhotoCheckTests(unittest.TestCase):
-    def test_heic_is_refused_with_a_clear_message(self):
+    """I-2: 업로드·동의 전에 내용까지 본다 — 진짜 HEIC 와 그냥 깨진 파일을 나눈다."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _path(self, name):
+        return Path(self._tmp.name) / name
+
+    def _save_image(self, name, fmt):
+        from PIL import Image
+
+        path = self._path(name)
+        Image.new("RGB", (2, 2), color=(1, 2, 3)).save(path, format=fmt)
+        return path
+
+    def test_heic_extension_is_refused_without_opening_the_file(self):
         """맥은 OS 해독기로 HEIC 를 열지만 윈도우는 못 연다.
         아이폰 사진이 기본 HEIC 라 그냥 실패하면 사용자가 이유를 모른다."""
-        message = win_ai.check_photo(Path("cat.heic"))
-        self.assertIsNotNone(message)
-        self.assertIn("PNG", message)
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                message = win_ai.check_photo(self._path("cat.heic"), language)
+            self.assertEqual(message, i18n.tr(language, "theme_error_heic"))
+            self.assertNotIn("macOS", message)
+            self.assertNotIn("맥", message)
 
-    def test_png_jpeg_webp_pass(self):
-        for name in ("cat.png", "cat.jpg", "cat.jpeg", "cat.webp"):
+    def test_png_jpeg_webp_pass_when_the_content_matches(self):
+        cases = [
+            ("cat.png", "PNG"),
+            ("cat.jpg", "JPEG"),
+            ("cat.jpeg", "JPEG"),
+            ("cat.webp", "WEBP"),
+        ]
+        for name, fmt in cases:
             with self.subTest(name=name):
-                self.assertIsNone(win_ai.check_photo(Path(name)))
+                path = self._save_image(name, fmt)
+                self.assertIsNone(win_ai.check_photo(path))
+
+    def test_gif_extension_is_still_refused_as_unsupported_format(self):
+        message = win_ai.check_photo(self._path("cat.gif"))
+        self.assertEqual(message, i18n.tr("ko", "theme_error_format"))
+
+    def test_a_14_byte_text_file_named_jpg_is_unreadable_not_heic(self):
+        """깨진 파일을 전부 HEIC 로 몰면 안 된다 — 실기에서 겪은 오분류다."""
+        path = self._path("cat.jpg")
+        path.write_bytes(b"not an image!!")  # 14 바이트
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                message = win_ai.check_photo(path, language)
+            self.assertEqual(message, i18n.tr(language, "theme_error_unreadable"))
+            self.assertNotIn("macOS", message)
+            self.assertNotIn("맥", message)
+
+    def test_heic_content_named_jpg_is_still_detected_as_heic(self):
+        path = self._path("cat.jpg")
+        path.write_bytes(
+            b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + b"\x00" * 8
+        )
+        self.assertEqual(
+            win_ai.check_photo(path), i18n.tr("ko", "theme_error_heic"))
+
+    def test_missing_file_is_unreadable(self):
+        message = win_ai.check_photo(self._path("missing.png"))
+        self.assertEqual(message, i18n.tr("ko", "theme_error_unreadable"))
 
 
 class ThemeTargetTests(unittest.TestCase):
@@ -252,25 +305,40 @@ class CreateThemeTests(unittest.TestCase):
         self._log_patch.start()
         self.addCleanup(self._log_patch.stop)
 
+        self._photo_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._photo_tmp.cleanup)
+        self.photo = _make_fake_photo(self._photo_tmp.name)
+
     def test_heic_is_blocked_before_calling_build_theme(self):
         with patch.object(win_ai.vision_theme, "build_theme") as build:
             with self.assertRaises(win_ai.ThemeError):
                 win_ai.create_theme(Path("cat.heic"), "mypet")
         build.assert_not_called()
 
+    def test_unreadable_content_is_blocked_before_calling_build_theme(self):
+        """14바이트 텍스트를 .jpg 로 골라도 업로드(build_theme 호출) 전에 막힌다."""
+        text_path = Path(self._photo_tmp.name) / "not_a_photo.jpg"
+        text_path.write_bytes(b"not an image!!")
+        with patch.object(win_ai.vision_theme, "build_theme") as build:
+            with self.assertRaises(win_ai.ThemeError) as ctx:
+                win_ai.create_theme(text_path, "mypet")
+        build.assert_not_called()
+        self.assertEqual(
+            str(ctx.exception), i18n.tr("ko", "theme_error_unreadable"))
+
     def test_build_theme_errors_are_wrapped_with_the_cause_preserved(self):
         original = RuntimeError("네트워크 오류")
         with patch.object(win_ai.vision_theme, "build_theme", side_effect=original):
             with self.assertRaises(win_ai.ThemeError) as ctx:
-                win_ai.create_theme(Path("cat.png"), "mypet")
+                win_ai.create_theme(self.photo, "mypet")
         self.assertIs(ctx.exception.__cause__, original)
 
     def test_success_calls_build_theme_and_returns_the_name(self):
         with patch.object(
             win_ai.vision_theme, "build_theme", return_value={"detected_stages": 6}
         ) as build:
-            result = win_ai.create_theme(Path("cat.png"), "mypet")
-        build.assert_called_once_with(Path("cat.png"), "mypet", quality="medium")
+            result = win_ai.create_theme(self.photo, "mypet")
+        build.assert_called_once_with(self.photo, "mypet", quality="medium")
         self.assertEqual(result, "mypet")
 
 
@@ -500,6 +568,43 @@ class LogAiFailureTests(unittest.TestCase):
                 raise RuntimeError("boom")
             except RuntimeError as error:
                 win_ai.log_ai_failure("theme", error)          # 예외가 새면 실패
+
+
+class ConsentButtonLabelsTests(unittest.TestCase):
+    """I-3: 동의창 버튼은 맥 동의창과 같은 공용 키(pet_theme_continue·cancel)를 쓴다."""
+
+    def test_labels_match_the_shared_mac_keys(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                continue_label, cancel_label = win_ai.consent_button_labels(
+                    language)
+            self.assertEqual(
+                continue_label, i18n.tr(language, "pet_theme_continue"))
+            self.assertEqual(cancel_label, i18n.tr(language, "cancel"))
+
+
+class ConsentDialogSourceTests(unittest.TestCase):
+    """win_ai_ui 는 Qt 라 맥에서 실행/임포트가 안 된다 — 소스 텍스트로만 배선을 본다."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = Path(_WINDOWS_DIR) / "win_ai_ui.py"
+        cls.source = path.read_text(encoding="utf-8")
+
+    def test_default_and_escape_buttons_are_set_on_the_consent_dialog(self):
+        self.assertIn("setDefaultButton(", self.source)
+        self.assertIn("setEscapeButton(", self.source)
+
+    def test_the_yes_no_question_dialog_is_gone(self):
+        self.assertNotIn("QMessageBox.question(", self.source)
+        self.assertNotIn("StandardButton.Yes", self.source)
+
+    def test_consent_labels_come_from_win_ai(self):
+        self.assertIn("win_ai.consent_button_labels(", self.source)
+
+    def test_the_diagnosis_worker_never_emits_the_raw_error_string(self):
+        """R26: 화면엔 번역 문구만 — 워커가 str(error) 를 그대로 emit 하면 안 된다."""
+        self.assertNotIn("self.failed.emit(str(error))", self.source)
 
 
 if __name__ == "__main__":

@@ -46,9 +46,11 @@ class _DiagnosisWorker(QtCore.QThread):
             lines = win_ai.diagnosis_lines(self._language)
         except Exception as error:
             # 원문은 로그로만 보낸다 — 로그 함수 자체는 예외를 내지 않으므로
-            # 워커 스레드에서 새 예외가 생길 걱정은 없다.
+            # 워커 스레드에서 새 예외가 생길 걱정은 없다. 시그널에도 원문
+            # 대신 번역된 안내만 실어 보낸다(R26) — 받는 쪽이 실수로 원문을
+            # 그대로 띄우는 일이 없도록 애초에 안전한 문자열만 내보낸다.
             win_ai.log_ai_failure("diagnosis", error)
-            self.failed.emit(str(error))
+            self.failed.emit(tr(self._language, "diagnosis_error"))
             return
         self.finished_ok.emit(lines)
 
@@ -134,11 +136,22 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
         QtWidgets.QMessageBox.warning(parent, tr(language, "menu_pet_theme"), problem)
         return None
 
-    answer = QtWidgets.QMessageBox.question(
-        parent,
-        tr(language, "pet_theme_consent_title"),
-        tr(language, "pet_theme_consent_body"))
-    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+    # QMessageBox.question 의 기본 Yes/No 는 버튼이 영어이고 기본 버튼이
+    # Yes 라 엔터 한 번에 사진이 전송된다. 직접 만들어 한국어 버튼을 달고
+    # 기본·Esc 버튼을 모두 "취소"로 둔다.
+    box = QtWidgets.QMessageBox(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+    box.setWindowTitle(tr(language, "pet_theme_consent_title"))
+    box.setText(tr(language, "pet_theme_consent_body"))
+    continue_label, cancel_label = win_ai.consent_button_labels(language)
+    continue_button = box.addButton(
+        continue_label, QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+    cancel_button = box.addButton(
+        cancel_label, QtWidgets.QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel_button)
+    box.setEscapeButton(cancel_button)
+    box.exec()
+    if box.clickedButton() is not continue_button:
         return None
 
     # 기본 테마·이미 만든 테마와 겹치지 않는 이름(mypet, mypet2, ...).

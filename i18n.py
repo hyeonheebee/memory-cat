@@ -131,6 +131,8 @@ _STRINGS = {
         ),
         "theme_working": "테마를 만드는 중이에요… 1~2분 걸립니다.",
         "theme_error_format": "PNG, JPEG, WebP 파일만 됩니다.",
+        "theme_error_heic": "HEIC 사진은 쓸 수 없어요. JPEG 로 바꿔서 다시 골라 주세요.",
+        "theme_error_unreadable": "이 사진을 읽을 수 없어요. PNG, JPEG, WebP 사진인지 확인해 주세요.",
         "theme_error_invalid_key": (
             "API 키가 올바르지 않아요. 키가 틀렸거나 만료됐거나 결제에 문제가 "
             "있을 수 있어요.\n"
@@ -276,6 +278,8 @@ _STRINGS = {
         ),
         "theme_working": "Building your theme… this takes a minute or two.",
         "theme_error_format": "Only PNG, JPEG, and WebP files work.",
+        "theme_error_heic": "HEIC photos can't be used here. Save the photo as JPEG and try again.",
+        "theme_error_unreadable": "Could not read this photo. Make sure it's a PNG, JPEG, or WebP file.",
         "theme_error_invalid_key": (
             "The API key isn't valid. It may be wrong, expired, or have a "
             "billing problem.\n"
