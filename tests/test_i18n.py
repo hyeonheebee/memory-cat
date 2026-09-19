@@ -121,7 +121,14 @@ class WindowsFeatureStringsTests(unittest.TestCase):
         ko = i18n.tr("ko", "windows_delete_warning")
         en = i18n.tr("en", "windows_delete_warning")
         self.assertIn("되돌릴 수 없", ko)
-        self.assertIn("cannot be undone", en.lower())
+        self.assertIn("can't be recovered", en.lower())
+
+    def test_the_delete_warning_does_not_point_at_a_nonexistent_list(self):
+        """윈도우판엔 정리 목록이 없다 — "위 항목"·"above" 로 가리키면 안 된다."""
+        ko = i18n.tr("ko", "windows_delete_warning")
+        en = i18n.tr("en", "windows_delete_warning")
+        self.assertNotIn("위 항목", ko)
+        self.assertNotIn("above", en.lower())
 
 
 class I18nTests(unittest.TestCase):

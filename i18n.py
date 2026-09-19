@@ -126,8 +126,8 @@ _STRINGS = {
         "menu_pet_theme_running": "테마 만드는 중…",
         "diagnosis_title": "🐾 뭘 먹었냐면",
         "windows_delete_warning": (
-            "윈도우판은 파일을 지우지 않습니다. 지운 파일은 되돌릴 수 없으니 "
-            "위 항목은 직접 확인하고 지워 주세요."
+            "윈도우판은 파일을 지우지 않습니다. 직접 정리하실 때는 지운 파일을 "
+            "되돌릴 수 없으니 먼저 꼭 확인해 주세요."
         ),
         "theme_working": "테마를 만드는 중이에요… 1~2분 걸립니다.",
         "theme_error_format": "PNG, JPEG, WebP 파일만 됩니다.",
@@ -273,8 +273,8 @@ _STRINGS = {
         "menu_pet_theme_running": "Making theme…",
         "diagnosis_title": "🐾 Here's what he ate",
         "windows_delete_warning": (
-            "The Windows build does not delete anything. Deleting a file "
-            "cannot be undone, so please check and remove these yourself."
+            "The Windows version doesn't delete files. If you clean up on "
+            "your own, check first — deleted files can't be recovered."
         ),
         "theme_working": "Building your theme… this takes a minute or two.",
         "theme_error_format": "Only PNG, JPEG, and WebP files work.",

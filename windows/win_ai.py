@@ -150,11 +150,39 @@ _FALLBACK_REASON_KEYS = {
 }
 
 
+def _disk_detail_line(language):
+    """정보창(``windows_cat.pyw``)과 같은 문구로 디스크 한 줄을 만든다.
+
+    ``brain.diagnose`` 의 결과엔 디스크 수치가 들어있지 않다 — 정리 후보만
+    보고 디스크 자체는 보지 않는다. 그래서 정보창과 똑같이
+    ``brain.disk_usage()``(``metrics.disk_usage`` 를 그대로 가리킨다)를
+    직접 불러 같은 숫자로 맞춘다. ``human_gb`` 도 ``metrics.human_gb`` 를
+    쓰는데, ``windows_cat.pyw`` 가 따로 정의한 ``human_gb`` 와 계산식이
+    같아(``n / 1024 ** 3`` 를 소수 첫째 자리까지) 결과가 같다.
+
+    값을 못 읽거나(예외) 형식화할 수 없으면(숫자가 아닌 값 등) 이 줄만
+    조용히 빼고 예외를 올리지 않는다 — 디스크 한 줄이 진단 전체를 막을
+    이유가 없다.
+    """
+    try:
+        disk = brain.disk_usage()
+        return tr(
+            language, "disk_detail",
+            percent=disk.percent,
+            used=brain.human_gb(disk.used),
+            total=brain.human_gb(disk.total),
+            free=brain.human_gb(disk.free),
+        )
+    except Exception:
+        return None
+
+
 def diagnosis_lines(language):
     """결과창에 그대로 뿌릴 줄 목록. 마지막 줄은 **항상** 삭제 경고다.
 
     ``source`` 가 ``"fallback"`` 이면(API 키 없음·네트워크 오류 등) 첫 줄에
     안내를 넣는다. 안 넣으면 규칙 기반 결과가 AI 진단인 것처럼 보인다.
+    디스크 한 줄은 그 안내가 있으면 바로 뒤, 없으면 맨 앞에 항상 넣는다.
     """
     result = brain.diagnose(language=language, include_cleanup=False)
     lines = []
@@ -164,6 +192,9 @@ def diagnosis_lines(language):
         lines.append(tr(
             language, "windows_diagnosis_source_fallback",
             reason=tr(language, reason_key)))
+    disk_line = _disk_detail_line(language)
+    if disk_line is not None:
+        lines.append(disk_line)
     lines.extend(result.get("why_slow", []))
     advice = result.get("one_line_advice")
     if advice:

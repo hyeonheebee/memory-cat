@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 _WINDOWS_DIR = str(Path(__file__).resolve().parent.parent / "windows")
@@ -135,8 +136,11 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
         )
 
     def test_openai_source_has_no_fallback_notice(self):
+        # 디스크 줄은 이 검사의 관심사가 아니라 비활성화(읽기 실패)해 둔다 —
+        # 그래야 lines[0] 이 여전히 why_slow 그대로다.
         with patch.object(win_ai.brain, "diagnose",
-                          return_value=self.FAKE_OPENAI):
+                          return_value=self.FAKE_OPENAI), \
+             patch.object(win_ai.brain, "disk_usage", side_effect=OSError):
             lines = win_ai.diagnosis_lines("ko")
         self.assertEqual(lines[0], self.FAKE_OPENAI["why_slow"][0])
 
@@ -145,6 +149,97 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
                           return_value=self._fallback("api_error")):
             lines = win_ai.diagnosis_lines("ko")
         self.assertEqual(lines[-1], i18n.tr("ko", "windows_delete_warning"))
+
+
+class DiskDetailLineTests(unittest.TestCase):
+    """C-2: 진단 결과에 정보창과 같은 디스크 한 줄을 항상 넣는다.
+
+    ``brain.diagnose`` 결과엔 디스크 수치가 없다(정리 후보만 본다) — 정보창
+    (``windows_cat.pyw``)과 똑같이 ``brain.disk_usage()`` 를 직접 불러 같은
+    문구를 만든다. ``brain.disk_usage`` 는 ``metrics.disk_usage`` 를 그대로
+    가리킨다(``brain.py`` 의 ``from metrics import disk_usage, ...``).
+    """
+
+    #: total=500GB, used=370GB, free=130GB, percent=74% — 바이트가 1024**3 의
+    #: 정수배라 human_gb() 결과가 "370.0 GB" 처럼 딱 떨어진다.
+    FAKE_DISK = SimpleNamespace(
+        percent=74.0,
+        total=500 * 1024 ** 3,
+        used=370 * 1024 ** 3,
+        free=130 * 1024 ** 3,
+    )
+
+    FAKE_NO_FALLBACK = {
+        "why_slow": ["램이 거의 찼습니다."],
+        "one_line_advice": "탭을 좀 닫아 보세요.",
+        "cleanup_recommendations": [],
+        "estimated_reclaimable_bytes": 0,
+        "source": "openai",
+    }
+
+    FAKE_FALLBACK = {
+        "why_slow": ["램이 거의 찼습니다."],
+        "one_line_advice": "탭을 좀 닫아 보세요.",
+        "cleanup_recommendations": [],
+        "estimated_reclaimable_bytes": 0,
+        "source": "fallback",
+        "fallback_reason": "api_error",
+    }
+
+    def _expected_line(self, language):
+        return i18n.tr(
+            language, "disk_detail",
+            percent=74.0, used="370.0 GB", total="500.0 GB", free="130.0 GB")
+
+    def test_disk_line_uses_the_same_wording_as_the_info_window(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language), \
+                 patch.object(win_ai.brain, "diagnose",
+                              return_value=self.FAKE_NO_FALLBACK), \
+                 patch.object(win_ai.brain, "disk_usage",
+                              return_value=self.FAKE_DISK):
+                lines = win_ai.diagnosis_lines(language)
+            self.assertEqual(lines[0], self._expected_line(language))
+
+    def test_disk_line_is_first_when_there_is_no_offline_notice(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self.FAKE_NO_FALLBACK), \
+             patch.object(win_ai.brain, "disk_usage",
+                          return_value=self.FAKE_DISK):
+            lines = win_ai.diagnosis_lines("ko")
+        self.assertEqual(lines[0], self._expected_line("ko"))
+        self.assertEqual(lines[1], self.FAKE_NO_FALLBACK["why_slow"][0])
+        self.assertEqual(lines[-1], i18n.tr("ko", "windows_delete_warning"))
+
+    def test_disk_line_comes_right_after_the_offline_notice(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self.FAKE_FALLBACK), \
+             patch.object(win_ai.brain, "disk_usage",
+                          return_value=self.FAKE_DISK):
+            lines = win_ai.diagnosis_lines("ko")
+        reason = i18n.tr("ko", "fallback_api_error")
+        notice = i18n.tr("ko", "windows_diagnosis_source_fallback", reason=reason)
+        self.assertEqual(lines[0], notice)
+        self.assertEqual(lines[1], self._expected_line("ko"))
+        self.assertEqual(lines[2], self.FAKE_FALLBACK["why_slow"][0])
+        self.assertEqual(lines[-1], i18n.tr("ko", "windows_delete_warning"))
+
+    def test_missing_disk_data_skips_the_line_without_raising(self):
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self.FAKE_NO_FALLBACK), \
+             patch.object(win_ai.brain, "disk_usage", side_effect=OSError("no disk")):
+            lines = win_ai.diagnosis_lines("ko")
+        self.assertEqual(lines[0], self.FAKE_NO_FALLBACK["why_slow"][0])
+        self.assertNotIn("💾", "\n".join(lines))
+
+    def test_odd_disk_values_skip_the_line_without_raising(self):
+        """숫자가 아닌 값(속성은 있는데 형식화가 안 되는 경우)도 조용히 뺀다."""
+        odd_disk = SimpleNamespace(percent="모름", total=0, used=0, free=0)
+        with patch.object(win_ai.brain, "diagnose",
+                          return_value=self.FAKE_NO_FALLBACK), \
+             patch.object(win_ai.brain, "disk_usage", return_value=odd_disk):
+            lines = win_ai.diagnosis_lines("ko")
+        self.assertEqual(lines[0], self.FAKE_NO_FALLBACK["why_slow"][0])
 
 
 class HasApiKeyTests(unittest.TestCase):
