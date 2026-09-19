@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _REPO = Path(__file__).resolve().parent.parent
 _WINDOWS_DIR = str(_REPO / "windows")
@@ -17,6 +18,35 @@ if _WINDOWS_DIR not in sys.path:
     sys.path.insert(0, _WINDOWS_DIR)
 
 import win_app  # noqa: E402
+
+
+class _FailingWriteHandle:
+    """진짜로 연 파일(exclusive "xb")을 감싸되, write 만 실패하게 흉내낸다.
+
+    디스크 꽉 참·OneDrive 동기화 충돌처럼 "만들기(open)는 되는데 쓰기는
+    실패" 하는 상황을 재현한다 — 진짜 디스크를 채우지 않고, 진짜 파일
+    시스템 위에서 실제로 빈 파일이 먼저 생기는 순서까지 그대로 흉내낸다.
+    """
+
+    def __init__(self, real_handle):
+        self._real = real_handle
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._real.close()
+        return False
+
+    def write(self, data):
+        raise OSError("simulated write failure (test)")
+
+
+def _open_with_failing_write(path, mode):
+    """``win_app.open`` 자리에 패치해서 쓰는 함수. target 은 진짜로 만들고
+    (exclusive 생성 시맨틱은 그대로 검사됨), write 호출만 실패시킨다."""
+    real_handle = open(path, mode)
+    return _FailingWriteHandle(real_handle)
 
 
 class MigrateLegacyConfigTests(unittest.TestCase):
@@ -53,6 +83,49 @@ class MigrateLegacyConfigTests(unittest.TestCase):
             self.assertFalse(result)
             self.assertEqual(target.read_text(encoding="utf-8"),
                               '{"theme": "cute"}')
+
+    def test_write_failure_after_create_removes_the_partial_target(self):
+        """쓰기 실패(디스크 꽉 참 등)로 만든 빈/부분 target 을 남기면 다음
+        실행이 "target 이 이미 있다"고 착각해 영영 재시도하지 않는다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            with patch("win_app.open", _open_with_failing_write, create=True):
+                result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertFalse(result)
+            self.assertFalse(
+                target.exists(),
+                "쓰기 실패 뒤에도 빈/부분 target 파일이 남아 있습니다 — "
+                "다음 실행이 재시도를 못 합니다.",
+            )
+            # legacy 는 절대 안 건드린다.
+            self.assertTrue(legacy.is_file())
+            self.assertEqual(legacy.read_text(encoding="utf-8"),
+                              '{"theme": "derpy"}')
+
+    def test_a_second_call_after_a_failed_write_self_heals(self):
+        """실패로 지워진 뒤 다음 호출은 정상적으로 복사를 마친다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            with patch("win_app.open", _open_with_failing_write, create=True):
+                first = win_app.migrate_legacy_config(legacy, target)
+            self.assertFalse(first)
+            self.assertFalse(target.exists())
+
+            second = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertTrue(second)
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                              '{"theme": "derpy"}')
 
     def test_returns_false_when_legacy_file_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

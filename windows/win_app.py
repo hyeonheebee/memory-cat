@@ -26,19 +26,38 @@ def migrate_legacy_config(legacy_path, target_path):
     - 실패는 전부 OSError 로 삼킨다. 옛 설정을 못 옮겨도 고양이는 떠야
       한다.
     """
-    legacy_path = Path(legacy_path)
-    target_path = Path(target_path)
+    legacy = Path(legacy_path)
+    target = Path(target_path)
 
-    if target_path.exists():
+    if target.exists():
         return False
-    if not legacy_path.is_file():
+    if not legacy.is_file():
         return False
 
     try:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        data = legacy_path.read_bytes()
-        with open(target_path, "xb") as handle:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = legacy.read_bytes()
+        handle = open(target, "xb")
+    except OSError:
+        # 이 시점까지는 target 을 만들지 못했다(부모 폴더 실패, legacy 읽기
+        # 실패, 또는 다른 인스턴스가 그새 먼저 만들어서 "xb" 가 걸린 경우) —
+        # 지울 파일이 없다.
+        return False
+
+    # open("xb") 가 성공했다는 것은 이 호출이 target 을 방금 만들었다는
+    # 뜻이다. 여기부터 쓰기가 실패하면(디스크 꽉 참, OneDrive 동기화 충돌
+    # 등) 빈/부분 파일을 그대로 남기면 다음 실행도 "target 이 이미 있다"고
+    # 보고 영영 재시도를 안 한다 — 우리가 만든 파일만 지워서 다음 실행이
+    # 다시 시도하게 한다. 원래 있던 target 이나 legacy 는 절대 안 건드린다.
+    # config.json 은 작아서 쓰기가 한 번(단일 write 호출)으로 끝난다 — 그
+    # 한 번의 write 도중 강제 종료되는 극단적인 경우까지는 못 막는다.
+    try:
+        with handle:
             handle.write(data)
     except OSError:
+        try:
+            target.unlink()
+        except OSError:
+            pass
         return False
     return True
