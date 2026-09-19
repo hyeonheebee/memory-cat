@@ -4,7 +4,7 @@
 바탕화면에 떠 있는 작은 고양이. C: 디스크(하드 용량)가 차오를수록
 애기냥 -> 돼지냥으로 변하며 살짝 통통 튄다. 라벨에 디스크/램 표시.
 - 드래그로 이동 / 우클릭: 상세 + 테마 + 크기 + 새로고침/종료
-- 설정은 config.json 에 저장돼 유지
+- 설정은 %APPDATA%\\Memory Cat\\config.json 에 저장돼 유지
 
 실행:  pythonw windows_cat.pyw   (또는 더블클릭)
 필요:  pip install pyside6 psutil
@@ -40,6 +40,11 @@ from metrics import ram_used_for_display
 # 사는 곳(%APPDATA%\Memory Cat\frames)을 여기서 받는다 — exe 옆이나 번들
 # frames 에는 쓸 수 없어서 새 테마는 늘 그쪽에 생긴다.
 import apppaths
+# win_app 은 windows/ 안에 있는 Qt 없는 모듈이다(stdlib + apppaths 만). 설정
+# 파일을 옛 위치(exe 옆)에서 새 위치(apppaths.config_file())로 옮기는 판단이
+# 여기 있다. 무거운 의존성이 없어서 win_ai_ui 처럼 try/except 로 감싸지
+# 않는다 — 이게 없으면 설정을 옮길 방법이 아예 없다.
+import win_app
 
 # 진단·테마 만들기는 선택 기능이다. openai·Pillow 같은 의존성이 없는 소스 실행
 # 환경(예: 업데이트 후 pip 를 다시 안 돌린 경우)에서도 고양이는 떠야 한다.
@@ -60,7 +65,10 @@ except ImportError:
         # 로그 기록은 부가 정보일 뿐이다 — 못 써도 고양이는 떠야 한다.
         pass
 
-# 빌드(.exe)면 frames 는 번들 안, config 는 exe 옆에 둔다
+# 빌드(.exe)면 frames 는 번들 안에 둔다(읽기 전용). config 는 apppaths 가
+# 정하는 사용자 데이터 폴더(%APPDATA%\Memory Cat)에 둔다 — exe 옆에 두면
+# Program Files 처럼 쓰기 권한이 없는 곳에 깔렸을 때 저장이 통째로 실패하고,
+# exe 를 다른 드라이브로 옮기면 테마 선택이 풀렸다(실기 확인됨).
 if getattr(sys, "frozen", False):
     BASE = sys._MEIPASS
     APPDIR = os.path.dirname(sys.executable)
@@ -68,7 +76,9 @@ else:
     BASE = APPDIR = os.path.dirname(os.path.abspath(__file__))
 
 FRAMES_DIR = os.path.join(BASE, "frames")
-CONFIG = os.path.join(APPDIR, "config.json")
+CONFIG = str(apppaths.config_file())
+# 옛 버전이 exe 옆에 저장하던 자리. main() 이 한 번 새 자리로 옮겨 준다.
+LEGACY_CONFIG = os.path.join(APPDIR, "config.json")
 
 REFRESH_MS = 4000
 CATBOTTOM = 46
@@ -112,6 +122,9 @@ def load_config():
 
 def save_config(cfg):
     try:
+        # CONFIG 는 이제 %APPDATA%\Memory Cat 아래다. 처음 실행이면 그 폴더
+        # 자체가 없을 수 있다(apppaths.user_data_dir() 은 만들지 않는다).
+        os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
         with open(CONFIG, "w", encoding="utf-8") as handle:
             json.dump(cfg, handle, ensure_ascii=False)
     except Exception:
@@ -457,6 +470,11 @@ class Cat(QtWidgets.QWidget):
 
 
 def main():
+    # 모듈 import 시점이 아니라 여기서 부른다 — 그래야 import 만으로는 아무
+    # 파일도 안 써서 테스트(WindowsSourceRunTests 등)가 실제 사용자 폴더를
+    # 건드리지 않는다. Cat() 이 load_config() 로 CONFIG 를 읽기 전에 옛
+    # 설정이 있으면 옮겨 둬야 첫 실행에 반영된다.
+    win_app.migrate_legacy_config(LEGACY_CONFIG, CONFIG)
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
     cat = Cat()

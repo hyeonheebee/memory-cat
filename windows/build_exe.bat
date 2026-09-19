@@ -69,6 +69,9 @@ REM --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기 시작하
 REM 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
 REM win_ai.py / win_ai_ui.py 는 windows 폴더에 있지만 windows_cat.pyw 가
 REM try/except 로 가져온다. 못 담으면 exe 에서 AI 메뉴만 소리 없이 사라진다.
+REM win_app.py 도 windows 폴더에 있지만, win_ai 와 달리 windows_cat.pyw 가
+REM 바로 import 한다(필수 설정 이전 기능). 못 담으면 exe 가 켜지자마자
+REM 조용히 죽는다.
 pyinstaller --noconsole --onefile --name MemoryCat ^
     --add-data "frames;frames" ^
     --paths ".." ^
@@ -81,6 +84,7 @@ pyinstaller --noconsole --onefile --name MemoryCat ^
     --hidden-import import_theme ^
     --hidden-import win_ai ^
     --hidden-import win_ai_ui ^
+    --hidden-import win_app ^
     windows_cat.pyw
 if errorlevel 1 (
     echo.

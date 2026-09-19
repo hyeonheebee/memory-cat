@@ -677,7 +677,7 @@ class InstallScriptTests(unittest.TestCase):
 MODULES_THE_WINDOWS_EXE_MUST_BUNDLE = (
     "i18n", "metrics", "apppaths", "brain", "personality",
     "vision_theme", "import_theme",
-    "win_ai", "win_ai_ui",
+    "win_ai", "win_ai_ui", "win_app",
 )
 
 
