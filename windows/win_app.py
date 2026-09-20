@@ -8,6 +8,7 @@ import 하는 필수 모듈이라서, 여기서 무거운 의존성을 끌어오
 고양이를 못 띄우는 이유가 된다.
 """
 
+import datetime
 from pathlib import Path
 
 # apppaths 는 저장소 루트의 가벼운 모듈이다(os·sys·pathlib 만) — Qt 도 없고
@@ -18,6 +19,10 @@ import apppaths
 #: 맥의 desktop_cat.INSTANCE_LOCK_NAME 과 같은 이름 — 잠금은 플랫폼마다
 #: 따로지만(맥은 fcntl.flock, 윈도우는 QLockFile) 파일 이름은 맞춰 둔다.
 INSTANCE_LOCK_NAME = "memory-cat.lock"
+
+#: 이미 떠 있는 인스턴스를 만나 조용히 접을 때 남기는 로그 파일 이름.
+#: win_ai 의 ai-errors.log 와 같은 폴더(apppaths.log_dir())에 둔다.
+INSTANCE_ALREADY_RUNNING_LOG_NAME = "instance-lock.log"
 
 
 def instance_lock_path():
@@ -66,6 +71,29 @@ def claim_single_instance(lock, lock_failed_error):
         return lock.error() != lock_failed_error
     except Exception:
         return True
+
+
+def log_instance_already_running():
+    """이미 다른 뚱냥이가 떠 있어 이번 실행을 접을 때 흔적 한 줄을 남긴다.
+
+    ``main()`` 은 이 경우 창 하나 없이 조용히 끝난다(사용자 관점에선 아무
+    일도 안 일어난 것처럼 보인다) — 로그가 없으면 exe 를 실수로 두 번
+    띄운 것인지, 다른 이유로 죽은 것인지 현장에서 구분할 방법이 없다.
+
+    ``win_ai.log_ai_failure`` 와 같은 원칙: 로그 쓰기 자체가 실패해도(폴더를
+    못 만들거나 파일을 못 열어도) 예외를 새로 내지 않는다 — 이 로그가 없어도
+    (판정을 못 믿는 상황에서) 앱 흐름은 그대로 이어져야 한다. 정상 실행
+    경로(잠금을 얻어서 계속 뜨는 경우)에서는 아예 불리지 않으니 매번 뜰 때
+    로그가 쌓이는 일도 없다.
+    """
+    try:
+        log_path = apppaths.log_dir() / INSTANCE_ALREADY_RUNNING_LOG_NAME
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"[{timestamp}] 이미 다른 인스턴스가 떠 있어 실행을 접었습니다.\n")
+    except OSError:
+        pass
 
 
 def migrate_legacy_config(legacy_path, target_path):

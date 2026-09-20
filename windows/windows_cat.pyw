@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """메모리 뚱냥이 — 윈도우 버전 (PySide6).
 
-바탕화면에 떠 있는 작은 고양이. C: 디스크(하드 용량)가 차오를수록
+바탕화면에 떠 있는 작은 고양이. 시스템 드라이브(하드 용량)가 차오를수록
 애기냥 -> 돼지냥으로 변하며 살짝 통통 튄다. 라벨에 디스크/램 표시.
 - 드래그로 이동 / 우클릭: 상세 + 테마 + 크기 + 새로고침/종료
 - 설정은 %APPDATA%\\Memory Cat\\config.json 에 저장돼 유지
@@ -35,9 +35,13 @@ from i18n import (
 )
 # metrics 는 저장소 루트의 플랫폼 공통 모듈이다(GUI 의존 없음). i18n 과 같은
 # 방식으로 닿는다 — build_exe.bat 의 `--paths ".."` 와 `--hidden-import`.
-# disk_usage 는 이 파일의 disk_usage() 가 그대로 위임할 것이라 이름이
-# 겹치지 않게 _metrics_disk_usage 로 따로 받는다.
-from metrics import disk_usage as _metrics_disk_usage, ram_used_for_display
+# disk_usage·human_gb 는 이 파일의 같은 이름 함수가 그대로 위임할 것이라
+# 이름이 겹치지 않게 _metrics_* 로 따로 받는다.
+from metrics import (
+    disk_usage as _metrics_disk_usage,
+    human_gb as _metrics_human_gb,
+    ram_used_for_display,
+)
 # apppaths 도 루트의 가벼운 모듈이다(os·sys·pathlib 만). 사용자가 만든 테마가
 # 사는 곳(%APPDATA%\Memory Cat\frames)을 여기서 받는다 — exe 옆이나 번들
 # frames 에는 쓸 수 없어서 새 테마는 늘 그쪽에 생긴다.
@@ -55,9 +59,15 @@ import win_app
 # pydantic_core·jiter·numpy 같은 간접 의존성의 DLL 을 놓치는 경우가
 # 있어서, 실패하면 흔적이라도 남긴다 — 안 그러면 메뉴가 기록 없이
 # 조용히 사라져서 사용자도 우리도 이유를 알 방법이 없다.
+# win_ai 도 같이 묶어서 import 한다 — 메뉴 핸들러(_start_diagnosis·
+# _start_theme)가 실패를 win_ai.log_ai_failure 로 남기려면 이 모듈이
+# 필요한데, win_ai_ui 와 의존성(PIL·openai 경유)이 겹쳐서 한쪽만 실패하는
+# 경우는 사실상 없다 — 따로 try/except 를 두 겹 만들지 않고 하나로 묶는다.
 try:
+    import win_ai
     import win_ai_ui
 except ImportError:
+    win_ai = None
     win_ai_ui = None
     try:
         log_path = apppaths.log_dir() / "ai-features-unavailable.log"
@@ -200,9 +210,10 @@ def frame_path(theme, idx):
 
 
 def disk_usage():
-    """윈도우는 C: 가 사용자가 보는 하드 용량.
+    """사용자가 보는 하드 용량은 ``metrics.disk_usage()`` 가 정한다
+    (시스템 드라이브 우선, 데모 override 도 거기서 처리).
 
-    ``metrics.disk_usage()`` 로 위임한다 — 정보창·프레임 선택·진단(``win_ai``)
+    여기서는 그 결과로 위임만 한다 — 정보창·프레임 선택·진단(``win_ai``)
     이 모두 같은 값을 봐야 한다. 예전엔 여기서 ``C:\\`` 를 먼저 봐서,
     ``SystemDrive`` 가 C: 가 아닌 PC 나 ``MEMORY_CAT_DEMO_DISK_PERCENT``
     데모 변수를 켰을 때 진단(``win_ai._disk_detail_line``, ``metrics``
@@ -212,7 +223,14 @@ def disk_usage():
 
 
 def human_gb(n):
-    return f"{n / 1024 ** 3:.1f} GB"
+    """``metrics.human_gb`` 로 위임한다 — disk_usage() 와 같은 이유(R27 계열):
+
+    옛 버전은 이 파일에 계산식(``n / 1024 ** 3``)을 따로 갖고 있었다.
+    ``win_ai`` 의 진단은 ``brain.human_gb``(= ``metrics.human_gb``)를 쓰는데,
+    텍스트만 같을 뿐 서로 다른 함수라 한쪽만 고치면 정보창과 진단 줄의
+    단위 표시가 갈라질 수 있었다.
+    """
+    return _metrics_human_gb(n)
 
 
 def top_memory_apps(limit=5):
@@ -437,16 +455,27 @@ class Cat(QtWidgets.QWidget):
         try:
             self._diagnosis_worker = win_ai_ui.show_diagnosis(self, language)
         except Exception as error:
+            # 워커가 시작되기 전에 터진 예외(예: has_api_key() 가 부르는
+            # dotenv 로더)라 _DiagnosisWorker.run() 의 안전망을 안 거친다 —
+            # 여기서도 원문은 로그로만 보내고, 화면엔 번역된 안내만 띄운다.
+            win_ai.log_ai_failure("diagnosis", error)
             QtWidgets.QMessageBox.warning(
-                self, tr(language, "diagnosis_title"), str(error))
+                self, tr(language, "diagnosis_title"),
+                tr(language, "diagnosis_error"))
 
     def _start_theme(self, language):
         try:
             self._theme_worker = win_ai_ui.make_theme(
                 self, language, FRAMES_DIR, self._apply_new_theme)
         except Exception as error:
+            # 위와 같은 이유 — 워커 시작 전에 터진 예외는 _ThemeWorker.run()
+            # 을 안 거친다. 그 run() 과 같은 규칙을 그대로 따른다: ThemeError
+            # 는 이미 번역까지 끝난 메시지라 로그로 다시 남기지 않는다.
+            if not isinstance(error, win_ai.ThemeError):
+                win_ai.log_ai_failure("theme", error)
             QtWidgets.QMessageBox.warning(
-                self, tr(language, "pet_theme_error_title"), str(error))
+                self, tr(language, "pet_theme_error_title"),
+                win_ai.theme_failure_message(error, language))
 
     def _apply_new_theme(self, name):
         # 워커 시그널이 QueuedConnection 으로 GUI 스레드에서 부른다. 새 테마는
@@ -494,6 +523,9 @@ def main():
     _instance_lock = QtCore.QLockFile(win_app.instance_lock_path())
     if not win_app.claim_single_instance(
             _instance_lock, QtCore.QLockFile.LockError.LockFailedError):
+        # 창 하나 없이 그냥 끝나면 현장에서 원인을 알 방법이 없다 — 흔적
+        # 한 줄을 남긴다. 이 호출 자체도 예외를 내지 않는다(docstring 참고).
+        win_app.log_instance_already_running()
         return
 
     app = QtWidgets.QApplication(sys.argv)

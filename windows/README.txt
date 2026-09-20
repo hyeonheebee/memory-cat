@@ -1,16 +1,19 @@
 메모리 뚱냥이 (Windows 버전) 🐱
 =================================
 
-바탕화면에 떠 있는 작은 고양이. C: 드라이브가 꽉 찰수록
+바탕화면에 떠 있는 작은 고양이. 시스템 드라이브(보통 C:)가 꽉 찰수록
 애기냥 -> 돼지냥으로 빵빵해집니다. 우클릭으로 테마/크기 변경.
 
 
 [ 폴더 구성 ]
   windows_cat.pyw   ... 본체
-  frames\           ... 고양이 그림 (테마별 PNG)
-  config.json       ... 설정 (자동 생성)
+  frames\           ... 고양이 그림 (테마별 PNG, 기본 제공분)
   requirements.txt  ... 필요한 패키지
   build_exe.bat     ... (선택) exe 만들기
+
+  설정(config.json)·API 키(.env)·직접 만든 테마는 이 폴더가 아니라
+  %APPDATA%\Memory Cat\ 에 자동 생성됩니다 (exe 를 다른 위치로 옮겨도
+  안 사라집니다).
 
 
 ────────────────────────────────────────
@@ -59,7 +62,8 @@
    (저장소 루트 등 다른 폴더에서  windows\build_exe.bat  으로 실행해도 됩니다.
     스크립트가 자기 폴더로 먼저 이동한 뒤 빌드합니다.)
 3) windows\dist\MemoryCat.exe 가 생김 -> 그거만 있으면 실행됨
-   (config.json 은 exe 옆에 생성됩니다)
+   (config.json 은 %APPDATA%\Memory Cat\config.json 에 생성됩니다 —
+    .env·frames 와 같은 자리입니다)
 
 
 ────────────────────────────────────────

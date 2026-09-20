@@ -258,6 +258,45 @@ class InstanceLockPathTests(unittest.TestCase):
             )
 
 
+class LogInstanceAlreadyRunningTests(unittest.TestCase):
+    """이미 다른 뚱냥이가 떠 있어 이번 실행을 접을 때, 창 하나 없이 그냥
+    끝나면 현장에서 원인을 알 방법이 없다 — exe 를 두 번 눌렀는지, 다른
+    이유로 죽었는지 구분이 안 된다. 흔적 한 줄을 남기되, 이 로그 기록
+    자체가 고양이를 못 띄우는 이유가 되면 안 된다(``win_ai.log_ai_failure``
+    와 같은 원칙)."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._patch = patch.object(
+            win_app.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+    def test_it_writes_a_timestamped_line(self):
+        win_app.log_instance_already_running()
+        entries = list(Path(self._log_tmp.name).iterdir())
+        self.assertEqual(len(entries), 1, "로그 파일이 정확히 하나 생겨야 합니다.")
+        text = entries[0].read_text(encoding="utf-8")
+        self.assertRegex(text, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+    def test_calling_twice_appends_rather_than_overwriting(self):
+        win_app.log_instance_already_running()
+        win_app.log_instance_already_running()
+        entries = list(Path(self._log_tmp.name).iterdir())
+        text = entries[0].read_text(encoding="utf-8")
+        self.assertEqual(
+            len([line for line in text.splitlines() if line.strip()]), 2,
+            "두 번 부르면 두 줄이 남아야 합니다(덮어쓰면 안 됩니다).",
+        )
+
+    def test_it_never_raises_when_the_log_folder_cannot_be_created(self):
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("파일")
+        with patch.object(win_app.apppaths, "log_dir", return_value=blocked / "logs"):
+            win_app.log_instance_already_running()      # 예외가 새면 실패
+
+
 class WindowsCatWiringTests(unittest.TestCase):
     """``windows_cat.pyw`` 는 못 돌리니 소스를 정적으로 검사한다."""
 
@@ -307,6 +346,65 @@ class WindowsCatWiringTests(unittest.TestCase):
             if isinstance(node, ast.FunctionDef) and node.name == name:
                 return node
         return None
+
+    def _class_method(self, class_name, method_name):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == method_name:
+                        return item
+        return None
+
+    def test_menu_slot_handlers_log_and_never_show_the_raw_error(self):
+        """워커가 시작되기도 전에 터진 예외(``win_ai.has_api_key()`` 가 부르는
+        dotenv 로더, ``win_ai.check_photo`` 등)는 ``_DiagnosisWorker``·
+        ``_ThemeWorker`` 의 안전망(``win_ai_ui.py``)을 거치지 않는다 —
+        ``_start_diagnosis``·``_start_theme`` 이 직접 잡는데, 여기서
+        ``str(error)`` 를 그대로 ``QMessageBox`` 에 넘기면 영어 원문 예외가
+        화면에 뜬다. 리터럴 문자열 하나만 보면 포맷이 조금만 바뀌어도
+        놓치므로 AST 로 각 except 블록을 직접 본다: ``str(<예외 이름>)`` 호출이
+        없어야 하고, ``win_ai.log_ai_failure`` 는 반드시 불러야 한다.
+        """
+        for method_name in ("_start_diagnosis", "_start_theme"):
+            with self.subTest(method=method_name):
+                method = self._class_method("Cat", method_name)
+                self.assertIsNotNone(method, f"Cat.{method_name} 을 못 찾았습니다.")
+
+                handlers = [
+                    n for n in ast.walk(method) if isinstance(n, ast.ExceptHandler)
+                ]
+                self.assertTrue(handlers, f"{method_name} 에 except 블록이 없습니다.")
+                error_names = {h.name for h in handlers if h.name}
+                self.assertTrue(
+                    error_names,
+                    f"{method_name} 의 except 가 예외를 이름으로 받지 않습니다.",
+                )
+
+                logs_failure = False
+                for handler in handlers:
+                    for node in ast.walk(handler):
+                        if not isinstance(node, ast.Call):
+                            continue
+                        func = node.func
+                        if isinstance(func, ast.Name):
+                            call_name = func.id
+                        elif isinstance(func, ast.Attribute):
+                            call_name = func.attr
+                        else:
+                            continue
+                        if (call_name == "str" and node.args
+                                and isinstance(node.args[0], ast.Name)
+                                and node.args[0].id in error_names):
+                            self.fail(
+                                f"{method_name} 이 str(error) 를 그대로 다이얼로그에 "
+                                "넘깁니다 — 영어 원문 예외가 화면에 보입니다."
+                            )
+                        if call_name == "log_ai_failure":
+                            logs_failure = True
+                self.assertTrue(
+                    logs_failure,
+                    f"{method_name} 이 win_ai.log_ai_failure 를 부르지 않습니다.",
+                )
 
     def test_disk_usage_imports_from_metrics_at_top_level(self):
         """R27: 정보창·프레임 선택·진단이 같은 값을 봐야 한다.
@@ -365,18 +463,45 @@ class WindowsCatWiringTests(unittest.TestCase):
             "수 있습니다 — metrics.disk_usage() 위임 하나만 남아야 합니다.",
         )
 
+    def test_human_gb_function_delegates_to_metrics(self):
+        """옛 ``human_gb()`` 는 ``metrics.human_gb`` 와 계산식이 텍스트로만
+        겹칠 뿐이었다(C-2 와 같은 종류의 문제 — 한쪽만 고치면 정보창과
+        진단이 다른 숫자를 보여준다). 이제는 위임만 해야 한다.
+        """
+        func = self._top_level_function("human_gb")
+        self.assertIsNotNone(func, "human_gb() 함수를 못 찾았습니다.")
+        dumped = self._non_docstring_body(func)
+        self.assertIn(
+            "_metrics_human_gb", dumped,
+            "human_gb() 가 metrics.human_gb 로 위임하지 않습니다.",
+        )
+        self.assertNotIn(
+            "1024", dumped,
+            "human_gb() 에 자체 계산식이 남아 있습니다 — metrics.human_gb "
+            "위임 하나만 남아야 합니다.",
+        )
+
     def test_migrate_legacy_config_runs_inside_main_before_cat_is_built(self):
+        """``ast.walk`` 는 너비 우선이라 소스 순서와 다를 수 있다(바로 아래
+        ``test_claim_single_instance_runs_before_qapplication_is_built`` 의
+        설명과 같은 이유) — 여기도 소스 위치(``lineno``, ``col_offset``)로
+        정렬해서 실제 실행 순서를 본다."""
         main = self._main_function()
         self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
 
-        call_names = []
+        calls = []
         for node in ast.walk(main):
             if isinstance(node, ast.Call):
                 func = node.func
                 if isinstance(func, ast.Name):
-                    call_names.append(func.id)
+                    name = func.id
                 elif isinstance(func, ast.Attribute):
-                    call_names.append(func.attr)
+                    name = func.attr
+                else:
+                    continue
+                calls.append((node.lineno, node.col_offset, name))
+        calls.sort()
+        call_names = [name for _, _, name in calls]
 
         self.assertIn("migrate_legacy_config", call_names,
                        "main() 안에서 migrate_legacy_config 를 부르지 않습니다.")
@@ -457,6 +582,43 @@ class WindowsCatWiringTests(unittest.TestCase):
             call_names.index("QApplication"),
             "claim_single_instance 는 QApplication 을 만들기 전에 불러야 합니다 — "
             "안 그러면 두 번째 인스턴스도 이벤트 루프까지 만들어 버립니다.",
+        )
+
+    def test_instance_already_running_is_logged_when_the_lock_is_taken(self):
+        """두 번째 인스턴스는 창 하나 없이 조용히 끝난다(``main()`` 의
+        ``return``) — ``win_app.log_instance_already_running()`` 을 그 분기
+        (``if not win_app.claim_single_instance(...):``) 안에서 불러야
+        현장에서 원인을 구분할 수 있다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        target_if = None
+        for node in ast.walk(main):
+            if isinstance(node, ast.If):
+                test = node.test
+                if (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
+                        and isinstance(test.operand, ast.Call)):
+                    func = test.operand.func
+                    name = (func.id if isinstance(func, ast.Name)
+                            else getattr(func, "attr", None))
+                    if name == "claim_single_instance":
+                        target_if = node
+        self.assertIsNotNone(
+            target_if,
+            "claim_single_instance() 결과를 뒤집은 if 문을 못 찾았습니다.",
+        )
+
+        call_names = []
+        for node in ast.walk(target_if):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    call_names.append(func.id)
+                elif isinstance(func, ast.Attribute):
+                    call_names.append(func.attr)
+        self.assertIn(
+            "log_instance_already_running", call_names,
+            "인스턴스가 이미 떠 있을 때 로그를 남기지 않습니다.",
         )
 
     def test_uses_the_exact_qlockfile_lock_failed_error_enum(self):
