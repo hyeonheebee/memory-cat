@@ -302,6 +302,69 @@ class WindowsCatWiringTests(unittest.TestCase):
                 return node
         return None
 
+    def _top_level_function(self, name):
+        for node in self.tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        return None
+
+    def test_disk_usage_imports_from_metrics_at_top_level(self):
+        """R27: 정보창·프레임 선택·진단이 같은 값을 봐야 한다.
+
+        ``windows_cat.pyw`` 는 PySide6 가 없는 맥에서 실행도 import 도 안
+        돼서, ``metrics.disk_usage`` 로 실제로 위임하는지는 직접 호출로
+        확인할 수 없다 — 소스를 정적으로 본다.
+        """
+        imports_disk_usage = any(
+            isinstance(node, ast.ImportFrom) and node.module == "metrics"
+            and any(alias.name == "disk_usage" for alias in node.names)
+            for node in self.tree.body
+        )
+        self.assertTrue(
+            imports_disk_usage,
+            "windows_cat.pyw 최상위에서 `from metrics import disk_usage`"
+            " (별칭 포함) 을 하지 않습니다.",
+        )
+
+    @staticmethod
+    def _non_docstring_body(func):
+        """함수 본문에서 독스트링(설명문)을 뺀 실행문만.
+
+        독스트링은 사람이 읽는 설명이라 "C:" 같은 옛 로직 얘기를 그대로
+        적어 둘 수 있다 — ``ast.dump`` 로 실행문만 검사해야 설명과 실제
+        코드를 헷갈리지 않는다.
+        """
+        body = func.body
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]
+        return ast.dump(ast.Module(body=body, type_ignores=[]))
+
+    def test_disk_usage_function_delegates_to_metrics_and_drops_c_drive_first(self):
+        """옛 ``disk_usage()`` 는 ``C:\\`` 를 먼저 봐서 ``SystemDrive`` 가
+        C: 가 아닌 PC 나 ``MEMORY_CAT_DEMO_DISK_PERCENT`` 데모 변수에서
+        ``win_ai`` 의 진단(``metrics.disk_usage`` 경유)과 어긋났다(R27).
+        이제는 ``metrics.disk_usage()`` 로 위임만 해야 한다 — 자체 fallback
+        체인이나 ``C:\\`` 하드코딩이 남아 있으면 안 된다.
+        """
+        func = self._top_level_function("disk_usage")
+        self.assertIsNotNone(func, "disk_usage() 함수를 못 찾았습니다.")
+        dumped = self._non_docstring_body(func)
+        self.assertIn(
+            "_metrics_disk_usage", dumped,
+            "disk_usage() 가 metrics 쪽 disk_usage 로 위임하지 않습니다.",
+        )
+        self.assertNotIn(
+            "C:", dumped,
+            "disk_usage() 에 C: 드라이브를 먼저 보는 옛 로직이 남아 있습니다.",
+        )
+        self.assertNotIn(
+            "psutil", dumped,
+            "disk_usage() 가 psutil 을 직접 불러 metrics 와 다른 값을 낼 "
+            "수 있습니다 — metrics.disk_usage() 위임 하나만 남아야 합니다.",
+        )
+
     def test_migrate_legacy_config_runs_inside_main_before_cat_is_built(self):
         main = self._main_function()
         self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")

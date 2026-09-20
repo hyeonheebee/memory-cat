@@ -35,7 +35,9 @@ from i18n import (
 )
 # metrics 는 저장소 루트의 플랫폼 공통 모듈이다(GUI 의존 없음). i18n 과 같은
 # 방식으로 닿는다 — build_exe.bat 의 `--paths ".."` 와 `--hidden-import`.
-from metrics import ram_used_for_display
+# disk_usage 는 이 파일의 disk_usage() 가 그대로 위임할 것이라 이름이
+# 겹치지 않게 _metrics_disk_usage 로 따로 받는다.
+from metrics import disk_usage as _metrics_disk_usage, ram_used_for_display
 # apppaths 도 루트의 가벼운 모듈이다(os·sys·pathlib 만). 사용자가 만든 테마가
 # 사는 곳(%APPDATA%\Memory Cat\frames)을 여기서 받는다 — exe 옆이나 번들
 # frames 에는 쓸 수 없어서 새 테마는 늘 그쪽에 생긴다.
@@ -198,14 +200,15 @@ def frame_path(theme, idx):
 
 
 def disk_usage():
-    """윈도우는 C: 가 사용자가 보는 하드 용량."""
-    drive = os.path.splitdrive(APPDIR)[0] + os.sep or "C:\\"
-    for path in ("C:\\", drive):
-        try:
-            return psutil.disk_usage(path)
-        except Exception:
-            continue
-    return psutil.disk_usage(os.getcwd())
+    """윈도우는 C: 가 사용자가 보는 하드 용량.
+
+    ``metrics.disk_usage()`` 로 위임한다 — 정보창·프레임 선택·진단(``win_ai``)
+    이 모두 같은 값을 봐야 한다. 예전엔 여기서 ``C:\\`` 를 먼저 봐서,
+    ``SystemDrive`` 가 C: 가 아닌 PC 나 ``MEMORY_CAT_DEMO_DISK_PERCENT``
+    데모 변수를 켰을 때 진단(``win_ai._disk_detail_line``, ``metrics``
+    쪽을 본다)과 서로 다른 수치를 보여줬다.
+    """
+    return _metrics_disk_usage()
 
 
 def human_gb(n):

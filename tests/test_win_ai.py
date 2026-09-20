@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from collections import namedtuple
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -18,6 +19,7 @@ if _WINDOWS_DIR not in sys.path:
 
 import apppaths
 import i18n
+import metrics
 import win_ai
 
 
@@ -30,13 +32,24 @@ class DiagnosisLinesTests(unittest.TestCase):
         "source": "openai",
     }
 
+    #: R27 리뷰 지적: 이 클래스는 디스크 줄 내용을 검사하지 않는데도
+    #: ``diagnosis_lines`` 가 이제 매번 ``brain.disk_usage()`` 를 실제로
+    #: 부른다. 값 자체는 관심사가 아니니 고정값으로 패치해 결정적으로
+    #: 만든다(진짜 psutil 호출을 없애 테스트를 더 빠르고 안정적으로).
+    FAKE_DISK = SimpleNamespace(
+        percent=50.0, total=200 * 1024 ** 3, used=100 * 1024 ** 3,
+        free=100 * 1024 ** 3,
+    )
+
     def test_it_asks_for_a_diagnosis_without_cleanup(self):
-        with patch.object(win_ai.brain, "diagnose", return_value=self.FAKE) as d:
+        with patch.object(win_ai.brain, "diagnose", return_value=self.FAKE) as d, \
+             patch.object(win_ai.brain, "disk_usage", return_value=self.FAKE_DISK):
             win_ai.diagnosis_lines("ko")
         self.assertEqual(d.call_args.kwargs["include_cleanup"], False)
 
     def test_the_explanation_and_the_advice_are_both_shown(self):
-        with patch.object(win_ai.brain, "diagnose", return_value=self.FAKE):
+        with patch.object(win_ai.brain, "diagnose", return_value=self.FAKE), \
+             patch.object(win_ai.brain, "disk_usage", return_value=self.FAKE_DISK):
             lines = win_ai.diagnosis_lines("ko")
         joined = "\n".join(lines)
         self.assertIn("램이 거의 찼습니다.", joined)
@@ -45,7 +58,8 @@ class DiagnosisLinesTests(unittest.TestCase):
     def test_the_delete_warning_is_always_the_last_line(self):
         for language in ("ko", "en"):
             with self.subTest(language=language), \
-                 patch.object(win_ai.brain, "diagnose", return_value=self.FAKE):
+                 patch.object(win_ai.brain, "diagnose", return_value=self.FAKE), \
+                 patch.object(win_ai.brain, "disk_usage", return_value=self.FAKE_DISK):
                 lines = win_ai.diagnosis_lines(language)
             self.assertEqual(lines[-1], i18n.tr(language, "windows_delete_warning"))
 
@@ -53,7 +67,8 @@ class DiagnosisLinesTests(unittest.TestCase):
         """윈도우판은 지우지 않는다. 정리 코드에 발도 들이면 안 된다."""
         with patch.object(win_ai.brain, "collect_cleanup_candidates") as scan, \
              patch.object(win_ai.brain, "safe_trash") as trash, \
-             patch.object(win_ai.brain, "_load_api_key", return_value=None):
+             patch.object(win_ai.brain, "_load_api_key", return_value=None), \
+             patch.object(win_ai.brain, "disk_usage", return_value=self.FAKE_DISK):
             win_ai.diagnosis_lines("ko")
         scan.assert_not_called()
         trash.assert_not_called()
@@ -240,6 +255,49 @@ class DiskDetailLineTests(unittest.TestCase):
              patch.object(win_ai.brain, "disk_usage", return_value=odd_disk):
             lines = win_ai.diagnosis_lines("ko")
         self.assertEqual(lines[0], self.FAKE_NO_FALLBACK["why_slow"][0])
+
+    def test_win_ai_reads_the_same_disk_function_windows_cat_delegates_to(self):
+        """R27: 진단·정보창·프레임 선택이 서로 다른 값을 보면 안 된다.
+
+        ``windows_cat.pyw`` 는 PySide6 가 없는 맥에서 import 할 수 없어
+        직접 호출로는 비교하지 못한다. 대신 ``win_ai`` 가 부르는
+        ``brain.disk_usage`` 가 ``metrics.disk_usage`` 그 자체(같은 함수
+        객체)임을 확인한다 — ``windows_cat.pyw`` 의 ``disk_usage()`` 도
+        이제 같은 ``metrics.disk_usage`` 로 위임하도록 고쳤다(그건
+        ``tests/test_win_app.py`` 의 소스 스캔이 본다). 이 identity 가
+        성립하는 한 셋(정보창·프레임 선택·진단)은 항상 같은 값을 본다.
+        """
+        self.assertIs(win_ai.brain.disk_usage, metrics.disk_usage)
+
+    def test_demo_disk_percent_override_reaches_the_diagnosis_line(self):
+        """데모 변수(``MEMORY_CAT_DEMO_DISK_PERCENT``)가 진단 줄에도 그대로 반영된다.
+
+        실기에서 실제로 관측된 불일치를 재현해 고정한다: 실측 디스크는
+        38.9% 인데 데모 변수로 90% 를 강제한 상황. 예전엔 진단
+        (``metrics.disk_usage`` 경유)은 90% 를, 정보창(``windows_cat.pyw``
+        의 옛 ``disk_usage()``, 데모 변수를 안 봄)은 38.9% 를 보여줘 서로
+        어긋났다. 지금은 정보창도 같은 ``metrics.disk_usage`` 로 위임하므로
+        여기서 90% 가 나오면(위 identity 검사와 합쳐) 정보창도 같은 90% 를
+        보게 된다.
+        """
+        # metrics.disk_usage() 가 데모 override 를 적용할 때 psutil 결과의
+        # ``_replace`` (namedtuple 메서드) 를 쓴다 — SimpleNamespace 로는
+        # 실제 psutil.disk_usage() 를 흉내낼 수 없다.
+        DiskUsage = namedtuple("DiskUsage", "total used free percent")
+        measured = DiskUsage(
+            total=1000 * 1024 ** 3, used=389 * 1024 ** 3,
+            free=611 * 1024 ** 3, percent=38.9,
+        )
+        with patch.dict(os.environ, {"MEMORY_CAT_DEMO_DISK_PERCENT": "90"},
+                        clear=False), \
+             patch.object(metrics.psutil, "disk_usage", return_value=measured), \
+             patch.object(win_ai.brain, "diagnose",
+                          return_value=self.FAKE_NO_FALLBACK):
+            lines = win_ai.diagnosis_lines("ko")
+        expected = i18n.tr(
+            "ko", "disk_detail", percent=90.0,
+            used="900.0 GB", total="1000.0 GB", free="100.0 GB")
+        self.assertEqual(lines[0], expected)
 
 
 class HasApiKeyTests(unittest.TestCase):
