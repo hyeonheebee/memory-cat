@@ -520,13 +520,22 @@ def main():
     # 조용히 끝낸다 — 맥의 desktop_cat.acquire_instance_lock 과 같은 원칙
     # (win_app.claim_single_instance 의 docstring 참고): 잠금 판정을 못
     # 믿을 상황이면 막지 않는다.
-    _instance_lock = QtCore.QLockFile(win_app.instance_lock_path())
-    if not win_app.claim_single_instance(
-            _instance_lock, QtCore.QLockFile.LockError.LockFailedError):
-        # 창 하나 없이 그냥 끝나면 현장에서 원인을 알 방법이 없다 — 흔적
-        # 한 줄을 남긴다. 이 호출 자체도 예외를 내지 않는다(docstring 참고).
-        win_app.log_instance_already_running()
-        return
+    #
+    # QLockFile 생성과 enum 조회 자체는 win_app.claim_single_instance 의
+    # 보호막(모든 예외를 삼키고 True 를 돌려주는) 밖이다 — PySide6 버전
+    # 차이 등으로 여기서 예외가 나면 .pyw 라 창도 로그도 없이 그냥
+    # 죽어 버린다. 그래서 이 두 줄도 같은 원칙으로 감싼다.
+    try:
+        _instance_lock = QtCore.QLockFile(win_app.instance_lock_path())
+        lock_failed = QtCore.QLockFile.LockError.LockFailedError
+    except Exception:
+        _instance_lock = None  # 판정을 못 하면 막지 않는다
+    else:
+        if not win_app.claim_single_instance(_instance_lock, lock_failed):
+            # 창 하나 없이 그냥 끝나면 현장에서 원인을 알 방법이 없다 — 흔적
+            # 한 줄을 남긴다. 이 호출 자체도 예외를 내지 않는다(docstring 참고).
+            win_app.log_instance_already_running()
+            return
 
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)

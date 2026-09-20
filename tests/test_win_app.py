@@ -680,6 +680,69 @@ class WindowsCatWiringTests(unittest.TestCase):
             "claim_single_instance 가 모듈 최상위(함수 밖)에서 불립니다.",
         )
 
+    def test_qlockfile_construction_and_enum_lookup_are_guarded(self):
+        """PySide6 버전 차이 등으로 ``QLockFile(...)`` 생성이나
+        ``QLockFile.LockError.LockFailedError`` 조회 자체가 예외를 낼 수
+        있다 — 이 둘이 try/except 밖에 있으면 ``.pyw`` 라 창도 로그도 없이
+        조용히 죽는다(``claim_single_instance`` 는 내부에서 모든 예외를
+        삼키지만, 그 호출 *이전의* 이 두 줄은 감싸져 있지 않으면 보호받지
+        못한다). 리터럴 문자열이 아니라 AST 로 "정말 try 블록 안에 있는가"
+        를 본다 — try/except 를 지우면 이 테스트가 반드시 떨어져야 한다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        def _calls_and_attrs(node):
+            names = []
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    func = sub.func
+                    if isinstance(func, ast.Name):
+                        names.append(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        names.append(func.attr)
+                elif isinstance(sub, ast.Attribute):
+                    names.append(sub.attr)
+            return names
+
+        # main() 최상위 문(try 블록 밖)에서 곧바로 일어나면 안 된다.
+        top_level_names = []
+        for stmt in main.body:
+            if isinstance(stmt, ast.Try):
+                continue
+            top_level_names.extend(_calls_and_attrs(stmt))
+        self.assertNotIn(
+            "QLockFile", top_level_names,
+            "QLockFile(...) 생성이 try 블록 밖(main() 최상위)에 있습니다 — "
+            "생성자가 예외를 내면 창도 로그도 없이 죽습니다.",
+        )
+        self.assertNotIn(
+            "LockFailedError", top_level_names,
+            "LockError.LockFailedError 조회가 try 블록 밖(main() 최상위)에 "
+            "있습니다.",
+        )
+
+        # try 블록 '안'에 두 호출이 실제로 있는지, 그 try 가 실제로 뭔가를
+        # 잡는지(except 가 있는지) 확인한다.
+        guarded = False
+        for stmt in main.body:
+            if not isinstance(stmt, ast.Try):
+                continue
+            body_names = []
+            for sub in stmt.body:
+                body_names.extend(_calls_and_attrs(sub))
+            if "QLockFile" in body_names and "LockFailedError" in body_names:
+                guarded = True
+                self.assertTrue(
+                    stmt.handlers,
+                    "QLockFile 생성을 감싼 try 에 except 가 없습니다 — "
+                    "감싸는 의미가 없습니다.",
+                )
+        self.assertTrue(
+            guarded,
+            "QLockFile(...) 생성과 LockError.LockFailedError 조회가 같은 "
+            "try 블록 안에 함께 있지 않습니다.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
