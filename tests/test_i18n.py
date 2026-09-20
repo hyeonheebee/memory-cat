@@ -105,6 +105,8 @@ WINDOWS_AI_KEYS = (
     "menu_diagnose", "menu_pet_theme", "missing_api_key_title", "missing_api_key_help",
     "pet_theme_consent_title", "pet_theme_consent_body", "pet_theme_error_title",
     "windows_diagnosis_source_fallback",
+    "theme_error_heic", "theme_error_unreadable", "theme_error_invalid_key",
+    "theme_error_generic",
 )
 
 

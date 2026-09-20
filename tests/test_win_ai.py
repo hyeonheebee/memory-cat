@@ -4,6 +4,7 @@ PySide6 는 맥 개발 환경에 없어서, 무엇을 보여줄지 정하는 로
 빼 두고 여기서 검사한다. ``win_ai`` 는 파일을 지우지 않는다는 것도 함께
 확인한다.
 """
+import ast
 import os
 import sys
 import tempfile
@@ -61,7 +62,7 @@ class DiagnosisLinesTests(unittest.TestCase):
                  patch.object(win_ai.brain, "diagnose", return_value=self.FAKE), \
                  patch.object(win_ai.brain, "disk_usage", return_value=self.FAKE_DISK):
                 lines = win_ai.diagnosis_lines(language)
-            self.assertEqual(lines[-1], i18n.tr(language, "windows_delete_warning"))
+                self.assertEqual(lines[-1], i18n.tr(language, "windows_delete_warning"))
 
     def test_it_never_reaches_the_file_deleting_code(self):
         """윈도우판은 지우지 않는다. 정리 코드에 발도 들이면 안 된다."""
@@ -106,10 +107,10 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
                               return_value=self._fallback("api_error")):
                 lines = win_ai.diagnosis_lines(language)
 
-            reason = i18n.tr(language, "fallback_api_error")
-            notice = i18n.tr(
-                language, "windows_diagnosis_source_fallback", reason=reason)
-            self.assertEqual(lines[0], notice)
+                reason = i18n.tr(language, "fallback_api_error")
+                notice = i18n.tr(
+                    language, "windows_diagnosis_source_fallback", reason=reason)
+                self.assertEqual(lines[0], notice)
 
     def test_fallback_missing_api_key_maps_to_its_own_reason(self):
         with patch.object(win_ai.brain, "diagnose",
@@ -134,10 +135,10 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
                  patch.object(win_ai.brain, "diagnose",
                               return_value=self._fallback("api_error")):
                 lines = win_ai.diagnosis_lines(language)
-            self.assertNotIn("성격", lines[0])
-            self.assertNotIn("Personality", lines[0])
-            reason = i18n.tr(language, "fallback_api_error")
-            self.assertIn(reason, lines[0])
+                self.assertNotIn("성격", lines[0])
+                self.assertNotIn("Personality", lines[0])
+                reason = i18n.tr(language, "fallback_api_error")
+                self.assertIn(reason, lines[0])
 
     def test_mac_fallback_key_text_is_untouched(self):
         """회귀 방지: 맥판이 쓰는 diagnosis_source_fallback 원문은 한 글자도 안 바뀐다."""
@@ -214,7 +215,7 @@ class DiskDetailLineTests(unittest.TestCase):
                  patch.object(win_ai.brain, "disk_usage",
                               return_value=self.FAKE_DISK):
                 lines = win_ai.diagnosis_lines(language)
-            self.assertEqual(lines[0], self._expected_line(language))
+                self.assertEqual(lines[0], self._expected_line(language))
 
     def test_disk_line_is_first_when_there_is_no_offline_notice(self):
         with patch.object(win_ai.brain, "diagnose",
@@ -356,9 +357,9 @@ class PhotoCheckTests(unittest.TestCase):
         for language in ("ko", "en"):
             with self.subTest(language=language):
                 message = win_ai.check_photo(self._path("cat.heic"), language)
-            self.assertEqual(message, i18n.tr(language, "theme_error_heic"))
-            self.assertNotIn("macOS", message)
-            self.assertNotIn("맥", message)
+                self.assertEqual(message, i18n.tr(language, "theme_error_heic"))
+                self.assertNotIn("macOS", message)
+                self.assertNotIn("맥", message)
 
     def test_png_jpeg_webp_pass_when_the_content_matches(self):
         cases = [
@@ -383,9 +384,9 @@ class PhotoCheckTests(unittest.TestCase):
         for language in ("ko", "en"):
             with self.subTest(language=language):
                 message = win_ai.check_photo(path, language)
-            self.assertEqual(message, i18n.tr(language, "theme_error_unreadable"))
-            self.assertNotIn("macOS", message)
-            self.assertNotIn("맥", message)
+                self.assertEqual(message, i18n.tr(language, "theme_error_unreadable"))
+                self.assertNotIn("macOS", message)
+                self.assertNotIn("맥", message)
 
     def test_heic_content_named_jpg_is_still_detected_as_heic(self):
         path = self._path("cat.jpg")
@@ -554,8 +555,9 @@ class ThemeErrorSecretRedactionTests(unittest.TestCase):
                               side_effect=_raise_401_from_vision_theme):
                 with self.assertRaises(win_ai.ThemeError) as ctx:
                     win_ai.create_theme(self.photo, "mypet", language)
-            expected = i18n.tr(language, "theme_error_invalid_key", path=str(env_path))
-            self.assertEqual(str(ctx.exception), expected)
+                expected = i18n.tr(
+                    language, "theme_error_invalid_key", path=str(env_path))
+                self.assertEqual(str(ctx.exception), expected)
 
     def test_401_message_has_none_of_the_raw_fragments(self):
         with patch.object(win_ai.vision_theme, "build_theme",
@@ -583,11 +585,11 @@ class ThemeErrorSecretRedactionTests(unittest.TestCase):
                  patch.object(win_ai.vision_theme, "build_theme", side_effect=error):
                 with self.assertRaises(win_ai.ThemeError) as ctx:
                     win_ai.create_theme(self.photo, "mypet", "ko")
-            expected = i18n.tr(
-                "ko", "theme_error_generic", path=str(win_ai._ai_error_log_path()))
-            self.assertEqual(str(ctx.exception), expected)
-            self.assertNotIn("네트워크 오류", str(ctx.exception))
-            self.assertNotIn("이상한 응답", str(ctx.exception))
+                expected = i18n.tr(
+                    "ko", "theme_error_generic", path=str(win_ai._ai_error_log_path()))
+                self.assertEqual(str(ctx.exception), expected)
+                self.assertNotIn("네트워크 오류", str(ctx.exception))
+                self.assertNotIn("이상한 응답", str(ctx.exception))
 
     def test_non_401_failure_is_still_logged_with_the_raw_text_redacted(self):
         with patch.object(win_ai.vision_theme, "build_theme",
@@ -684,11 +686,11 @@ class ThemeFailureMessageTests(unittest.TestCase):
         for language in ("ko", "en"):
             with self.subTest(language=language):
                 message = win_ai.theme_failure_message(error, language)
-            expected = i18n.tr(
-                language, "theme_error_generic",
-                path=str(win_ai._ai_error_log_path()))
-            self.assertEqual(message, expected)
-            self.assertNotIn("boom", message)
+                expected = i18n.tr(
+                    language, "theme_error_generic",
+                    path=str(win_ai._ai_error_log_path()))
+                self.assertEqual(message, expected)
+                self.assertNotIn("boom", message)
 
 
 class LogAiFailureTests(unittest.TestCase):
@@ -731,9 +733,9 @@ class ConsentButtonLabelsTests(unittest.TestCase):
             with self.subTest(language=language):
                 continue_label, cancel_label = win_ai.consent_button_labels(
                     language)
-            self.assertEqual(
-                continue_label, i18n.tr(language, "pet_theme_continue"))
-            self.assertEqual(cancel_label, i18n.tr(language, "cancel"))
+                self.assertEqual(
+                    continue_label, i18n.tr(language, "pet_theme_continue"))
+                self.assertEqual(cancel_label, i18n.tr(language, "cancel"))
 
 
 class ConsentDialogSourceTests(unittest.TestCase):
@@ -756,8 +758,45 @@ class ConsentDialogSourceTests(unittest.TestCase):
         self.assertIn("win_ai.consent_button_labels(", self.source)
 
     def test_the_diagnosis_worker_never_emits_the_raw_error_string(self):
-        """R26: 화면엔 번역 문구만 — 워커가 str(error) 를 그대로 emit 하면 안 된다."""
-        self.assertNotIn("self.failed.emit(str(error))", self.source)
+        """R26: 화면엔 번역 문구만 — 워커가 str(error) 를 그대로 emit 하면 안 된다.
+
+        리터럴 문자열(``"self.failed.emit(str(error))"``) 하나만 찾으면 코드
+        포맷이 살짝만 바뀌어도(개행·괄호 위치) 놓친다. AST 로
+        ``_DiagnosisWorker.run()`` 의 except 블록 안에 ``str(<예외 변수>)``
+        호출이 있는지를 직접 본다 — emit 호출 하나만이 아니라 그 블록
+        전체를 본다.
+        """
+        tree = ast.parse(self.source)
+        worker_run = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "_DiagnosisWorker":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "run":
+                        worker_run = item
+        self.assertIsNotNone(worker_run, "_DiagnosisWorker.run() 을 못 찾았습니다.")
+
+        except_handlers = [
+            n for n in ast.walk(worker_run) if isinstance(n, ast.ExceptHandler)
+        ]
+        self.assertTrue(except_handlers, "run() 안에 except 블록이 없습니다.")
+        error_names = {h.name for h in except_handlers if h.name}
+        self.assertTrue(error_names, "except 블록이 예외를 이름으로 받지 않습니다.")
+
+        for handler in except_handlers:
+            for node in ast.walk(handler):
+                offending = (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "str"
+                    and node.args
+                    and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id in error_names
+                )
+                self.assertFalse(
+                    offending,
+                    "except 블록에서 str(error) 를 그대로 쓰고 있습니다 — "
+                    "화면엔 번역된 안내만 나가야 합니다.",
+                )
 
 
 if __name__ == "__main__":

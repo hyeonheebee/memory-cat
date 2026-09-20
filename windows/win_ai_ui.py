@@ -85,10 +85,10 @@ def _show_diagnosis(parent, language, lines):
 
 
 def _show_diagnosis_failure(parent, language, message):
-    # 원문(message)은 화면에 붙이지 않는다 — 로그(win_ai.log_ai_failure)로만
-    # 보낸다. 여기서는 번역된 안내 한 줄만 보여준다.
+    # message 는 워커가 이미 번역해서 emit 한 안내 문구다(원문은 로그로만
+    # 간다) — 여기서 다시 tr() 을 불러 따로 만들지 않고 그대로 띄운다.
     QtWidgets.QMessageBox.warning(
-        parent, tr(language, "diagnosis_title"), tr(language, "diagnosis_error"))
+        parent, tr(language, "diagnosis_title"), message)
 
 
 def show_diagnosis(parent, language):
