@@ -124,6 +124,45 @@ def log_ai_failure(kind, error):
         pass
 
 
+#: 동의창이 남길 수 있는 단계. 이 세 값 밖은 호출부 실수다 — 조용히 삼키지
+#: 않고 ``ValueError`` 로 바로 드러낸다(로그 함수 자체의 OSError 만 삼킨다).
+_CONSENT_STAGES = ("shown", "accepted", "declined")
+
+
+def _append_log_line(text):
+    """``ai-errors.log`` 에 타임스탬프를 붙여 한 줄 남긴다.
+
+    ``log_ai_failure`` 와 같은 파일·같은 로그 폴더를 쓴다. 폴더가 없으면
+    만들고, 쓰기 실패(``OSError``)는 삼켜 사용자가 보는 흐름을 막지 않는다.
+    """
+    try:
+        log_path = _ai_error_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"[{timestamp}] {text}\n")
+    except OSError:
+        pass
+
+
+def log_consent(stage):
+    """사진 전송 동의창의 진행 상황을 한 줄 남긴다.
+
+    ``stage`` 는 ``"shown"``(동의창을 띄우기 직전) · ``"accepted"``(진행
+    클릭) · ``"declined"``(취소·Esc·닫기 등 그 밖 전부) 세 값만 받는다.
+    다음 실기에서 "shown 줄은 있는데 accepted 가 없는데 업로드가 됐다"
+    같은 모양이 나오면 그 자체로 버그 위치가 확정된다.
+
+    사진 경로·파일명·키 같은 건 절대 남기지 않는다 — 단계 이름 하나뿐이다.
+    잘못된 ``stage`` 는 로그를 남기지 않고 ``ValueError`` 를 낸다(호출부
+    실수를 조용히 감추지 않기 위해서다) — 로그 쓰기 자체의 ``OSError`` 만
+    삼킨다.
+    """
+    if stage not in _CONSENT_STAGES:
+        raise ValueError(f"알 수 없는 동의 단계: {stage!r}")
+    _append_log_line(f"consent {stage}")
+
+
 def has_api_key() -> bool:
     return bool(brain._load_api_key())
 
@@ -183,12 +222,17 @@ def diagnosis_lines(language):
     ``source`` 가 ``"fallback"`` 이면(API 키 없음·네트워크 오류 등) 첫 줄에
     안내를 넣는다. 안 넣으면 규칙 기반 결과가 AI 진단인 것처럼 보인다.
     디스크 한 줄은 그 안내가 있으면 바로 뒤, 없으면 맨 앞에 항상 넣는다.
+
+    fallback 인 경우 사유(``result["fallback_reason"]``, 예: ``"api_error"``)
+    를 동의 로그와 같은 파일에도 한 줄 남긴다(R33) — 번역 전 원문 키라
+    사용자를 특정하지 않는다.
     """
     result = brain.diagnose(language=language, include_cleanup=False)
     lines = []
     if result.get("source") == "fallback":
-        reason_key = _FALLBACK_REASON_KEYS.get(
-            result.get("fallback_reason"), "fallback_unknown")
+        reason = result.get("fallback_reason")
+        _append_log_line(f"diagnosis fallback: {reason}")
+        reason_key = _FALLBACK_REASON_KEYS.get(reason, "fallback_unknown")
         lines.append(tr(
             language, "windows_diagnosis_source_fallback",
             reason=tr(language, reason_key)))

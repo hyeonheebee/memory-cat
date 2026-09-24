@@ -30,6 +30,42 @@ def _explain_missing_key(parent, language):
     QtWidgets.QMessageBox.information(parent, title, body)
 
 
+def _bring_to_front(box):
+    """대화상자가 다른 창 뒤에 숨지 않도록 항상 위로 끌어온다.
+
+    고양이 창은 ``FramelessWindowHint | WindowStaysOnTopHint | Tool``
+    이다(``windows_cat.pyw``). 윈도우에서 ``Tool`` 창의 자식 대화상자는 그
+    항상-위를 물려받지 못해 다른 창 뒤에서 열릴 수 있다 — 대화상자
+    자신에게도 항상-위 플래그를 직접 준다.
+
+    순서 근거(Qt 문서, PySide6 도 같은 C++ API 를 그대로 감싼다):
+
+    * ``setWindowFlag()``/``setWindowFlags()`` 는 최상위 창을 다시 만들며
+      (내부적으로 ``setParent()`` 를 부른다) 그 창을 **숨긴다** — 문서가
+      "You must call show() to make the widget visible again" 라고
+      경고한다. 그래서 **아직 한 번도 보이지 않은 시점**(``box.exec()`` 를
+      부르기 전)에 플래그를 준다 — 숨었다 다시 뜨는 깜빡임이 없다.
+    * ``activateWindow()`` 는 창이 이미 보이는 상태가 아니면 아무 효과가
+      없다 — 문서: "Note that the window must be visible, otherwise
+      activateWindow() has no effect." 그래서 ``show()`` **뒤에** 부른다.
+    * 같은 문서가 쌓임 순서까지 확실히 하려면 ``raise_()`` 도 같이 부르라고
+      되어 있다("If you want to ensure that the window is stacked on top
+      as well you should also call raise_()") — 그래서 ``raise_()`` 를
+      ``activateWindow()`` 바로 앞에 둔다.
+    * 뒤이어 부르는 ``box.exec()`` 는 이미 보이는 창을 다시 숨겼다 띄우지
+      않는다 — ``QDialog.exec()`` 문서는 "always pops up the dialog as
+      modal"(modal 프로퍼티 값과 무관하게 언제나 모달로 띄운다)이라고만
+      말할 뿐, 창 플래그(항상-위 등)에 대해서는 아무 조건을 걸지 않는다.
+      즉 여기서 준 ``WindowStaysOnTopHint`` 는 ``exec()`` 의 모달성과
+      서로 다른 축(플래그 vs 모달리티)이라 충돌하지 않고, 모달 동작은
+      그대로 유지된다.
+    """
+    box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+    box.show()
+    box.raise_()
+    box.activateWindow()
+
+
 class _DiagnosisWorker(QtCore.QThread):
     """``brain.diagnose`` 는 OpenAI 타임아웃 20초·재시도 1회라 수십 초 걸릴 수
     있다. UI 스레드에서 부르면 그동안 고양이가 얼어붙는다."""
@@ -150,8 +186,18 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
         cancel_label, QtWidgets.QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(cancel_button)
     box.setEscapeButton(cancel_button)
+
+    # K-1: 무효 키로도 동의창이 안 보였다는 실기 보고가 있었다 — 코드로는
+    # 원인이 밝혀지지 않아(추정하지 않는다) 유일한 코드 근거인 이 지점만
+    # 고친다. 동의 3지점(shown·accepted·declined)도 같은 로그에 남겨 다음
+    # 실기에서 기록으로 판정한다.
+    win_ai.log_consent("shown")
+    _bring_to_front(box)
     box.exec()
-    if box.clickedButton() is not continue_button:
+    if box.clickedButton() is continue_button:
+        win_ai.log_consent("accepted")
+    else:
+        win_ai.log_consent("declined")
         return None
 
     # 기본 테마·이미 만든 테마와 겹치지 않는 이름(mypet, mypet2, ...).

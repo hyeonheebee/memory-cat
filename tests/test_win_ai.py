@@ -6,6 +6,7 @@ PySide6 는 맥 개발 환경에 없어서, 무엇을 보여줄지 정하는 로
 """
 import ast
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -80,7 +81,19 @@ class DiagnosisSourceNoticeTests(unittest.TestCase):
 
     맥판(``desktop_cat.diagnosis_result_content``)이 하는 것과 같은 매핑을
     쓴다 — ``fallback_reason`` 이 없거나 모르는 값이면 ``fallback_unknown``.
+
+    R33 로 ``diagnosis_lines`` 가 fallback 일 때 로그 한 줄을 남기게 되어,
+    이 클래스의 fallback 픽스처를 쓰는 테스트들도 이제 로그를 쓴다 — 실제
+    ``~/Library/Logs`` 를 건드리지 않도록 매 테스트에서 임시 폴더로 바꿔 끼운다.
     """
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
 
     FAKE_OPENAI = {
         "why_slow": ["램이 거의 찼습니다."],
@@ -174,7 +187,19 @@ class DiskDetailLineTests(unittest.TestCase):
     (``windows_cat.pyw``)과 똑같이 ``brain.disk_usage()`` 를 직접 불러 같은
     문구를 만든다. ``brain.disk_usage`` 는 ``metrics.disk_usage`` 를 그대로
     가리킨다(``brain.py`` 의 ``from metrics import disk_usage, ...``).
+
+    R33 로 ``diagnosis_lines`` 가 fallback 일 때 로그 한 줄을 남기게 되어,
+    ``FAKE_FALLBACK`` 을 쓰는 테스트도 이제 로그를 쓴다 — 실제
+    ``~/Library/Logs`` 를 건드리지 않도록 매 테스트에서 임시 폴더로 바꿔 끼운다.
     """
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
 
     #: total=500GB, used=370GB, free=130GB, percent=74% — 바이트가 1024**3 의
     #: 정수배라 human_gb() 결과가 "370.0 GB" 처럼 딱 떨어진다.
@@ -725,6 +750,132 @@ class LogAiFailureTests(unittest.TestCase):
                 win_ai.log_ai_failure("theme", error)          # 예외가 새면 실패
 
 
+class LogConsentTests(unittest.TestCase):
+    """K-1: 동의 3지점(shown·accepted·declined)을 ``log_ai_failure`` 와 같은
+    파일에 남긴다. 다음 실기에서 "shown 줄은 있는데 accepted 가 없는데
+    업로드가 됐다" 같은 모양이 나오면 버그 위치가 바로 잡힌다."""
+
+    #: ``datetime.isoformat(timespec="seconds")`` 형식. ``log_ai_failure`` 가
+    #: 쓰는 것과 같은 타임스탬프 모양이어야 한 파일을 같이 훑어볼 수 있다.
+    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] ")
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+    def _log_text(self):
+        return (Path(self._log_tmp.name) / "ai-errors.log").read_text(
+            encoding="utf-8")
+
+    def test_each_stage_writes_one_timestamped_line(self):
+        for stage in ("shown", "accepted", "declined"):
+            with self.subTest(stage=stage), \
+                 tempfile.TemporaryDirectory() as tmp, \
+                 patch.object(win_ai.apppaths, "log_dir", return_value=Path(tmp)):
+                win_ai.log_consent(stage)
+
+                text = (Path(tmp) / "ai-errors.log").read_text(encoding="utf-8")
+                lines = [line for line in text.splitlines() if line]
+                self.assertEqual(len(lines), 1)
+                self.assertTrue(
+                    self._TIMESTAMP_RE.match(lines[0]),
+                    f"타임스탬프 형식이 아닙니다: {lines[0]!r}")
+                self.assertIn(f"consent {stage}", lines[0])
+
+    def test_it_shares_the_file_with_log_ai_failure(self):
+        """같은 파일 하나만 보내면 되게 — 파일 이름을 바꾸지 않는다."""
+        win_ai.log_consent("shown")
+        try:
+            raise RuntimeError("네트워크 오류")
+        except RuntimeError as error:
+            win_ai.log_ai_failure("theme", error)
+        win_ai.log_consent("accepted")
+
+        log_path = Path(self._log_tmp.name) / "ai-errors.log"
+        self.assertTrue(log_path.exists())
+        text = log_path.read_text(encoding="utf-8")
+        self.assertIn("consent shown", text)
+        self.assertIn("theme", text)
+        self.assertIn("consent accepted", text)
+
+    def test_calling_the_three_stages_appends_three_lines_in_order(self):
+        win_ai.log_consent("shown")
+        win_ai.log_consent("declined")
+        text = self._log_text()
+        lines = [line for line in text.splitlines() if line]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("consent shown", lines[0])
+        self.assertIn("consent declined", lines[1])
+
+    def test_unknown_stage_raises_value_error_instead_of_logging_silently(self):
+        """세 값 밖은 구현 실수다 — 로그가 아니라 예외로 바로 드러낸다."""
+        with self.assertRaises(ValueError):
+            win_ai.log_consent("maybe")
+        log_path = Path(self._log_tmp.name) / "ai-errors.log"
+        self.assertFalse(log_path.exists())
+
+    def test_it_never_raises_when_the_log_folder_cannot_be_created(self):
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("파일")
+        with patch.object(win_ai.apppaths, "log_dir", return_value=blocked / "logs"):
+            win_ai.log_consent("shown")          # 예외가 새면 실패
+
+    def test_no_photo_path_or_key_like_text_is_ever_written(self):
+        """단계 이름 말고는 아무것도 남기지 않는다."""
+        win_ai.log_consent("shown")
+        text = self._log_text()
+        self.assertNotIn("sk-", text)
+        self.assertNotIn(".png", text)
+        self.assertNotIn(".jpg", text)
+
+
+class DiagnosisFallbackLogTests(unittest.TestCase):
+    """R33: 진단이 fallback(API 키 없음·네트워크 오류 등)으로 빠지면 같은
+    로그 파일에 사유 한 줄을 남긴다. ``brain.diagnose`` 는 가짜로 패치한다."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+    def _log_path(self):
+        return Path(self._log_tmp.name) / "ai-errors.log"
+
+    def test_fallback_result_logs_the_reason(self):
+        fallback = {
+            "why_slow": ["램이 거의 찼습니다."],
+            "one_line_advice": "탭을 좀 닫아 보세요.",
+            "cleanup_recommendations": [],
+            "estimated_reclaimable_bytes": 0,
+            "source": "fallback",
+            "fallback_reason": "api_error",
+        }
+        with patch.object(win_ai.brain, "diagnose", return_value=fallback):
+            win_ai.diagnosis_lines("ko")
+        text = self._log_path().read_text(encoding="utf-8")
+        self.assertIn("diagnosis fallback: api_error", text)
+
+    def test_openai_source_writes_nothing(self):
+        openai_result = {
+            "why_slow": ["램이 거의 찼습니다."],
+            "one_line_advice": "탭을 좀 닫아 보세요.",
+            "cleanup_recommendations": [],
+            "estimated_reclaimable_bytes": 0,
+            "source": "openai",
+        }
+        with patch.object(win_ai.brain, "diagnose", return_value=openai_result), \
+             patch.object(win_ai.brain, "disk_usage", side_effect=OSError):
+            win_ai.diagnosis_lines("ko")
+        self.assertFalse(self._log_path().exists())
+
+
 class ConsentButtonLabelsTests(unittest.TestCase):
     """I-3: 동의창 버튼은 맥 동의창과 같은 공용 키(pet_theme_continue·cancel)를 쓴다."""
 
@@ -797,6 +948,185 @@ class ConsentDialogSourceTests(unittest.TestCase):
                     "except 블록에서 str(error) 를 그대로 쓰고 있습니다 — "
                     "화면엔 번역된 안내만 나가야 합니다.",
                 )
+
+    # --- K-1: 동의창을 앞으로 끌어오고, 동의 3지점을 로그로 남긴다 --------
+
+    def _tree(self):
+        return ast.parse(self.source)
+
+    def _top_level_function(self, name):
+        for node in ast.walk(self._tree()):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        return None
+
+    def _sorted_calls(self, func_node):
+        """``func_node`` 안의 모든 호출을 소스 위치(줄·컬럼) 순서로.
+
+        ``ast.walk`` 는 너비 우선이라 소스 순서와 다를 수 있다(``tests/
+        test_win_app.py`` 의 같은 패턴 참고) — 그래서 ``(lineno,
+        col_offset)`` 로 정렬해 실제 실행 순서를 본다.
+        """
+        calls = []
+        for node in ast.walk(func_node):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            else:
+                continue
+            calls.append((node.lineno, node.col_offset, name, node))
+        calls.sort(key=lambda item: (item[0], item[1]))
+        return calls
+
+    def _log_consent_calls_by_stage(self, func_node):
+        """``win_ai.log_consent("<stage>")`` 처럼 문자열 리터럴로 부른
+        호출들을 stage -> [노드] 로 모은다. 문자열 하나만 보는 검사가 아니라
+        실제 호출 인자(AST 상수)를 읽는다."""
+        calls_by_stage = {}
+        for node in ast.walk(func_node):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "log_consent"):
+                continue
+            if not (node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                continue
+            calls_by_stage.setdefault(node.args[0].value, []).append(node)
+        return calls_by_stage
+
+    def test_bring_to_front_helper_sets_the_stay_on_top_flag_and_raises_and_activates(self):
+        """헬퍼가 항상-위 플래그를 주고 ``raise_``·``activateWindow`` 를
+        부르는지 AST 로 본다 — 이름이 바뀌어도(리터럴 문자열 검사가 아니라)
+        실제 호출을 본다."""
+        helper = None
+        for node in ast.walk(self._tree()):
+            if isinstance(node, ast.FunctionDef) and node.name == "_bring_to_front":
+                helper = node
+                break
+        self.assertIsNotNone(
+            helper, "_bring_to_front(또는 같은 역할의 헬퍼)를 못 찾았습니다.")
+
+        attr_calls = {
+            node.func.attr
+            for node in ast.walk(helper)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        self.assertIn(
+            "raise_", attr_calls, "_bring_to_front 안에 raise_() 호출이 없습니다.")
+        self.assertIn(
+            "activateWindow", attr_calls,
+            "_bring_to_front 안에 activateWindow() 호출이 없습니다.")
+
+        flag_calls = [
+            node for node in ast.walk(helper)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("setWindowFlag", "setWindowFlags")
+        ]
+        self.assertTrue(
+            flag_calls, "_bring_to_front 안에 창 플래그를 주는 호출이 없습니다.")
+        self.assertTrue(
+            any("WindowStaysOnTopHint" in ast.dump(call) for call in flag_calls),
+            "_bring_to_front 가 WindowStaysOnTopHint 를 주지 않습니다.",
+        )
+
+    def test_bring_to_front_is_applied_to_the_consent_dialog_before_exec(self):
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        calls = self._sorted_calls(make_theme)
+        call_names = [name for _, _, name, _ in calls]
+
+        self.assertIn(
+            "_bring_to_front", call_names,
+            "make_theme() 안에서 _bring_to_front(...) 를 부르지 않습니다.")
+        self.assertIn("exec", call_names, "make_theme() 안에서 box.exec() 를 부르지 않습니다.")
+        self.assertLess(
+            call_names.index("_bring_to_front"),
+            call_names.index("exec"),
+            "_bring_to_front 는 box.exec() 보다 앞에서 불러야 합니다 "
+            "(모달 루프가 시작되면 그 뒤엔 이 창을 다시 건드릴 수 없다).",
+        )
+
+        # 동의창(box) 에 적용됐는지 — 인자 이름까지 확인한다.
+        bring_to_front_call = next(
+            node for _, _, name, node in calls if name == "_bring_to_front")
+        self.assertTrue(
+            bring_to_front_call.args
+            and isinstance(bring_to_front_call.args[0], ast.Name)
+            and bring_to_front_call.args[0].id == "box",
+            "_bring_to_front 가 동의창(box) 이 아닌 다른 인자로 불립니다.",
+        )
+
+    def test_consent_shown_is_logged_before_the_dialog_is_executed(self):
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        shown_calls = self._log_consent_calls_by_stage(make_theme).get("shown")
+        self.assertTrue(
+            shown_calls, 'make_theme() 안에서 log_consent("shown") 을 못 찾았습니다.')
+
+        exec_calls = [
+            node for node in ast.walk(make_theme)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "exec"
+        ]
+        self.assertTrue(exec_calls, "make_theme() 안에서 box.exec() 를 못 찾았습니다.")
+
+        shown_pos = min((n.lineno, n.col_offset) for n in shown_calls)
+        exec_pos = min((n.lineno, n.col_offset) for n in exec_calls)
+        self.assertLess(
+            shown_pos, exec_pos,
+            'log_consent("shown") 은 box.exec() 보다 앞에서 불러야 합니다.')
+
+    def test_accepted_and_declined_are_logged_in_the_matching_branch_only(self):
+        """``accepted`` 는 "진행" 분기 안에서만, ``declined`` 는 그 반대
+        분기에서만 불려야 한다 — ``clickedButton()`` 을 검사하는 ``if`` 문을
+        찾아 ``body``/``orelse`` 를 각각 본다."""
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        consent_if = None
+        for node in ast.walk(make_theme):
+            if not isinstance(node, ast.If):
+                continue
+            test_call_names = {
+                n.func.attr for n in ast.walk(node.test)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            }
+            if "clickedButton" in test_call_names:
+                consent_if = node
+                break
+        self.assertIsNotNone(
+            consent_if, "clickedButton() 을 검사하는 if 문을 못 찾았습니다.")
+
+        def _stage_logged_in(stmts, stage):
+            for stmt in stmts:
+                for node in ast.walk(stmt):
+                    if (isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "log_consent"
+                            and node.args
+                            and isinstance(node.args[0], ast.Constant)
+                            and node.args[0].value == stage):
+                        return True
+            return False
+
+        self.assertTrue(
+            _stage_logged_in(consent_if.body, "accepted"),
+            '"진행" 분기 안에서 log_consent("accepted") 를 부르지 않습니다.')
+        self.assertTrue(
+            _stage_logged_in(consent_if.orelse, "declined"),
+            '그 반대 분기에서 log_consent("declined") 를 부르지 않습니다.')
+        self.assertFalse(
+            _stage_logged_in(consent_if.body, "declined"),
+            '"진행" 분기 안에서 declined 를 부르면 안 됩니다.')
+        self.assertFalse(
+            _stage_logged_in(consent_if.orelse, "accepted"),
+            '반대 분기에서 accepted 를 부르면 안 됩니다.')
 
 
 if __name__ == "__main__":
