@@ -152,6 +152,30 @@ def _show_theme_failure(parent, language, message):
         parent, tr(language, "pet_theme_error_title"), message)
 
 
+def _finish_theme(parent, language, on_done, name):
+    """워커의 ``finished_ok`` 가 오면 불린다(``QueuedConnection`` 이라 GUI
+    스레드에서 실행된다).
+
+    순서가 중요하다: 테마를 먼저 적용하고(``on_done``) **그 뒤에** 완료
+    알림을 띄운다. 반대로 하면 알림이 모달이라 사용자가 닫을 때까지
+    적용이 늦어진다 — 이번 라운드가 고치는 "만드는 중" 모달 문제와 같은
+    모양이 완료 쪽에도 생긴다.
+
+    문구 판단은 여기서 하지 않는다(모듈 맨 위 설명대로) — ``win_ai.
+    theme_done_message`` 가 정한 (제목, 본문) 을 그대로 띄운다.
+    """
+    on_done(name)
+    title, body = win_ai.theme_done_message(language)
+    box = QtWidgets.QMessageBox(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+    box.setWindowTitle(title)
+    box.setText(body)
+    # 동의창과 같은 이유: 고양이 창은 Tool 이라 자식 대화상자가 항상-위를
+    # 물려받지 못한다 — _bring_to_front 로 직접 준다(box.exec() 전에).
+    _bring_to_front(box)
+    box.exec()
+
+
 def make_theme(parent, language, bundled_frames_dir, on_done):
     """사진을 골라 테마 생성을 워커 스레드에서 시작하고 워커를 돌려준다.
 
@@ -204,14 +228,26 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
     # vision_theme 은 있는 폴더를 덮어쓰지 않으므로 고정 이름을 쓰면 두 번째부터 실패한다.
     name = win_ai.next_theme_name(bundled_frames_dir)
 
-    # 안내창은 모달이라 사용자가 닫을 때까지 여기서 멈춘다. 스레드를 시작하기
-    # **전에** 띄운다 — 시작한 뒤에 띄우면 이 창에서 예외가 났을 때 도는 워커를
-    # 아무도 붙잡지 않은 채 GC 에 넘기게 된다.
-    QtWidgets.QMessageBox.information(
-        parent, tr(language, "menu_pet_theme"), tr(language, "theme_working"))
-
+    # J-1: 예전엔 여기서 "만드는 중" 모달을 띄웠다(주석: "예외가 났을 때
+    # 도는 워커를 아무도 붙잡지 않은 채 GC 에 넘기는 것을 피하려고 워커를
+    # 만들기 전에 띄운다"). 그런데 그 모달은 OK 를 눌러야 닫히는 모달이라,
+    # 워커가 **시작조차** 안 된 채로 사용자가 한참 기다리는 원인이었다
+    # (실기 R3). 진행 상황은 이미 있는 우클릭 메뉴 항목
+    # (``menu_pet_theme_running``, ``windows_cat`` 이 단다)이 맡으므로
+    # 여기서 새로 만들 것은 없다 — 조용히 바로 시작한다.
+    #
+    # GC 안전 계약: 걱정했던 문제(붙잡히지 않은 워커가 GC 에 넘어가는 것)는
+    # 모달을 없앤 것과 별개로 계속 막아야 한다 — 아래에서 워커를 만든
+    # 뒤로는 예외를 낼 수 있는 코드를 두지 않는다(연결·시작은 실패하지
+    # 않는다고 보는 Qt API 호출뿐). 그리고 이 함수는 만든 워커를 그대로
+    # **반환**해야 한다 — 호출부(``windows_cat.Cat._start_theme``)가 그
+    # 반환값을 ``self._theme_worker`` 에 담아 참조를 잡고 있다는 계약이다.
+    # 이 함수를 고칠 때 반환을 빼먹으면 그 계약이 깨지고, 참조를 잃은
+    # 스레드는 GC 가 도는 대로 죽는다.
     worker = _ThemeWorker(photo, name, language)
-    worker.finished_ok.connect(on_done, _queued())
+    worker.finished_ok.connect(
+        lambda done_name: _finish_theme(parent, language, on_done, done_name),
+        _queued())
     worker.failed.connect(
         lambda message: _show_theme_failure(parent, language, message), _queued())
     worker.start()

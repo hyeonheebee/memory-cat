@@ -107,6 +107,8 @@ WINDOWS_AI_KEYS = (
     "windows_diagnosis_source_fallback",
     "theme_error_heic", "theme_error_unreadable", "theme_error_invalid_key",
     "theme_error_generic",
+    # J-1: 테마 생성 완료 알림(R5 Task B) — 성공했을 때만 뜬다.
+    "theme_done_title", "theme_done_body",
 )
 
 

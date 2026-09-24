@@ -343,3 +343,14 @@ def theme_failure_message(error, language):
     if isinstance(error, ThemeError):
         return str(error)
     return tr(language, "theme_error_generic", path=str(_ai_error_log_path()))
+
+
+def theme_done_message(language):
+    """테마 생성 완료 알림의 (제목, 본문).
+
+    J-1: 예전엔 워커를 시작하기 전에 "만드는 중" 모달을 띄웠다(그래서 OK 를
+    누를 때까지 생성이 시작조차 안 됐다). 그 모달을 없앤 대신, 성공했을 때
+    이 문구로 완료를 알린다 — 실패는 지금처럼 ``theme_failure_message`` 가
+    맡는다.
+    """
+    return tr(language, "theme_done_title"), tr(language, "theme_done_body")

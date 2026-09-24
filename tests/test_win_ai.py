@@ -359,6 +359,24 @@ class ApiKeyMessageTests(unittest.TestCase):
             self.assertIn(".env", body)
 
 
+class ThemeDoneMessageTests(unittest.TestCase):
+    """J-1: 테마 생성 완료 알림 문구 — win_ai 가 판단하고 win_ai_ui 는 띄우기만."""
+
+    def test_title_and_body_are_non_empty_for_both_languages(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                title, body = win_ai.theme_done_message(language)
+                self.assertTrue(title.strip())
+                self.assertTrue(body.strip())
+
+    def test_the_message_comes_from_the_new_i18n_keys(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                title, body = win_ai.theme_done_message(language)
+                self.assertEqual(title, i18n.tr(language, "theme_done_title"))
+                self.assertEqual(body, i18n.tr(language, "theme_done_body"))
+
+
 class PhotoCheckTests(unittest.TestCase):
     """I-2: 업로드·동의 전에 내용까지 본다 — 진짜 HEIC 와 그냥 깨진 파일을 나눈다."""
 
@@ -1127,6 +1145,149 @@ class ConsentDialogSourceTests(unittest.TestCase):
         self.assertFalse(
             _stage_logged_in(consent_if.orelse, "accepted"),
             '반대 분기에서 accepted 를 부르면 안 됩니다.')
+
+    # --- J-1: "만드는 중" 모달을 없애고, 성공 뒤에만 완료 알림을 띄운다 ----
+
+    def test_theme_working_notice_is_gone_from_make_theme(self):
+        """예전엔 워커를 만들기 전에 tr(..., "theme_working") 을 담은
+        QMessageBox.information 이 떴다 — OK 를 눌러야 워커가 시작됐다.
+        그 tr() 호출 자체가 make_theme() 안에서 사라져야 한다(리터럴
+        문자열 검사가 아니라 실제 tr() 호출 인자를 본다)."""
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        offending = [
+            node for node in ast.walk(make_theme)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "tr" and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == "theme_working"
+        ]
+        self.assertEqual(
+            offending, [],
+            'make_theme() 안에 tr(..., "theme_working") 호출이 남아 있습니다 '
+            '— "만드는 중" 모달이 아직 안 지워졌습니다.')
+
+    def test_no_blocking_dialog_between_consent_accepted_and_worker_start(self):
+        """동의("진행") 뒤에는 조용히 바로 워커를 시작해야 한다 — 그 사이에
+        exec()/information()/warning() 같은 모달 호출이 끼면 안 된다."""
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        calls = self._sorted_calls(make_theme)
+        accepted_calls = self._log_consent_calls_by_stage(make_theme).get("accepted")
+        self.assertTrue(
+            accepted_calls, 'make_theme() 안에서 log_consent("accepted") 를 못 찾았습니다.')
+        accepted_pos = min((n.lineno, n.col_offset) for n in accepted_calls)
+
+        start_calls = [(lineno, col) for lineno, col, name, _ in calls if name == "start"]
+        self.assertTrue(start_calls, "make_theme() 안에서 worker.start() 를 못 찾았습니다.")
+        start_pos = min(start_calls)
+
+        blocking = [
+            name for lineno, col, name, _ in calls
+            if accepted_pos < (lineno, col) < start_pos
+            and name in ("exec", "information", "warning")
+        ]
+        self.assertEqual(
+            blocking, [],
+            f"동의 뒤 워커 시작 전에 모달 호출이 남아 있습니다: {blocking}")
+
+    def test_worker_reference_is_returned_for_the_caller_to_hold(self):
+        """GC 안전 계약: make_theme() 은 워커를 만들면 그대로 반환해야 한다
+        — 호출부(windows_cat.Cat._start_theme)가 그걸 self._theme_worker 에
+        담아 참조를 잡고 있다는 계약이 있다(주석으로도 적혀 있어야 한다).
+        여기서는 함수의 마지막 문장이 이름 그대로(worker) 반환하는지만
+        구조로 검사한다 — 이름이 바뀌면 계약 문서화가 깨졌다는 신호다."""
+        make_theme = self._top_level_function("make_theme")
+        last_stmt = make_theme.body[-1]
+        self.assertIsInstance(
+            last_stmt, ast.Return, "make_theme() 의 마지막 문장이 return 이 아닙니다.")
+        self.assertIsInstance(
+            last_stmt.value, ast.Name,
+            "make_theme() 이 워커 변수를 그대로 반환하지 않습니다.")
+        self.assertEqual(
+            last_stmt.value.id, "worker",
+            "make_theme() 이 반환하는 이름이 worker 가 아닙니다 — GC 계약 주석과 "
+            "어긋날 수 있습니다.")
+
+    def test_success_handler_applies_the_theme_before_showing_the_done_notice(self):
+        """완료 시그널이 오면 먼저 테마를 적용하고(on_done) 그 뒤에 완료
+        알림을 띄워야 한다 — 순서가 반대면 모달이 적용을 사용자가 알림을
+        닫을 때까지 늦춘다(이번 라운드가 고치는 문제와 같은 모양)."""
+        finish = self._top_level_function("_finish_theme")
+        self.assertIsNotNone(
+            finish,
+            "_finish_theme(성공 시그널을 받아 적용→알림 순서를 맡는 함수)를 "
+            "못 찾았습니다.")
+
+        calls = self._sorted_calls(finish)
+        call_names = [name for _, _, name, _ in calls]
+        self.assertIn(
+            "on_done", call_names,
+            "_finish_theme() 안에서 on_done(...) 을 부르지 않습니다.")
+        self.assertIn(
+            "theme_done_message", call_names,
+            "_finish_theme() 안에서 win_ai.theme_done_message(...) 를 "
+            "부르지 않습니다 — 문구 판단은 win_ai 몫이다.")
+        self.assertLess(
+            call_names.index("on_done"),
+            call_names.index("theme_done_message"),
+            "on_done() 은 완료 알림 문구를 만들기(theme_done_message) 전에 "
+            "불러야 합니다 — 적용이 알림보다 먼저 끝나야 한다.")
+
+    def test_success_notice_is_brought_to_front(self):
+        """완료 알림도 동의창과 같은 문제(Tool 창의 자식 대화상자가 항상-위를
+        물려받지 못함)를 겪을 수 있다 — _bring_to_front 를 적용한다."""
+        finish = self._top_level_function("_finish_theme")
+        self.assertIsNotNone(finish, "_finish_theme() 를 못 찾았습니다.")
+        call_names = [name for _, _, name, _ in self._sorted_calls(finish)]
+        self.assertIn(
+            "_bring_to_front", call_names,
+            "_finish_theme() 안에서 _bring_to_front(...) 를 부르지 않습니다.")
+
+    def test_finished_ok_signal_is_wired_to_the_finish_helper_not_on_done_directly(self):
+        """워커의 finished_ok 는 더 이상 on_done 을 직접 물지 않는다 — 완료
+        알림이 끼어들 자리가 필요해서 _finish_theme 를 거친다."""
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        connect_calls = [
+            node for node in ast.walk(make_theme)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "connect"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "finished_ok"
+        ]
+        self.assertTrue(connect_calls, "worker.finished_ok.connect(...) 를 못 찾았습니다.")
+        connect_call = connect_calls[0]
+        self.assertTrue(connect_call.args, "finished_ok.connect() 에 인자가 없습니다.")
+        handler = connect_call.args[0]
+        self.assertFalse(
+            isinstance(handler, ast.Name) and handler.id == "on_done",
+            "finished_ok 가 on_done 을 직접 물고 있습니다 — 완료 알림이 "
+            "끼어들 수 없습니다. _finish_theme 를 거쳐야 합니다.")
+        names_in_handler = {
+            n.func.id for n in ast.walk(handler)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+        self.assertIn(
+            "_finish_theme", names_in_handler,
+            "finished_ok 연결이 _finish_theme 를 거치지 않습니다.")
+
+    def test_failure_path_never_shows_the_done_notice(self):
+        """실패창(_show_theme_failure)은 완료 알림(theme_done_message)을
+        절대 부르면 안 된다 — 실패는 지금처럼 오류창만 뜬다."""
+        failure_fn = self._top_level_function("_show_theme_failure")
+        self.assertIsNotNone(failure_fn, "_show_theme_failure() 를 못 찾았습니다.")
+        names = {
+            n.func.attr for n in ast.walk(failure_fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        self.assertNotIn(
+            "theme_done_message", names,
+            "_show_theme_failure() 가 완료 알림 문구를 부릅니다 — 실패 경로에선 "
+            "안 됩니다.")
 
 
 if __name__ == "__main__":
