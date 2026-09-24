@@ -15,7 +15,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-_WINDOWS_DIR = str(Path(__file__).resolve().parent.parent / "windows")
+_REPO = Path(__file__).resolve().parent.parent
+_WINDOWS_DIR = str(_REPO / "windows")
 if _WINDOWS_DIR not in sys.path:
     sys.path.insert(0, _WINDOWS_DIR)
 
@@ -1288,6 +1289,224 @@ class ConsentDialogSourceTests(unittest.TestCase):
             "theme_done_message", names,
             "_show_theme_failure() 가 완료 알림 문구를 부릅니다 — 실패 경로에선 "
             "안 됩니다.")
+
+
+class UploadRequiresConsentGuardrailTests(unittest.TestCase):
+    """R5 Task C: "동의창 없이 사진이 전송됐다"(R3 K-1) 재발 방지 회귀 테스트.
+
+    코드 비교로는 원인이 설명되지 않았다(Task A·B 는 계측만 추가했다) —
+    그래서 원인을 고치는 대신, **앞으로 이 순서가 깨지는 변경을 테스트가
+    반드시 잡게** 만든다. 모두 AST 로 실제 호출·정의 위치를 본다(리터럴
+    문자열 한 줄만 보는 검사는 줄바꿈·이름 변경에 뚫린다).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.win_ai_ui_path = Path(_WINDOWS_DIR) / "win_ai_ui.py"
+        cls.win_ai_ui_source = cls.win_ai_ui_path.read_text(encoding="utf-8")
+        cls.vision_theme_path = _REPO / "vision_theme.py"
+        cls.vision_theme_source = cls.vision_theme_path.read_text(encoding="utf-8")
+
+    # --- 공용 헬퍼 (ConsentDialogSourceTests 와 같은 패턴) -----------------
+
+    def _win_ai_ui_tree(self):
+        return ast.parse(self.win_ai_ui_source, filename=str(self.win_ai_ui_path))
+
+    def _top_level_function(self, tree, name):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        return None
+
+    def _sorted_calls(self, func_node):
+        """``func_node`` 안의 모든 호출을 소스 위치(줄·컬럼) 순서로.
+
+        ``ast.walk`` 는 너비 우선이라 소스 순서와 다를 수 있다(``tests/
+        test_win_app.py``·``ConsentDialogSourceTests`` 의 같은 패턴 참고).
+        """
+        calls = []
+        for node in ast.walk(func_node):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            else:
+                continue
+            calls.append((node.lineno, node.col_offset, name, node))
+        calls.sort(key=lambda item: (item[0], item[1]))
+        return calls
+
+    def test_worker_is_created_and_started_only_after_the_consent_branch(self):
+        """R3 K-1: 동의창 없이 사진이 전송된 실기 보고가 있었다. ``_ThemeWorker``
+        생성과 ``start()`` 가 동의 판정(``clickedButton()`` 비교) if 문보다
+        앞(또는 그 검사 자체보다 앞)에 나오면, 동의창이 뜨기도 전이거나
+        "취소" 를 눌러도 업로드가 시작될 수 있다. 위치는 소스 좌표
+        (``lineno``, ``col_offset``) 로 비교해서 개행·변수명이 바뀌어도
+        흔들리지 않게 잡는다."""
+        tree = self._win_ai_ui_tree()
+        make_theme = self._top_level_function(tree, "make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        consent_if = None
+        for node in ast.walk(make_theme):
+            if not isinstance(node, ast.If):
+                continue
+            test_call_names = {
+                n.func.attr for n in ast.walk(node.test)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            }
+            if "clickedButton" in test_call_names:
+                consent_if = node
+                break
+        self.assertIsNotNone(
+            consent_if, "clickedButton() 을 검사하는 if 문을 못 찾았습니다.")
+        consent_end = (consent_if.end_lineno, consent_if.end_col_offset)
+
+        calls = self._sorted_calls(make_theme)
+        worker_creations = [
+            (lineno, col) for lineno, col, name, _ in calls if name == "_ThemeWorker"
+        ]
+        worker_starts = [
+            (lineno, col) for lineno, col, name, _ in calls if name == "start"
+        ]
+        self.assertTrue(
+            worker_creations,
+            "make_theme() 안에서 _ThemeWorker(...) 생성을 못 찾았습니다.")
+        self.assertTrue(
+            worker_starts, "make_theme() 안에서 worker.start() 를 못 찾았습니다.")
+
+        for pos in worker_creations:
+            self.assertGreater(
+                pos, consent_end,
+                "_ThemeWorker 생성이 동의 판정 if 문보다 앞(또는 안)에 있습니다 "
+                "— 동의 없이 워커가 만들어질 수 있습니다.")
+        for pos in worker_starts:
+            self.assertGreater(
+                pos, consent_end,
+                "worker.start() 가 동의 판정 if 문보다 앞(또는 안)에 있습니다 "
+                "— 동의 없이 업로드가 시작될 수 있습니다.")
+
+    def test_theme_worker_is_only_constructed_inside_make_theme(self):
+        """``_ThemeWorker`` 를 만드는 곳이 ``win_ai_ui`` 안에 두 곳 이상이면
+        그중 하나가 동의 검사를 건너뛰는 새 경로일 수 있다(R3 K-1 과 같은
+        모양의 재발). 파일 전체에서 ``_ThemeWorker(...)`` 호출을 모두 찾아
+        ``make_theme()`` 안의 호출과 정확히 같은 집합인지 본다."""
+        tree = self._win_ai_ui_tree()
+        make_theme = self._top_level_function(tree, "make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        def _theme_worker_calls(node):
+            return [
+                n for n in ast.walk(node)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "_ThemeWorker"
+            ]
+
+        all_calls = _theme_worker_calls(tree)
+        in_make_theme = _theme_worker_calls(make_theme)
+        self.assertTrue(
+            all_calls, "win_ai_ui.py 안에서 _ThemeWorker(...) 생성을 못 찾았습니다.")
+        self.assertEqual(
+            len(all_calls), 1,
+            "win_ai_ui.py 안에 _ThemeWorker(...) 생성이 두 곳 이상입니다 — "
+            "make_theme() 하나여야 합니다.")
+        self.assertEqual(
+            [n.lineno for n in all_calls], [n.lineno for n in in_make_theme],
+            "_ThemeWorker(...) 생성이 make_theme() 밖에도 있습니다.")
+
+    def test_create_theme_is_called_only_from_theme_worker_run_repo_wide(self):
+        """``win_ai.create_theme`` 를 부르는 곳이 저장소에 하나 더 생기면
+        (테스트 코드 제외) 그건 동의 대화상자를 거치지 않는 새 업로드 경로일
+        수 있다 — 사람이 반드시 다시 들여다봐야 한다(R3 K-1). 지금은
+        ``_ThemeWorker.run`` 하나뿐이어야 한다."""
+        call_sites = []
+        for path in sorted(_REPO.rglob("*.py")):
+            relative = path.relative_to(_REPO)
+            parts = relative.parts
+            if "tests" in parts or "__pycache__" in parts or ".superpowers" in parts:
+                continue
+            try:
+                source = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            try:
+                tree = ast.parse(source, filename=str(path))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "create_theme"):
+                    call_sites.append((relative, node))
+
+        self.assertEqual(
+            len(call_sites), 1,
+            f"win_ai.create_theme(...) 호출부가 {len(call_sites)}곳입니다 — "
+            f"{[str(p) for p, _ in call_sites]}. _ThemeWorker.run 하나여야 "
+            "합니다(늘어나면 동의 경로를 다시 확인해야 합니다).")
+        relative_path, call_node = call_sites[0]
+        self.assertEqual(
+            str(relative_path), str(Path("windows") / "win_ai_ui.py"),
+            "create_theme 호출이 win_ai_ui.py 가 아닌 다른 파일에 있습니다.")
+
+        tree = self._win_ai_ui_tree()
+        worker_run = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "_ThemeWorker":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "run":
+                        worker_run = item
+        self.assertIsNotNone(worker_run, "_ThemeWorker.run() 을 못 찾았습니다.")
+        run_call_lines = {
+            n.lineno for n in ast.walk(worker_run)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "create_theme"
+        }
+        self.assertIn(
+            call_node.lineno, run_call_lines,
+            "create_theme 호출이 _ThemeWorker.run() 안에 있지 않습니다.")
+
+    def test_upload_call_lives_only_inside_generate_sheet(self):
+        """실제 업로드(``client.images.edit``)는 ``vision_theme.generate_sheet``
+        한 곳에서만 나가야 한다 — 다른 함수에서 새로 호출하면
+        ``win_ai_ui.make_theme`` → ``win_ai.create_theme`` →
+        ``vision_theme.build_theme`` 경로(동의 대화상자를 반드시 거치는
+        경로)를 안 거치고도 사진이 나갈 길이 생긴다(R3 K-1)."""
+        tree = ast.parse(
+            self.vision_theme_source, filename=str(self.vision_theme_path))
+        generate_sheet = None
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "generate_sheet":
+                generate_sheet = node
+                break
+        self.assertIsNotNone(generate_sheet, "generate_sheet() 를 못 찾았습니다.")
+
+        def _upload_calls(node):
+            found = []
+            for n in ast.walk(node):
+                if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                        and n.func.attr == "edit"):
+                    continue
+                value = n.func.value
+                if isinstance(value, ast.Attribute) and value.attr == "images":
+                    found.append(n)
+            return found
+
+        all_calls = _upload_calls(tree)
+        in_generate_sheet = _upload_calls(generate_sheet)
+        self.assertTrue(
+            all_calls,
+            "vision_theme.py 안에서 <client>.images.edit(...) 호출을 못 찾았습니다.")
+        self.assertEqual(
+            len(all_calls), 1,
+            "vision_theme.py 안에 <client>.images.edit(...) 호출이 두 곳 "
+            "이상입니다.")
+        self.assertEqual(
+            [n.lineno for n in all_calls], [n.lineno for n in in_generate_sheet],
+            "<client>.images.edit(...) 호출이 generate_sheet() 밖에도 있습니다.")
 
 
 if __name__ == "__main__":
