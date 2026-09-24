@@ -1108,7 +1108,7 @@ class ConsentDialogSourceTests(unittest.TestCase):
         make_theme = self._top_level_function("make_theme")
         self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
 
-        consent_if = None
+        consent_if_matches = []
         for node in ast.walk(make_theme):
             if not isinstance(node, ast.If):
                 continue
@@ -1117,10 +1117,14 @@ class ConsentDialogSourceTests(unittest.TestCase):
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
             }
             if "clickedButton" in test_call_names:
-                consent_if = node
-                break
-        self.assertIsNotNone(
-            consent_if, "clickedButton() 을 검사하는 if 문을 못 찾았습니다.")
+                consent_if_matches.append(node)
+        # 리뷰 지적(Minor): 첫 매치에서 멈추면 동의창이 하나 더 생겼을 때
+        # 엉뚱한 if 문을 조용히 검사하게 된다 — 정확히 하나인지 확인한다.
+        self.assertEqual(
+            len(consent_if_matches), 1,
+            f"clickedButton() 을 검사하는 if 문이 {len(consent_if_matches)}개"
+            "입니다 — 정확히 하나여야 합니다.")
+        consent_if = consent_if_matches[0]
 
         def _stage_logged_in(stmts, stage):
             for stmt in stmts:
@@ -1339,19 +1343,14 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
         calls.sort(key=lambda item: (item[0], item[1]))
         return calls
 
-    def test_worker_is_created_and_started_only_after_the_consent_branch(self):
-        """R3 K-1: 동의창 없이 사진이 전송된 실기 보고가 있었다. ``_ThemeWorker``
-        생성과 ``start()`` 가 동의 판정(``clickedButton()`` 비교) if 문보다
-        앞(또는 그 검사 자체보다 앞)에 나오면, 동의창이 뜨기도 전이거나
-        "취소" 를 눌러도 업로드가 시작될 수 있다. 위치는 소스 좌표
-        (``lineno``, ``col_offset``) 로 비교해서 개행·변수명이 바뀌어도
-        흔들리지 않게 잡는다."""
-        tree = self._win_ai_ui_tree()
-        make_theme = self._top_level_function(tree, "make_theme")
-        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+    def _find_consent_if(self, func_node):
+        """``clickedButton()`` 을 검사하는 ``if`` 문을 찾는다.
 
-        consent_if = None
-        for node in ast.walk(make_theme):
+        리뷰 지적(Minor): 첫 매치에서 ``break`` 하면 나중에 동의창이 하나
+        더 생겼을 때 엉뚱한 if 문을 조용히 검사하게 된다 — 매치를 모두
+        모아 **정확히 하나**인지 확인한다."""
+        matches = []
+        for node in ast.walk(func_node):
             if not isinstance(node, ast.If):
                 continue
             test_call_names = {
@@ -1359,10 +1358,48 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
             }
             if "clickedButton" in test_call_names:
-                consent_if = node
-                break
-        self.assertIsNotNone(
-            consent_if, "clickedButton() 을 검사하는 if 문을 못 찾았습니다.")
+                matches.append(node)
+        self.assertEqual(
+            len(matches), 1,
+            f"clickedButton() 을 검사하는 if 문이 {len(matches)}개입니다 — "
+            "정확히 하나여야 이 테스트가 올바른 분기를 검사한다고 보장할 "
+            "수 있습니다.")
+        return matches[0]
+
+    def _log_consent_calls_by_stage(self, stmts):
+        """주어진 문장 목록(if 문의 ``body``/``orelse``) 안에서
+        ``win_ai.log_consent("<stage>")`` 호출을 stage 별로 모은다."""
+        calls_by_stage = {}
+        for stmt in stmts:
+            for node in ast.walk(stmt):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "log_consent"
+                        and node.args
+                        and isinstance(node.args[0], ast.Constant)
+                        and isinstance(node.args[0].value, str)):
+                    continue
+                calls_by_stage.setdefault(node.args[0].value, []).append(node)
+        return calls_by_stage
+
+    def test_worker_is_created_and_started_only_after_the_consent_branch(self):
+        """R3 K-1: 동의창 없이 사진이 전송된 실기 보고가 있었다. ``_ThemeWorker``
+        생성과 ``start()`` 가 동의 판정(``clickedButton()`` 비교) if 문보다
+        앞(또는 그 검사 자체보다 앞)에 나오면, 동의창이 뜨기도 전이거나
+        "취소" 를 눌러도 업로드가 시작될 수 있다. 위치는 소스 좌표
+        (``lineno``, ``col_offset``) 로 비교해서 개행·변수명이 바뀌어도
+        흔들리지 않게 잡는다.
+
+        주의: 이 검사는 **텍스트 위치**만 본다 — "취소" 분기가 실제로
+        멈추는지(제어 흐름)는 안 본다. 그건
+        ``test_declined_branch_returns_so_the_worker_is_unreachable_
+        without_consent`` 가 따로 검사한다(리뷰 지적 Critical: return 을
+        지워도 이 위치 검사만으로는 못 잡는다)."""
+        tree = self._win_ai_ui_tree()
+        make_theme = self._top_level_function(tree, "make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        consent_if = self._find_consent_if(make_theme)
         consent_end = (consent_if.end_lineno, consent_if.end_col_offset)
 
         calls = self._sorted_calls(make_theme)
@@ -1388,6 +1425,46 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
                 pos, consent_end,
                 "worker.start() 가 동의 판정 if 문보다 앞(또는 안)에 있습니다 "
                 "— 동의 없이 업로드가 시작될 수 있습니다.")
+
+    def test_declined_branch_returns_so_the_worker_is_unreachable_without_consent(self):
+        """리뷰 지적(Critical): 위 텍스트-위치 검사만으로는 "취소" 분기의
+        ``return None`` 을 지우는 변경을 못 잡는다 — ``_ThemeWorker`` 생성문이
+        여전히 if 문보다 뒤에 있다는 사실은 그대로이기 때문이다(그저 두
+        분기 모두 그 문장까지 흘러내려 갈 뿐). 텍스트 위치가 아니라
+        **제어 흐름**을 본다: "거절" 분기(``log_consent("declined")`` 가
+        있는 쪽)의 마지막 문장이 ``return`` 이어야 한다 — 그래야 그 분기를
+        타면 워커 생성문에 도달할 수 없다는 것을 AST 로 보장한다.
+
+        이 시나리오가 바로 이 작업의 존재 이유다(R3 K-1: 동의창에서
+        아무것도 누르지 않았는데, 혹은 취소를 눌렀는데도 사진이
+        나갔다는 실기 보고)."""
+        tree = self._win_ai_ui_tree()
+        make_theme = self._top_level_function(tree, "make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        consent_if = self._find_consent_if(make_theme)
+
+        body_stages = self._log_consent_calls_by_stage(consent_if.body)
+        orelse_stages = self._log_consent_calls_by_stage(consent_if.orelse)
+        self.assertIn(
+            "declined", orelse_stages,
+            '"진행" 이 아닌 분기(else)에서 log_consent("declined") 를 '
+            "못 찾았습니다 — 브랜치 식별 전제가 깨졌습니다.")
+        self.assertNotIn(
+            "declined", body_stages,
+            '"진행" 분기(if body)에서 log_consent("declined") 가 불립니다 '
+            "— 브랜치가 뒤바뀐 것 같습니다.")
+        declined_branch = consent_if.orelse
+
+        self.assertTrue(
+            declined_branch,
+            "거절 분기(else)가 비어 있습니다 — return 이 있어야 합니다.")
+        last_stmt = declined_branch[-1]
+        self.assertIsInstance(
+            last_stmt, ast.Return,
+            "거절(취소) 분기의 마지막 문장이 return 이 아닙니다 — 이 분기를 "
+            "타도 뒤이은 _ThemeWorker 생성문까지 실행이 이어질 수 있습니다 "
+            "(return 을 지우면 동의 없이도 업로드가 시작됩니다).")
 
     def test_theme_worker_is_only_constructed_inside_make_theme(self):
         """``_ThemeWorker`` 를 만드는 곳이 ``win_ai_ui`` 안에 두 곳 이상이면
@@ -1421,7 +1498,22 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
         """``win_ai.create_theme`` 를 부르는 곳이 저장소에 하나 더 생기면
         (테스트 코드 제외) 그건 동의 대화상자를 거치지 않는 새 업로드 경로일
         수 있다 — 사람이 반드시 다시 들여다봐야 한다(R3 K-1). 지금은
-        ``_ThemeWorker.run`` 하나뿐이어야 한다."""
+        ``_ThemeWorker.run`` 하나뿐이어야 한다.
+
+        ``win_ai.create_theme(...)`` 같은 속성 호출뿐 아니라
+        ``from win_ai import create_theme as ct`` 처럼 ``ImportFrom`` 으로
+        별칭을 준 뒤 ``ct(...)`` 로 부르는 경우도 그 파일 안에서 별칭을
+        추적해 잡는다(리뷰 지적 Important: 별칭 호출이 조용히 스캔을
+        빠져나갔었다).
+
+        한계(의도적으로 여기까지만 본다): ``import win_ai as w`` 뒤
+        ``w.create_theme(...)`` 처럼 **모듈** 별칭은 원래도 잡힌다(속성
+        이름만 보고 베이스는 안 가리므로). 하지만 별칭 이름을 다시 변수에
+        담아 넘기거나(``f = ct; f(...)``), ``getattr(win_ai,
+        "create_theme")(...)`` 같은 동적 호출, 또는 ``create_theme`` 를
+        감싸는 새 래퍼 함수를 만들어 그 래퍼만 부르는 경우는 이 테스트가
+        못 잡는다 — 그런 간접 경로는 사람의 코드 리뷰가 잡아야 한다. 또한
+        ``.py`` 파일만 스캔한다(``windows/build_exe.bat`` 등은 대상 밖)."""
         call_sites = []
         for path in sorted(_REPO.rglob("*.py")):
             relative = path.relative_to(_REPO)
@@ -1436,10 +1528,24 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
                 tree = ast.parse(source, filename=str(path))
             except SyntaxError:
                 continue
+
+            # "from <어디서든> import create_theme [as <별칭>]" 로 이 파일
+            # 안에 들어온 이름을 모은다 — 그 이름으로 부르는 Name 호출도
+            # 속성 호출과 같은 취급을 한다.
+            local_aliases = set()
             for node in ast.walk(tree):
-                if (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Attribute)
-                        and node.func.attr == "create_theme"):
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        if alias.name == "create_theme":
+                            local_aliases.add(alias.asname or alias.name)
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if isinstance(func, ast.Attribute) and func.attr == "create_theme":
+                    call_sites.append((relative, node))
+                elif isinstance(func, ast.Name) and func.id in local_aliases:
                     call_sites.append((relative, node))
 
         self.assertEqual(
