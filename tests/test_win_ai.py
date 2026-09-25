@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import unittest
 from collections import namedtuple
 from pathlib import Path
@@ -852,6 +853,103 @@ class LogConsentTests(unittest.TestCase):
         self.assertNotIn(".jpg", text)
 
 
+class ThemeWorkerStartedLogTests(unittest.TestCase):
+    """R5 K-1: 지금까지 업로드가 있었다는 증거는 401 트레이스백(즉 API 호출이
+    **실패했을 때만**) 뿐이었다. 워커가 실제로 돌기 시작할 때마다(성공이든
+    실패든) 한 줄을 남겨, 다음 실기에서 "consent accepted 줄 없이 이 줄만
+    있다"는 모양이 나오면 그 자체로 동의 없이 워커가 돈 증거가 된다."""
+
+    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] ")
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+    def _log_text(self):
+        return (Path(self._log_tmp.name) / "ai-errors.log").read_text(
+            encoding="utf-8")
+
+    def test_it_writes_one_timestamped_line(self):
+        win_ai.log_theme_worker_started()
+        lines = [line for line in self._log_text().splitlines() if line]
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(
+            self._TIMESTAMP_RE.match(lines[0]),
+            f"타임스탬프 형식이 아닙니다: {lines[0]!r}")
+        self.assertIn("theme worker started", lines[0])
+
+    def test_it_shares_the_file_with_log_consent(self):
+        win_ai.log_consent("accepted")
+        win_ai.log_theme_worker_started()
+        text = self._log_text()
+        self.assertIn("consent accepted", text)
+        self.assertIn("theme worker started", text)
+
+    def test_it_never_raises_when_the_log_folder_cannot_be_created(self):
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("파일")
+        with patch.object(win_ai.apppaths, "log_dir", return_value=blocked / "logs"):
+            win_ai.log_theme_worker_started()          # 예외가 새면 실패
+
+    def test_no_photo_path_or_key_like_text_is_ever_written(self):
+        win_ai.log_theme_worker_started()
+        text = self._log_text()
+        self.assertNotIn("sk-", text)
+        self.assertNotIn(".png", text)
+        self.assertNotIn(".jpg", text)
+
+
+class LogAppendIsThreadSafeTests(unittest.TestCase):
+    """R5 M3: ``log_consent`` 는 GUI 스레드에서, 진단 fallback 한 줄은 워커
+    스레드에서 같은 파일에 append 한다 — 두 스레드가 동시에 파일을 열고 쓰면
+    한쪽 줄이 깨지거나 사라질 수 있다. 모듈 수준 ``threading.Lock`` 으로
+    쓰기 구간을 감싸는지, 실제로 여러 스레드에서 두들겨 봐서 줄이 하나도
+    깨지거나 사라지지 않는지로 확인한다(락이 없으면 이 테스트는 드물게라도
+    깨진 줄·모자란 줄 수로 실패할 수 있다 — open(...,'a') 자체는 원자적이지
+    않다)."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
+    def test_module_level_lock_exists(self):
+        self.assertTrue(
+            hasattr(win_ai, "_LOG_LOCK"),
+            "win_ai 에 모듈 수준 락(_LOG_LOCK)이 없습니다.")
+        self.assertIsInstance(win_ai._LOG_LOCK, type(threading.Lock()))
+
+    def test_concurrent_writers_never_corrupt_or_drop_a_line(self):
+        writers = []
+        for index in range(20):
+            def _write(index=index):
+                win_ai._append_log_line(f"probe {index}")
+            writers.append(threading.Thread(target=_write))
+
+        for thread in writers:
+            thread.start()
+        for thread in writers:
+            thread.join()
+
+        log_path = Path(self._log_tmp.name) / "ai-errors.log"
+        text = log_path.read_text(encoding="utf-8")
+        lines = [line for line in text.splitlines() if line]
+        self.assertEqual(
+            len(lines), 20,
+            f"줄이 깨지거나 사라졌습니다(락 없이 동시에 쓰면 open('a') 조차도 "
+            f"보장 못 합니다): {lines!r}")
+        seen = {index for index in range(20)
+                for line in lines if f"probe {index}" in line}
+        self.assertEqual(seen, set(range(20)), "일부 줄이 통째로 사라졌습니다.")
+
+
 class DiagnosisFallbackLogTests(unittest.TestCase):
     """R33: 진단이 fallback(API 키 없음·네트워크 오류 등)으로 빠지면 같은
     로그 파일에 사유 한 줄을 남긴다. ``brain.diagnose`` 는 가짜로 패치한다."""
@@ -880,6 +978,25 @@ class DiagnosisFallbackLogTests(unittest.TestCase):
             win_ai.diagnosis_lines("ko")
         text = self._log_path().read_text(encoding="utf-8")
         self.assertIn("diagnosis fallback: api_error", text)
+
+    def test_missing_fallback_reason_logs_the_word_unknown_not_python_none(self):
+        """R5 M5: ``fallback_reason`` 키가 아예 없으면 ``result.get(...)`` 이
+        ``None`` 을 돌려준다 — f-string 에 그대로 넣으면 로그에 파이썬
+        내부값 ``"diagnosis fallback: None"`` 이 찍힌다. 사람이 읽을 단어
+        ``"unknown"`` 으로 대신 남겨야 한다."""
+        fallback = {
+            "why_slow": ["램이 거의 찼습니다."],
+            "one_line_advice": "탭을 좀 닫아 보세요.",
+            "cleanup_recommendations": [],
+            "estimated_reclaimable_bytes": 0,
+            "source": "fallback",
+            # fallback_reason 자체가 없다.
+        }
+        with patch.object(win_ai.brain, "diagnose", return_value=fallback):
+            win_ai.diagnosis_lines("ko")
+        text = self._log_path().read_text(encoding="utf-8")
+        self.assertIn("diagnosis fallback: unknown", text)
+        self.assertNotIn("diagnosis fallback: None", text)
 
     def test_openai_source_writes_nothing(self):
         openai_result = {
@@ -1017,10 +1134,14 @@ class ConsentDialogSourceTests(unittest.TestCase):
             calls_by_stage.setdefault(node.args[0].value, []).append(node)
         return calls_by_stage
 
-    def test_bring_to_front_helper_sets_the_stay_on_top_flag_and_raises_and_activates(self):
-        """헬퍼가 항상-위 플래그를 주고 ``raise_``·``activateWindow`` 를
-        부르는지 AST 로 본다 — 이름이 바뀌어도(리터럴 문자열 검사가 아니라)
-        실제 호출을 본다."""
+    def test_bring_to_front_helper_only_raises_and_activates_not_the_flag(self):
+        """R5 M10: 헬퍼가 ``raise_``·``activateWindow`` 를 부르는지 AST 로
+        본다 — 이름이 바뀌어도(리터럴 문자열 검사가 아니라) 실제 호출을 본다.
+
+        플래그(``setWindowFlag``/``setWindowFlags``)는 더 이상 이 함수 안에
+        없어야 한다 — ``_new_top_box`` 가 대화상자를 만들자마자(내용을
+        채우기 전에) 주는 쪽으로 옮겨졌다(M10). ``_bring_to_front`` 는 내용을
+        다 채운 뒤 ``exec()`` 직전에 show→raise_→activateWindow 만 한다."""
         helper = None
         for node in ast.walk(self._tree()):
             if isinstance(node, ast.FunctionDef) and node.name == "_bring_to_front":
@@ -1035,6 +1156,8 @@ class ConsentDialogSourceTests(unittest.TestCase):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
         }
         self.assertIn(
+            "show", attr_calls, "_bring_to_front 안에 show() 호출이 없습니다.")
+        self.assertIn(
             "raise_", attr_calls, "_bring_to_front 안에 raise_() 호출이 없습니다.")
         self.assertIn(
             "activateWindow", attr_calls,
@@ -1045,12 +1168,94 @@ class ConsentDialogSourceTests(unittest.TestCase):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr in ("setWindowFlag", "setWindowFlags")
         ]
-        self.assertTrue(
-            flag_calls, "_bring_to_front 안에 창 플래그를 주는 호출이 없습니다.")
+        self.assertFalse(
+            flag_calls,
+            "_bring_to_front 안에 창 플래그를 주는 호출이 남아 있습니다 — "
+            "M10 이후엔 _new_top_box 가 그 일을 맡아야 합니다.")
+
+    def test_new_top_box_sets_the_flag_immediately_after_construction(self):
+        """R5 M10: ``setWindowFlag()``/``setWindowFlags()`` 는 최상위 창을
+        다시 만든다(문서: "You must call show() to make the widget visible
+        again") — 그래서 대화상자를 만든 직후, 아이콘·제목·본문 같은 내용을
+        채우기 **전에** 플래그부터 줘야 한다. 대화상자를 만드는 헬퍼
+        (``_new_top_box`` 또는 같은 역할)의 몸 전체가 (1) ``QMessageBox(...)``
+        생성, (2) ``WindowStaysOnTopHint`` 플래그, (3) ``return`` 세 문장
+        뿐이어야 한다 — ``setIcon``/``setWindowTitle``/``setText`` 처럼
+        내용을 채우는 호출이 하나라도 섞여 있으면 안 된다."""
+        box_maker = None
+        for node in ast.walk(self._tree()):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            calls = {
+                n.func.attr for n in ast.walk(node)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr in ("setWindowFlag", "setWindowFlags")
+            }
+            constructs_box = any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "QMessageBox"
+                for n in ast.walk(node)
+            )
+            if calls and constructs_box:
+                box_maker = node
+                break
+        self.assertIsNotNone(
+            box_maker,
+            "대화상자를 만들고 그 자리에서 항상-위 플래그를 주는 헬퍼를 "
+            "못 찾았습니다(_new_top_box 또는 같은 역할).")
+
+        content_calls = {
+            n.func.attr for n in ast.walk(box_maker)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr in ("setIcon", "setWindowTitle", "setText")
+        }
+        self.assertFalse(
+            content_calls,
+            f"{box_maker.name}() 안에 내용을 채우는 호출이 있습니다: "
+            f"{content_calls} — 플래그는 내용을 채우기 전, 대화상자를 만든 "
+            "직후에만 줘야 합니다(M10).")
+
+        flag_calls = [
+            node for node in ast.walk(box_maker)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("setWindowFlag", "setWindowFlags")
+        ]
         self.assertTrue(
             any("WindowStaysOnTopHint" in ast.dump(call) for call in flag_calls),
-            "_bring_to_front 가 WindowStaysOnTopHint 를 주지 않습니다.",
+            f"{box_maker.name}() 가 WindowStaysOnTopHint 를 주지 않습니다.",
         )
+
+    def test_every_top_box_site_uses_the_new_top_box_helper(self):
+        """R5 M10: 동의창·완료 알림·진단/실패 알림 등 항상-위 대화상자를 쓰는
+        모든 자리가 새 헬퍼(``_new_top_box``)를 거쳐야 한다 — 어딘가 하나가
+        옛날처럼 ``QtWidgets.QMessageBox(parent)`` 를 직접 부르면 그 창엔
+        플래그가 안 붙는다. ``_new_top_box`` 자기 자신의 몸 안에서 만드는
+        것 하나만 예외다."""
+        tree = self._tree()
+        box_maker = self._top_level_function("_new_top_box")
+        self.assertIsNotNone(box_maker, "_new_top_box() 를 못 찾았습니다.")
+        allowed_lines = {
+            n.lineno for n in ast.walk(box_maker)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "QMessageBox"
+        }
+
+        direct_constructions = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "QMessageBox"):
+                continue
+            value = node.func.value
+            # QtWidgets.QMessageBox(...) 형태만 대상 — QMessageBox.Icon 같은
+            # 속성 접근은 이 노드 모양이 아니다.
+            if isinstance(value, ast.Name) and value.id == "QtWidgets":
+                if node.lineno in allowed_lines:
+                    continue
+                direct_constructions.append(node)
+        self.assertEqual(
+            len(direct_constructions), 0,
+            "QtWidgets.QMessageBox(...) 를 _new_top_box() 밖에서 직접 생성하는 "
+            "곳이 남아 있습니다 — _new_top_box(parent) 를 거쳐야 합니다.")
 
     def test_bring_to_front_is_applied_to_the_consent_dialog_before_exec(self):
         make_theme = self._top_level_function("make_theme")
@@ -1079,6 +1284,53 @@ class ConsentDialogSourceTests(unittest.TestCase):
             and bring_to_front_call.args[0].id == "box",
             "_bring_to_front 가 동의창(box) 이 아닌 다른 인자로 불립니다.",
         )
+
+    # --- I1: 나중에 비동기로 뜨는 창도 항상 앞으로 끌려와야 한다 ----------
+    #
+    # _show_theme_failure·_show_diagnosis·_show_diagnosis_failure 는 모두
+    # 클릭 직후가 아니라 워커가 몇 분 뒤에 끝났을 때 비동기로 뜨는 창이다
+    # (동의창·완료 알림과 같은 처지) — 다른 창 뒤에 숨으면 "만드는 중" 모달을
+    # 없앤 지금은 사용자 눈에 "아무 일도 안 일어난 것"처럼 보인다. 클릭
+    # 직후 바로 뜨는 _explain_missing_key·사진 형식 경고(check_photo 결과를
+    # 보여주는 QMessageBox.warning)는 대상이 아니다 — 그 자리에서 바로
+    # 뜨니 다른 창 뒤에 숨을 일이 없다.
+    _ASYNC_DIALOG_FUNCTIONS = (
+        "_show_theme_failure", "_show_diagnosis", "_show_diagnosis_failure",
+    )
+
+    def test_async_result_dialogs_are_brought_to_front_before_exec(self):
+        for name in self._ASYNC_DIALOG_FUNCTIONS:
+            with self.subTest(function=name):
+                func = self._top_level_function(name)
+                self.assertIsNotNone(func, f"{name}() 를 못 찾았습니다.")
+
+                calls = self._sorted_calls(func)
+                call_names = [call_name for _, _, call_name, _ in calls]
+                self.assertIn(
+                    "_bring_to_front", call_names,
+                    f"{name}() 안에서 _bring_to_front(...) 를 부르지 않습니다 "
+                    "— 다른 창 뒤에 숨을 수 있습니다(I1).")
+                self.assertIn(
+                    "exec", call_names, f"{name}() 안에서 box.exec() 를 부르지 않습니다.")
+                self.assertLess(
+                    call_names.index("_bring_to_front"),
+                    call_names.index("exec"),
+                    f"{name}() 에서 _bring_to_front 는 box.exec() 보다 앞이어야 "
+                    "합니다.")
+
+    def test_async_result_dialogs_use_the_new_top_box_helper(self):
+        for name in self._ASYNC_DIALOG_FUNCTIONS:
+            with self.subTest(function=name):
+                func = self._top_level_function(name)
+                self.assertIsNotNone(func, f"{name}() 를 못 찾았습니다.")
+                call_names = {
+                    n.func.id for n in ast.walk(func)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                }
+                self.assertIn(
+                    "_new_top_box", call_names,
+                    f"{name}() 가 _new_top_box(parent) 를 거치지 않고 대화상자를 "
+                    "만듭니다 — 항상-위 플래그가 안 붙습니다.")
 
     def test_consent_shown_is_logged_before_the_dialog_is_executed(self):
         make_theme = self._top_level_function("make_theme")
@@ -1294,6 +1546,122 @@ class ConsentDialogSourceTests(unittest.TestCase):
             "_show_theme_failure() 가 완료 알림 문구를 부릅니다 — 실패 경로에선 "
             "안 됩니다.")
 
+    def test_failed_signal_handler_never_references_the_success_path(self):
+        """R5 M1: 위 테스트(test_failure_path_never_shows_the_done_notice)는
+        ``_show_theme_failure()`` 함수 **본문**만 본다 — ``worker.failed`` 가
+        아예 ``_finish_theme`` 에 배선되는 실수(성공 알림을 실패 때도 띄우는
+        길)는 그 검사로 못 잡는다. 여기서는 ``failed.connect(...)`` 에 실제로
+        연결되는 핸들러 노드를 꺼내 그 안에 ``_finish_theme``·
+        ``theme_done_message`` 참조가 없는지 직접 본다 —
+        ``test_finished_ok_signal_is_wired_to_the_finish_helper_not_on_done_
+        directly`` 와 짝을 이루는 검사다(finished_ok 는 _finish_theme 를 거쳐야
+        하고, failed 는 거치면 안 된다)."""
+        make_theme = self._top_level_function("make_theme")
+        self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
+
+        connect_calls = [
+            node for node in ast.walk(make_theme)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "connect"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "failed"
+        ]
+        self.assertTrue(connect_calls, "worker.failed.connect(...) 를 못 찾았습니다.")
+        connect_call = connect_calls[0]
+        self.assertTrue(connect_call.args, "failed.connect() 에 인자가 없습니다.")
+        handler = connect_call.args[0]
+
+        names_in_handler = set()
+        for n in ast.walk(handler):
+            if not isinstance(n, ast.Call):
+                continue
+            if isinstance(n.func, ast.Name):
+                names_in_handler.add(n.func.id)
+            elif isinstance(n.func, ast.Attribute):
+                names_in_handler.add(n.func.attr)
+
+        self.assertNotIn(
+            "_finish_theme", names_in_handler,
+            "worker.failed 가 _finish_theme 를 부르는 핸들러에 연결돼 있습니다 "
+            "— 실패했는데도 완료 알림 경로를 탈 수 있습니다.")
+        self.assertNotIn(
+            "theme_done_message", names_in_handler,
+            "worker.failed 핸들러가 완료 알림 문구(theme_done_message)를 "
+            "부릅니다 — 실패 경로에선 안 됩니다.")
+
+    def test_finished_ok_is_never_emitted_inside_theme_workers_except_block(self):
+        """R5 M2: ``_ThemeWorker.run()`` 의 ``except`` 블록 안에서
+        ``self.finished_ok.emit(...)`` 을 부르면, 예외가 나서 실패 처리
+        (``failed.emit``)를 하는 도중에도 성공 신호가 같이 나가 완료 알림이
+        뜰 수 있다. AST 로 ``run()`` 의 except 블록 안에
+        ``<무엇>.finished_ok.emit(...)`` 호출이 없는지 직접 본다(위
+        ``test_the_diagnosis_worker_never_emits_the_raw_error_string`` 과
+        같은 패턴 — _DiagnosisWorker 대신 _ThemeWorker 를 본다)."""
+        tree = self._tree()
+        worker_run = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "_ThemeWorker":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "run":
+                        worker_run = item
+        self.assertIsNotNone(worker_run, "_ThemeWorker.run() 을 못 찾았습니다.")
+
+        except_handlers = [
+            n for n in ast.walk(worker_run) if isinstance(n, ast.ExceptHandler)
+        ]
+        self.assertTrue(except_handlers, "run() 안에 except 블록이 없습니다.")
+
+        for handler in except_handlers:
+            for node in ast.walk(handler):
+                offending = (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "emit"
+                    and isinstance(node.func.value, ast.Attribute)
+                    and node.func.value.attr == "finished_ok"
+                )
+                self.assertFalse(
+                    offending,
+                    "except 블록 안에서 finished_ok.emit(...) 을 부르고 있습니다 "
+                    "— 실패했는데도 완료 알림이 뜰 수 있습니다.",
+                )
+
+    def test_run_logs_that_the_worker_started_before_the_try_block(self):
+        """R5 K-1: ``_ThemeWorker.run()`` 이 실제로(워커 스레드에서) 실행되기
+        시작할 때마다 ``win_ai.log_theme_worker_started()`` 를 불러야 한다 —
+        ``try`` 블록보다 앞이어야 한다(성공이든 실패든 남아야 증거로 쓸 수
+        있다). 다음 실기에서 "theme worker started 줄은 있는데 그 앞에
+        consent accepted 가 없다" 는 모양이 나오면 그 자체로 동의 없이
+        워커가 돈 증거가 된다."""
+        tree = self._tree()
+        worker_run = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "_ThemeWorker":
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "run":
+                        worker_run = item
+        self.assertIsNotNone(worker_run, "_ThemeWorker.run() 을 못 찾았습니다.")
+
+        started_calls = [
+            n for n in ast.walk(worker_run)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "log_theme_worker_started"
+        ]
+        self.assertTrue(
+            started_calls,
+            "_ThemeWorker.run() 안에서 win_ai.log_theme_worker_started() 를 "
+            "못 찾았습니다.")
+
+        try_blocks = [n for n in worker_run.body if isinstance(n, ast.Try)]
+        self.assertTrue(try_blocks, "run() 안에서 try 블록을 못 찾았습니다.")
+        try_pos = min((n.lineno, n.col_offset) for n in try_blocks)
+        started_pos = min((n.lineno, n.col_offset) for n in started_calls)
+        self.assertLess(
+            started_pos, try_pos,
+            "log_theme_worker_started() 는 try 블록보다 앞에서 불러야 합니다 "
+            "— 예외가 나도(그리고 나지 않아도) 이 줄은 항상 남아야 증거가 "
+            "됩니다.")
+
 
 class UploadRequiresConsentGuardrailTests(unittest.TestCase):
     """R5 Task C: "동의창 없이 사진이 전송됐다"(R3 K-1) 재발 방지 회귀 테스트.
@@ -1435,9 +1803,9 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
         있는 쪽)의 마지막 문장이 ``return`` 이어야 한다 — 그래야 그 분기를
         타면 워커 생성문에 도달할 수 없다는 것을 AST 로 보장한다.
 
-        이 시나리오가 바로 이 작업의 존재 이유다(R3 K-1: 동의창에서
-        아무것도 누르지 않았는데, 혹은 취소를 눌렀는데도 사진이
-        나갔다는 실기 보고)."""
+        이 시나리오가 바로 이 작업의 존재 이유다(R3 K-1: 테스터가 동의창을
+        보지 못했다는 실기 보고 — 그런데 로그 기록상으로는 사진이 이미
+        전송된 상태였다)."""
         tree = self._win_ai_ui_tree()
         make_theme = self._top_level_function(tree, "make_theme")
         self.assertIsNotNone(make_theme, "make_theme() 를 못 찾았습니다.")
@@ -1518,7 +1886,18 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
         for path in sorted(_REPO.rglob("*.py")):
             relative = path.relative_to(_REPO)
             parts = relative.parts
-            if "tests" in parts or "__pycache__" in parts or ".superpowers" in parts:
+            if "tests" in parts or "__pycache__" in parts:
+                continue
+            # 리뷰 지적(Important): ".superpowers" 하나만 걸러서는
+            # ".venv"·"에이전트 워크트리(.claude/worktrees/...)" 같은
+            # 점(.)으로 시작하는 다른 디렉터리가 그대로 스캔에 들어간다 —
+            # 그 안에 이 파일의 다른 사본(sibling 워크트리의 win_ai_ui.py
+            # 등)이 있으면 호출부가 둘로 잡혀 이 테스트가 잘못 실패한다.
+            # 점으로 시작하는 컴포넌트는 전부(.git·.venv·.claude·
+            # .superpowers·.github·.pytest_cache 등) 저장소 소스가 아니므로
+            # 한 번에 뺀다 — 저장소 루트·windows/·macos/ 는 점으로 시작하지
+            # 않으니 그대로 스캔된다.
+            if any(part.startswith(".") for part in parts):
                 continue
             try:
                 source = path.read_text(encoding="utf-8")

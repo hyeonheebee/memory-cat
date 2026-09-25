@@ -233,6 +233,20 @@ class I18nTests(unittest.TestCase):
             "I'm so full… want a checkup?",
         )
 
+    def test_theme_working_key_is_documented_as_intentionally_unused(self):
+        """R5 M9: J-1 이 "만드는 중" 모달(이 키를 쓰던 곳)을 없앴다. 키
+        자체는 일부러 남겨 뒀는데, 나중에 누가 "안 쓰는 키니 지워도 되나?"
+        헷갈리지 않도록 그 이유를 적은 주석이 소스에 있어야 한다."""
+        source = (_REPO / "i18n.py").read_text(encoding="utf-8")
+        marker = source.index('"theme_working"')
+        preceding = source[:marker]
+        # 바로 앞 줄(들)에 이유를 설명하는 주석이 있는지 — "J-1" 과 "R5" 둘
+        # 다 언급해야 어떤 라운드의 어떤 결정인지 추적할 수 있다.
+        comment_window = preceding[-400:]
+        self.assertIn("J-1", comment_window)
+        self.assertIn("R5", comment_window)
+        self.assertIn("#", comment_window)
+
 
 if __name__ == "__main__":
     unittest.main()

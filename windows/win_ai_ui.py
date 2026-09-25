@@ -30,21 +30,42 @@ def _explain_missing_key(parent, language):
     QtWidgets.QMessageBox.information(parent, title, body)
 
 
-def _bring_to_front(box):
-    """대화상자가 다른 창 뒤에 숨지 않도록 항상 위로 끌어온다.
+def _new_top_box(parent):
+    """항상-위 대화상자를 하나 만든다. 창 플래그는 **내용을 채우기 전에** 준다.
 
     고양이 창은 ``FramelessWindowHint | WindowStaysOnTopHint | Tool``
     이다(``windows_cat.pyw``). 윈도우에서 ``Tool`` 창의 자식 대화상자는 그
     항상-위를 물려받지 못해 다른 창 뒤에서 열릴 수 있다 — 대화상자
     자신에게도 항상-위 플래그를 직접 준다.
 
+    R5 M10: 예전엔 이 플래그를 ``_bring_to_front`` 안에서, 즉 아이콘·제목·
+    본문을 다 채운 **뒤에** 줬다. ``setWindowFlag()``/``setWindowFlags()``
+    는 최상위 창을 다시 만들며(내부적으로 ``setParent()`` 를 부른다) 그
+    창을 숨긴다 — 문서가 "You must call show() to make the widget visible
+    again" 라고 경고한다. 아직 한 번도 보이지 않은 위젯이면 이 재생성이
+    화면에 보이는 효과는 없지만, 플래그를 대화상자를 만들자마자(내용을
+    채우기 전에) 주면 "그 뒤로는 이 대화상자가 다시 만들어질 일이 없다"
+    는 걸 코드 순서만으로 보장할 수 있다 — 나중에 누가 아이콘·제목·본문을
+    채우는 도중에 ``show()`` 를 끼워 넣어도(예: 진행 중 표시) 이미 보이는
+    창을 재생성해 깜빡이는 경로가 생기지 않는다.
+
+    화면 앞으로 끌어오는 일(show→raise_→activateWindow)은 내용을 다 채운
+    뒤 ``exec()`` 직전에 ``_bring_to_front`` 가 따로 맡는다.
+    """
+    box = QtWidgets.QMessageBox(parent)
+    box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+    return box
+
+
+def _bring_to_front(box):
+    """내용을 다 채운 대화상자를 화면 맨 앞으로 끌어온다.
+
+    항상-위 플래그는 ``_new_top_box`` 가 생성 직후에 이미 줬다 — 여기서는
+    플래그를 다시 건드리지 않는다. 아이콘·제목·본문을 다 채운 뒤,
+    ``box.exec()`` 직전에 부른다.
+
     순서 근거(Qt 문서, PySide6 도 같은 C++ API 를 그대로 감싼다):
 
-    * ``setWindowFlag()``/``setWindowFlags()`` 는 최상위 창을 다시 만들며
-      (내부적으로 ``setParent()`` 를 부른다) 그 창을 **숨긴다** — 문서가
-      "You must call show() to make the widget visible again" 라고
-      경고한다. 그래서 **아직 한 번도 보이지 않은 시점**(``box.exec()`` 를
-      부르기 전)에 플래그를 준다 — 숨었다 다시 뜨는 깜빡임이 없다.
     * ``activateWindow()`` 는 창이 이미 보이는 상태가 아니면 아무 효과가
       없다 — 문서: "Note that the window must be visible, otherwise
       activateWindow() has no effect." 그래서 ``show()`` **뒤에** 부른다.
@@ -60,7 +81,6 @@ def _bring_to_front(box):
       서로 다른 축(플래그 vs 모달리티)이라 충돌하지 않고, 모달 동작은
       그대로 유지된다.
     """
-    box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
     box.show()
     box.raise_()
     box.activateWindow()
@@ -102,6 +122,11 @@ class _ThemeWorker(QtCore.QThread):
         self._photo, self._name, self._language = photo, name, language
 
     def run(self):
+        # R5 K-1: 이 워커가 실제로(워커 스레드에서) 돌기 시작했다는 증거를
+        # 성공·실패에 상관없이 항상 남긴다 — try 블록보다 앞이어야 예외가
+        # 나도 이 줄은 남는다. 지금까지는 "사진이 나갔다"는 증거가 401
+        # 트레이스백(호출이 실패했을 때만) 뿐이었다.
+        win_ai.log_theme_worker_started()
         try:
             name = win_ai.create_theme(self._photo, self._name, self._language)
         except Exception as error:
@@ -116,15 +141,29 @@ class _ThemeWorker(QtCore.QThread):
 
 
 def _show_diagnosis(parent, language, lines):
-    QtWidgets.QMessageBox.information(
-        parent, tr(language, "diagnosis_title"), "\n".join(lines))
+    # I1: 진단도 워커가 수십 초 뒤에 끝나서 비동기로 뜨는 창이다 — 동의창·
+    # 완료 알림과 같은 처지라 _bring_to_front 를 똑같이 적용한다. 그 전엔
+    # 정적(static) QMessageBox.information() 호출이라 다른 창 뒤에 숨을 수
+    # 있었다(J-1 로 "만드는 중" 모달이 없어진 지금은 그게 "아무 일도 안
+    # 일어난 것"처럼 보인다).
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+    box.setWindowTitle(tr(language, "diagnosis_title"))
+    box.setText("\n".join(lines))
+    _bring_to_front(box)
+    box.exec()
 
 
 def _show_diagnosis_failure(parent, language, message):
     # message 는 워커가 이미 번역해서 emit 한 안내 문구다(원문은 로그로만
     # 간다) — 여기서 다시 tr() 을 불러 따로 만들지 않고 그대로 띄운다.
-    QtWidgets.QMessageBox.warning(
-        parent, tr(language, "diagnosis_title"), message)
+    # I1: _show_diagnosis 와 같은 이유로 _bring_to_front 를 적용한다.
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr(language, "diagnosis_title"))
+    box.setText(message)
+    _bring_to_front(box)
+    box.exec()
 
 
 def show_diagnosis(parent, language):
@@ -148,8 +187,14 @@ def show_diagnosis(parent, language):
 
 
 def _show_theme_failure(parent, language, message):
-    QtWidgets.QMessageBox.warning(
-        parent, tr(language, "pet_theme_error_title"), message)
+    # I1: 테마 실패도 워커가 1~2 분 뒤에 끝나서 비동기로 뜨는 창이다 —
+    # 동의창·완료 알림과 같은 처지라 _bring_to_front 를 똑같이 적용한다.
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr(language, "pet_theme_error_title"))
+    box.setText(message)
+    _bring_to_front(box)
+    box.exec()
 
 
 def _finish_theme(parent, language, on_done, name):
@@ -166,7 +211,7 @@ def _finish_theme(parent, language, on_done, name):
     """
     on_done(name)
     title, body = win_ai.theme_done_message(language)
-    box = QtWidgets.QMessageBox(parent)
+    box = _new_top_box(parent)
     box.setIcon(QtWidgets.QMessageBox.Icon.Information)
     box.setWindowTitle(title)
     box.setText(body)
@@ -199,7 +244,7 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
     # QMessageBox.question 의 기본 Yes/No 는 버튼이 영어이고 기본 버튼이
     # Yes 라 엔터 한 번에 사진이 전송된다. 직접 만들어 한국어 버튼을 달고
     # 기본·Esc 버튼을 모두 "취소"로 둔다.
-    box = QtWidgets.QMessageBox(parent)
+    box = _new_top_box(parent)
     box.setIcon(QtWidgets.QMessageBox.Icon.Question)
     box.setWindowTitle(tr(language, "pet_theme_consent_title"))
     box.setText(tr(language, "pet_theme_consent_body"))

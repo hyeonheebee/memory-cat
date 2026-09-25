@@ -12,6 +12,7 @@
 
 import datetime
 import re
+import threading
 import traceback
 from pathlib import Path
 
@@ -37,6 +38,13 @@ class ThemeError(Exception):
 
 #: 로그 파일 이름. ``apppaths.log_dir()`` 아래에 둔다.
 _AI_LOG_FILE_NAME = "ai-errors.log"
+
+#: R5 M3: 동의 로그(``log_consent``)는 GUI 스레드에서, 진단·테마 실패 로그는
+#: 워커 스레드(``_DiagnosisWorker``/``_ThemeWorker``)에서 남는다 — 둘이 같은
+#: 파일에 동시에 append 할 수 있다. ``open(..., "a")`` 자체가 두 스레드의
+#: 쓰기를 자동으로 순서 매겨 주지 않으므로, 이 파일에 쓰는 모든 자리를 이
+#: 락으로 감싼다.
+_LOG_LOCK = threading.Lock()
 
 #: ``sk-`` 로 시작하는 토큰. 앞에 다른 글자가 붙어도(``ssk-proj…``) ``sk-``
 #: 부터는 가려진다 — 앵커를 걸지 않았기 때문이다. ``*`` 는 openai 가 키를
@@ -118,7 +126,7 @@ def log_ai_failure(kind, error):
             detail = f"{type(error).__name__}: {error}"
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
         entry = f"[{timestamp}] {kind}\n{redact_secrets(detail)}\n"
-        with open(log_path, "a", encoding="utf-8") as handle:
+        with _LOG_LOCK, open(log_path, "a", encoding="utf-8") as handle:
             handle.write(entry + "\n")
     except OSError:
         pass
@@ -134,12 +142,16 @@ def _append_log_line(text):
 
     ``log_ai_failure`` 와 같은 파일·같은 로그 폴더를 쓴다. 폴더가 없으면
     만들고, 쓰기 실패(``OSError``)는 삼켜 사용자가 보는 흐름을 막지 않는다.
+
+    R5 M3: ``_LOG_LOCK`` 으로 감싼다 — 동의 로그는 GUI 스레드에서, 진단
+    fallback·워커 시작 로그는 워커 스레드에서 남아 같은 파일에 동시에 쓸 수
+    있다.
     """
     try:
         log_path = _ai_error_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
-        with open(log_path, "a", encoding="utf-8") as handle:
+        with _LOG_LOCK, open(log_path, "a", encoding="utf-8") as handle:
             handle.write(f"[{timestamp}] {text}\n")
     except OSError:
         pass
@@ -161,6 +173,19 @@ def log_consent(stage):
     if stage not in _CONSENT_STAGES:
         raise ValueError(f"알 수 없는 동의 단계: {stage!r}")
     _append_log_line(f"consent {stage}")
+
+
+def log_theme_worker_started():
+    """R5 K-1: 테마 워커가 실제로 돌기 시작했다는 증거 한 줄을 남긴다.
+
+    지금까지 "사진이 실제로 나갔다" 는 증거는 401 트레이스백뿐이었다 — 즉
+    API 호출이 **실패했을 때만** 흔적이 남았다. 이 한 줄은 성공이든
+    실패든 워커가 시작될 때마다 남으므로, 다음 실기에서 "consent accepted
+    줄 없이 이 줄만 있다" 는 모양이 나오면 그 자체로 동의 없이 워커가 돈
+    증거가 된다. ``log_consent`` 와 마찬가지로 단계 이름 하나뿐 — 사진
+    경로·파일명은 남기지 않는다.
+    """
+    _append_log_line("theme worker started")
 
 
 def has_api_key() -> bool:
@@ -230,7 +255,12 @@ def diagnosis_lines(language):
     result = brain.diagnose(language=language, include_cleanup=False)
     lines = []
     if result.get("source") == "fallback":
-        reason = result.get("fallback_reason")
+        # R5 M5: fallback_reason 키 자체가 없으면 .get() 이 파이썬 None 을
+        # 돌려준다 — 로그 줄에 그대로 넣으면 "diagnosis fallback: None"
+        # 이라는, 사람이 아니라 파이썬 내부 표현이 찍힌다. 사람이 읽을 단어
+        # "unknown" 으로 대신한다("fallback_unknown" 매핑으로도 안 걸리는
+        # 값이라 아래 reason_key 조회 결과는 이전과 같다).
+        reason = result.get("fallback_reason") or "unknown"
         _append_log_line(f"diagnosis fallback: {reason}")
         reason_key = _FALLBACK_REASON_KEYS.get(reason, "fallback_unknown")
         lines.append(tr(
