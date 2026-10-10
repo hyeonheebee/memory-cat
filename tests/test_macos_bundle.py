@@ -296,6 +296,44 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(moved["themes"], [])
 
 
+class AppModulesCoverImportsTests(unittest.TestCase):
+    """R7: 맥 번들(``install_mac.command`` 경로)은 ``APP_MODULES`` 에 적힌
+    파일만 복사한다. ``desktop_cat`` 이 새 루트 모듈을 쓰기 시작했는데 목록에
+    안 넣으면, 저장소에선 멀쩡하고 설치한 앱만 켜자마자 ImportError 로 죽는다.
+
+    번들에 들어가는 모듈들이 import 하는 루트 모듈을 따라가며(간접 포함)
+    전부 목록에 있는지 본다.
+    """
+
+    @staticmethod
+    def _root_imports(path):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add(alias.name.split(".")[0])
+        return {n for n in names if (_REPO / f"{n}.py").is_file()}
+
+    def test_every_root_module_the_bundle_imports_is_copied(self):
+        declared = {Path(name).stem for name in build_app.APP_MODULES}
+        seen, todo = set(), ["desktop_cat"]
+        while todo:
+            name = todo.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            todo.extend(self._root_imports(_REPO / f"{name}.py"))
+        missing = sorted(seen - declared)
+        self.assertEqual(
+            missing, [],
+            "macos/build_app.py APP_MODULES 에 빠진 모듈: " + ", ".join(missing)
+            + " — 설치한 앱이 켜자마자 죽습니다",
+        )
+
+
 class AssembleTests(unittest.TestCase):
     def _fake_source(self, root: Path) -> Path:
         source = root / "repo"
@@ -676,7 +714,7 @@ class InstallScriptTests(unittest.TestCase):
 #: 멀쩡하고 exe 에서 AI 메뉴만 소리 없이 사라진다.
 MODULES_THE_WINDOWS_EXE_MUST_BUNDLE = (
     "i18n", "metrics", "apppaths", "brain", "personality",
-    "vision_theme", "import_theme",
+    "vision_theme", "import_theme", "ai_errors",
     "win_ai", "win_ai_ui", "win_app",
 )
 

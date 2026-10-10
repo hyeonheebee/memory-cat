@@ -30,6 +30,7 @@ class FormatArgumentTests(unittest.TestCase):
         "personality.py",
         "vision_theme.py",
         "import_theme.py",
+        "ai_errors.py",
     )
 
     @staticmethod

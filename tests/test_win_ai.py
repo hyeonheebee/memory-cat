@@ -21,6 +21,7 @@ _WINDOWS_DIR = str(_REPO / "windows")
 if _WINDOWS_DIR not in sys.path:
     sys.path.insert(0, _WINDOWS_DIR)
 
+import ai_errors
 import apppaths
 import i18n
 import metrics
@@ -2087,7 +2088,7 @@ class ThemeKeyProblemTests(unittest.TestCase):
         return path.read_text(encoding="utf-8") if path.exists() else ""
 
     def _run(self, error=None):
-        with patch.object(win_ai, "OpenAI", _fake_openai(error)):
+        with patch.object(ai_errors, "OpenAI", _fake_openai(error)):
             return win_ai.theme_key_problem("ko")
 
     def test_a_working_key_lets_the_flow_continue(self):

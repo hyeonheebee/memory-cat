@@ -74,6 +74,7 @@ APP_MODULES = (
     "personality.py",
     "vision_theme.py",
     "import_theme.py",
+    "ai_errors.py",
     "generate_frames.py",
 )
 

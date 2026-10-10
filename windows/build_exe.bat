@@ -63,7 +63,7 @@ if not exist "..\apppaths.py" (
 )
 
 REM i18n.py / metrics.py 는 저장소 루트에 있다. apppaths.py / brain.py /
-REM personality.py / vision_theme.py / import_theme.py (진단·커스텀 테마 AI 기능)
+REM personality.py / vision_theme.py / import_theme.py / ai_errors.py (진단·커스텀 테마 AI 기능)
 REM 도 마찬가지다. --paths 로 import 경로에 넣고, 이름을
 REM --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기 시작하면
 REM 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
@@ -82,6 +82,7 @@ pyinstaller --noconsole --onefile --name MemoryCat ^
     --hidden-import personality ^
     --hidden-import vision_theme ^
     --hidden-import import_theme ^
+    --hidden-import ai_errors ^
     --hidden-import win_ai ^
     --hidden-import win_ai_ui ^
     --hidden-import win_app ^
