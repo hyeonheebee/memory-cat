@@ -1827,6 +1827,89 @@ class RevealTests(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY=sk-...", body)
         self.assertIn(".env", body)
 
+    def _pet_theme_controller(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        controller._pet_theme_running = False
+        controller._show_information_alert = Mock()
+        return controller
+
+    def test_pet_theme_checks_the_key_works_before_asking_for_a_photo(self):
+        """F-2: 키가 있지만 무효면 사진 선택·동의·업로드까지 다 간 뒤에야 401
+        로 실패했다. 사진 고르기 전에 막고, 윈도우와 같은 안내를 보인다."""
+        controller = self._pet_theme_controller()
+        panel_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value="sk-test"),
+            patch.object(desktop_cat, "theme_key_problem",
+                         return_value="API 키가 올바르지 않아요 …") as check,
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+        ):
+            controller.makePetTheme_(None)
+
+        check.assert_called_once_with("ko")
+        panel_class.openPanel.assert_not_called()
+        controller._show_information_alert.assert_called_once_with(
+            "테마를 만들지 못했어요", "API 키가 올바르지 않아요 …")
+        self.assertFalse(controller._pet_theme_running)
+
+    def test_pet_theme_goes_on_to_the_photo_when_the_key_is_not_known_bad(self):
+        controller = self._pet_theme_controller()
+        panel_class = Mock()
+        panel_class.openPanel.return_value.runModal.return_value = (
+            desktop_cat.NSModalResponseOK + 1)  # 사진 고르기 취소
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value="sk-test"),
+            patch.object(desktop_cat, "theme_key_problem", return_value=None),
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+            patch.object(desktop_cat, "NSApp", Mock()),
+        ):
+            controller.makePetTheme_(None)
+
+        panel_class.openPanel.assert_called_once()
+        controller._show_information_alert.assert_not_called()
+
+    def test_pet_theme_without_a_key_does_not_touch_the_network(self):
+        controller = self._pet_theme_controller()
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value=None),
+            patch.object(desktop_cat, "theme_key_problem") as check,
+            patch.object(desktop_cat, "NSOpenPanel", Mock()),
+        ):
+            controller.makePetTheme_(None)
+        check.assert_not_called()
+
+    def test_pet_theme_worker_gets_the_app_language(self):
+        """G-1 배선: 실패 안내가 앱 언어로 나오려면 워커에 언어를 넘겨야 한다."""
+        controller = self._pet_theme_controller()
+        controller.language = "en"
+        panel_class = Mock()
+        panel = panel_class.openPanel.return_value
+        panel.runModal.return_value = desktop_cat.NSModalResponseOK
+        panel.URL.return_value.path.return_value = "/photos/pet.jpg"
+        alert = Mock()
+        alert.runModal.return_value = desktop_cat.NSAlertFirstButtonReturn
+        thread_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value="sk-test"),
+            patch.object(desktop_cat, "theme_key_problem", return_value=None),
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "next_pet_theme_name", return_value="mypet"),
+            patch.object(desktop_cat, "NSApp", Mock()),
+            patch.object(desktop_cat.threading, "Thread", thread_class),
+        ):
+            controller.makePetTheme_(None)
+
+        kwargs = thread_class.call_args.kwargs
+        self.assertIs(kwargs["target"], desktop_cat._pet_theme_worker)
+        self.assertEqual(kwargs["args"][0], "/photos/pet.jpg")
+        self.assertEqual(kwargs["args"][-1], "en")
+        thread_class.return_value.start.assert_called_once()
+
     def test_diagnosis_tells_you_where_to_put_the_key_when_it_is_missing(self):
         content = desktop_cat.diagnosis_result_content(
             {

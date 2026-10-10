@@ -59,7 +59,7 @@ from personality import (
     preset_label,
     preset_names,
 )
-from ai_errors import theme_failure_text
+from ai_errors import theme_failure_text, theme_key_problem
 from vision_theme import ThemeGenerationError, build_theme as build_pet_theme
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -961,6 +961,15 @@ class CatController(NSObject):
         # 누르자마자 알려 준다.
         if not _load_api_key():
             self._show_missing_api_key_alert()
+            return
+
+        # F-2: 키가 있어도 무효면 사진·동의·업로드를 다 거친 뒤에야 401 로
+        # 실패했다. 모델 목록 GET 한 번(사진 없음·과금 없음, 최대 5초·재시도
+        # 없음)으로 먼저 본다. 401 만 막고 나머지(네트워크·403)는 진행한다.
+        problem = theme_key_problem(self.language)
+        if problem:
+            self._show_information_alert(
+                tr(self.language, "pet_theme_error_title"), problem)
             return
 
         panel = NSOpenPanel.openPanel()
