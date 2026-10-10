@@ -803,8 +803,8 @@ class CatViewTests(unittest.TestCase):
             self.assertEqual(win_app.normalize_size_source(value), value)
 
 
-class WindowsSizeSourceWiringTests(unittest.TestCase):
-    """``.pyw`` 는 못 돌리니 배선을 정적으로 본다."""
+class _PywStatic:
+    """``.pyw`` 는 못 돌리니 배선을 정적으로 본다(테스트 없는 도우미)."""
 
     APP = _REPO / "windows" / "windows_cat.pyw"
 
@@ -832,6 +832,8 @@ class WindowsSizeSourceWiringTests(unittest.TestCase):
                     names.add(func.id)
         return names
 
+
+class WindowsSizeSourceWiringTests(_PywStatic, unittest.TestCase):
     def test_refresh_uses_the_shared_view_not_a_linear_map(self):
         refresh = self._function("_refresh_once")
         self.assertIn("cat_view", self._calls(refresh))
@@ -854,3 +856,137 @@ class WindowsSizeSourceWiringTests(unittest.TestCase):
         calls = self._calls(self._function("set_size_source"))
         self.assertIn("save_config", calls)
         self.assertIn("refresh", calls)
+
+
+class FakeWinreg:
+    """``winreg`` 의 쓰는 부분만 흉내 낸다. 값은 dict 하나에 산다."""
+
+    HKEY_CURRENT_USER = "HKCU"
+    REG_SZ = 1
+    KEY_READ = 0x20019
+    KEY_SET_VALUE = 0x0002
+
+    def __init__(self, values=None, fail=False):
+        self.values = dict(values or {})
+        self.fail = fail
+        self.opened = []
+
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _check(self):
+        if self.fail:
+            raise PermissionError("access denied")
+
+    def OpenKey(self, root, path, reserved=0, access=0):
+        self._check()
+        self.opened.append((root, path))
+        return self._Key()
+
+    def CreateKey(self, root, path):
+        self._check()
+        self.opened.append((root, path))
+        return self._Key()
+
+    def QueryValueEx(self, key, name):
+        self._check()
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name], self.REG_SZ
+
+    def SetValueEx(self, key, name, reserved, kind, value):
+        self._check()
+        self.values[name] = value
+
+    def DeleteValue(self, key, name):
+        self._check()
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        del self.values[name]
+
+
+class AutostartTests(unittest.TestCase):
+    """R7 #4: 윈도우 켤 때 같이 실행. HKCU Run 값 하나(관리자 권한 불필요).
+
+    레지스트리 값 자체가 진실이다 — 설정 파일에 따로 적으면 둘이 엇갈린다.
+    기본은 꺼짐: 사용자가 메뉴에서 켜기 전엔 아무것도 쓰지 않는다.
+    """
+
+    EXE = r"C:\Users\me\Downloads\MemoryCat.exe"
+
+    def test_the_command_quotes_the_exe_path(self):
+        self.assertEqual(
+            win_app.autostart_command(self.EXE, frozen=True, script=None),
+            f'"{self.EXE}"')
+
+    def test_source_runs_use_pythonw_so_no_console_window_opens(self):
+        command = win_app.autostart_command(
+            r"C:\Python312\python.exe", frozen=False,
+            script=r"C:\cat\windows\windows_cat.pyw")
+        self.assertEqual(
+            command,
+            r'"C:\Python312\pythonw.exe" "C:\cat\windows\windows_cat.pyw"')
+
+    def test_off_by_default(self):
+        self.assertFalse(win_app.autostart_enabled(FakeWinreg()))
+
+    def test_turning_on_writes_one_run_value_under_hkcu(self):
+        reg = FakeWinreg()
+        self.assertTrue(win_app.set_autostart(True, '"x.exe"', reg))
+        self.assertEqual(reg.values, {win_app.AUTOSTART_VALUE_NAME: '"x.exe"'})
+        self.assertIn(("HKCU", win_app.RUN_KEY), reg.opened)
+        self.assertTrue(win_app.autostart_enabled(reg))
+
+    def test_turning_off_removes_it_and_tolerates_it_being_gone(self):
+        reg = FakeWinreg({win_app.AUTOSTART_VALUE_NAME: '"x.exe"'})
+        self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
+        self.assertEqual(reg.values, {})
+        self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
+
+    def test_registry_errors_report_failure_instead_of_crashing(self):
+        reg = FakeWinreg(fail=True)
+        self.assertFalse(win_app.set_autostart(True, '"x.exe"', reg))
+        self.assertFalse(win_app.autostart_enabled(reg))
+        win_app.refresh_autostart('"x.exe"', reg)  # 예외 없이 끝나야 한다
+
+    def test_a_moved_exe_is_rewritten_on_the_next_launch(self):
+        reg = FakeWinreg({win_app.AUTOSTART_VALUE_NAME: '"C:\\old\\MemoryCat.exe"'})
+        win_app.refresh_autostart(f'"{self.EXE}"', reg)
+        self.assertEqual(reg.values[win_app.AUTOSTART_VALUE_NAME], f'"{self.EXE}"')
+
+    def test_refresh_never_turns_it_on_by_itself(self):
+        reg = FakeWinreg()
+        win_app.refresh_autostart('"x.exe"', reg)
+        self.assertEqual(reg.values, {})
+
+    def test_no_registry_module_means_off_and_unchanged(self):
+        """맥·리눅스에는 winreg 가 없다 — None 이면 조용히 꺼짐으로 본다."""
+        self.assertFalse(win_app.autostart_enabled(None))
+        self.assertFalse(win_app.set_autostart(True, '"x.exe"', None))
+
+
+class WindowsAutostartWiringTests(_PywStatic, unittest.TestCase):
+    def test_menu_has_a_checkable_autostart_toggle(self):
+        dumped = ast.dump(self._function("contextMenuEvent"))
+        self.assertIn("menu_autostart", dumped)
+        self.assertIn("autostart_enabled", dumped)
+        self.assertIn("toggle_autostart", dumped)
+
+    def test_toggle_writes_and_tells_the_user_when_it_fails(self):
+        toggle = self._function("toggle_autostart")
+        calls = self._calls(toggle)
+        self.assertIn("set_autostart", calls)
+        self.assertIn("autostart_error", ast.dump(toggle))
+
+    def test_main_rewrites_a_moved_exe_path(self):
+        self.assertIn("refresh_autostart", self._calls(self._function("main")))
+
+    def test_menu_strings_exist_in_both_languages(self):
+        import i18n
+        for key in ("menu_autostart", "autostart_error"):
+            for language in ("ko", "en"):
+                self.assertIn(key, i18n._STRINGS[language])

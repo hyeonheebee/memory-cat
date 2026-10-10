@@ -254,6 +254,12 @@ def top_memory_apps(limit=5):
     return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
 
 
+def _autostart_command():
+    """이 실행본을 다시 띄울 명령줄(exe 면 exe, 소스면 pythonw + 이 파일)."""
+    return win_app.autostart_command(
+        sys.executable, getattr(sys, "frozen", False), os.path.abspath(__file__))
+
+
 def worker_running(worker):
     """AI 워커가 아직 도는지. 없거나 끝났으면 False."""
     return worker is not None and worker.isRunning()
@@ -455,6 +461,13 @@ class Cat(QtWidgets.QWidget):
                 a.triggered.connect(lambda _=False: self._start_theme(language))
 
         menu.addSeparator()
+        a = menu.addAction(tr(language, "menu_autostart"))
+        a.setCheckable(True)
+        a.setChecked(win_app.autostart_enabled(win_app.registry_module()))
+        # 인자 대신 액션의 체크 상태를 읽는다 — PySide6 가 triggered 의 bool 을
+        # 안 넘기는 경우 기본값(False)으로 "끄기" 가 돼 버린다.
+        a.triggered.connect(
+            lambda _=False, act=a: self.toggle_autostart(act.isChecked()))
         menu.addAction(tr(language, "menu_refresh"), self.refresh)
         menu.addAction(tr(language, "menu_quit"), QtWidgets.QApplication.quit)
         menu.exec(e.globalPos())
@@ -506,6 +519,15 @@ class Cat(QtWidgets.QWidget):
         self.cfg["theme"] = key
         save_config(self.cfg)
         self.refresh()
+
+    def toggle_autostart(self, enabled):
+        # 레지스트리 값이 곧 상태라 설정 파일엔 적지 않는다. 막혀서 못 바꾸면
+        # (회사 PC 정책 등) 체크만 바뀐 척하지 않게 알려 준다.
+        if not win_app.set_autostart(
+                bool(enabled), _autostart_command(), win_app.registry_module()):
+            QtWidgets.QMessageBox.warning(
+                self, tr(self.language, "menu_autostart"),
+                tr(self.language, "autostart_error"))
 
     def set_size_source(self, option):
         self.cfg["size_source"] = win_app.normalize_size_source(option)
@@ -562,6 +584,13 @@ def main():
             win_ai.log_session_started()
         except Exception:
             pass
+
+    # R7 #4: 자동 실행이 켜져 있는데 exe 를 옮겼으면 지금 경로로 다시 적는다.
+    # 켜져 있지 않으면 아무것도 안 쓴다. 실패해도 고양이는 떠야 한다.
+    try:
+        win_app.refresh_autostart(_autostart_command(), win_app.registry_module())
+    except Exception:
+        pass
 
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)

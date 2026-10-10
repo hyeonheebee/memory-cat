@@ -10,6 +10,7 @@
 """
 
 import datetime
+import ntpath
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -181,4 +182,92 @@ def cat_view(source, memory, disk, ram_percent, frames, language):
     )
     return SimpleNamespace(
         index=index, l1=l1, l2=l2, score=reading.percent, mood_line=mood_line)
+
+
+#: 윈도우 켤 때 같이 실행(R7 #4). 현재 사용자 Run 키라 관리자 권한이 필요
+#: 없고, 작업 관리자 "시작 프로그램" 탭에도 보인다.
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_VALUE_NAME = "Memory Cat"
+
+
+def registry_module():
+    """``winreg`` 모듈. 윈도우가 아니면(테스트하는 맥) ``None``."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    return winreg
+
+
+def autostart_command(executable, frozen, script):
+    """Run 값에 적을 명령줄. 경로에 공백이 있어도 되게 따옴표로 감싼다.
+
+    exe 면 exe 자신. 소스 실행(``.pyw``)이면 ``pythonw.exe`` 로 스크립트를
+    연다 — ``python.exe`` 로 열면 부팅할 때마다 검은 콘솔 창이 같이 뜬다.
+    """
+    if frozen:
+        return f'"{executable}"'
+    # 윈도우 경로 규칙으로 자른다(ntpath) — 맥에서 테스트할 때 Path 는 \ 를
+    # 구분자로 안 본다.
+    folder, name = ntpath.split(executable)
+    if name.lower() == "python.exe":
+        executable = ntpath.join(folder, "pythonw.exe")
+    return f'"{executable}" "{script}"'
+
+
+def _read_autostart(reg):
+    with reg.OpenKey(reg.HKEY_CURRENT_USER, RUN_KEY, 0, reg.KEY_READ) as key:
+        value, _kind = reg.QueryValueEx(key, AUTOSTART_VALUE_NAME)
+    return value
+
+
+def autostart_enabled(reg):
+    """Run 값이 있으면 켜짐. 레지스트리 값 자체가 진실이다(설정 파일에 따로
+    적으면 둘이 엇갈린다). 못 읽으면 꺼짐으로 본다."""
+    if reg is None:
+        return False
+    try:
+        return bool(_read_autostart(reg))
+    except OSError:
+        return False
+
+
+def set_autostart(enabled, command, reg):
+    """켜면 Run 값을 쓰고, 끄면 지운다. 성공하면 ``True``.
+
+    실패(권한·정책으로 막힘 등)는 예외 대신 ``False`` — 메뉴 슬롯에서 예외가
+    새면 앱이 죽는다. 이미 꺼져 있는데 끄는 건 성공이다.
+    """
+    if reg is None:
+        return False
+    try:
+        if enabled:
+            with reg.CreateKey(reg.HKEY_CURRENT_USER, RUN_KEY) as key:
+                reg.SetValueEx(key, AUTOSTART_VALUE_NAME, 0, reg.REG_SZ, command)
+        else:
+            with reg.OpenKey(reg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                             reg.KEY_SET_VALUE) as key:
+                try:
+                    reg.DeleteValue(key, AUTOSTART_VALUE_NAME)
+                except FileNotFoundError:
+                    pass
+    except OSError:
+        return False
+    return True
+
+
+def refresh_autostart(command, reg):
+    """켜져 있는데 경로가 다르면(exe 를 옮겼으면) 지금 경로로 다시 적는다.
+
+    켜져 있지 않으면 아무것도 쓰지 않는다 — 사용자가 켜지 않은 자동 실행을
+    앱이 스스로 켜면 안 된다. 실패해도 조용히 넘어간다(고양이는 떠야 한다).
+    """
+    if reg is None:
+        return
+    try:
+        current = _read_autostart(reg)
+    except OSError:
+        return
+    if current and current != command:
+        set_autostart(True, command, reg)
 
