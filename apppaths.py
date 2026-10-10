@@ -99,7 +99,12 @@ def config_file() -> Path:
 
 
 def log_dir() -> Path:
-    if sys.platform == "win32":
+    """로그 폴더. ``MEMORY_CAT_HOME`` 을 주면 맥에서도 그 아래 ``Logs`` 를 쓴다.
+
+    테스트가 이 변수로 사용자 데이터를 옮겨도 맥 로그만
+    ``~/Library/Logs`` 로 새어 나가 진짜 ai-errors.log 에 줄이 쌓였다.
+    """
+    if sys.platform == "win32" or os.environ.get(HOME_ENV):
         return user_data_dir() / "Logs"
     return Path.home() / "Library" / "Logs" / APP_NAME
 

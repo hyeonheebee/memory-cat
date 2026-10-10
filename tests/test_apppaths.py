@@ -52,6 +52,20 @@ class UserDataDirTests(unittest.TestCase):
                              apppaths.user_data_dir() / "Logs")
 
 
+    def test_the_override_moves_the_mac_log_dir_too(self):
+        """MEMORY_CAT_HOME 으로 옮긴 테스트가 진짜 ~/Library/Logs 에 쓰면 안 된다."""
+        with patch.object(apppaths.sys, "platform", "darwin"), \
+             patch.dict(os.environ, {apppaths.HOME_ENV: "/tmp/cat-home"}):
+            self.assertEqual(apppaths.log_dir(), Path("/tmp/cat-home") / "Logs")
+
+    def test_mac_log_dir_without_override_is_library_logs(self):
+        with patch.object(apppaths.sys, "platform", "darwin"), \
+             patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(apppaths.HOME_ENV, None)
+            self.assertEqual(apppaths.log_dir(),
+                             Path.home() / "Library" / "Logs" / "Memory Cat")
+
+
 class DotenvEncodingTests(unittest.TestCase):
     """메모장이 저장하는 세 가지 인코딩을 앞 몇 바이트로 구분한다.
 

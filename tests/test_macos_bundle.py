@@ -878,8 +878,9 @@ class WindowsOptionalImportLoggingTests(unittest.TestCase):
             env = dict(os.environ)
             env["PYTHONPATH"] = str(self._stubs(tmp))
             # PYTHONPATH 가 site-packages 보다 먼저라 가짜 openai 가 진짜를
-            # 가린다 — apppaths.log_dir() 은 맥에서 MEMORY_CAT_HOME 을
-            # 무시하고 Path.home() 을 쓰므로, HOME 을 임시 폴더로 옮긴다.
+            # 가린다. MEMORY_CAT_HOME 이 없으면 apppaths.log_dir() 은 맥에서
+            # Path.home() 을 쓰므로, 변수를 빼고 HOME 을 임시 폴더로 옮긴다.
+            env.pop("MEMORY_CAT_HOME", None)
             env["HOME"] = str(home)
             proc = subprocess.run(
                 [sys.executable, str(self.APP)],
