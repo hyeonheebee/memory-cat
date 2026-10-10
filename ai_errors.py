@@ -188,3 +188,17 @@ def theme_key_problem(language):
     if status == "invalid":
         return invalid_key_message(language)
     return None
+
+
+def theme_failure_text(error, language):
+    """테마 생성 실패를 사용자에게 보여 줄 문구로 바꾼다. 원문은 로그로만.
+
+    원문(키 조각 포함)을 그대로 띄우면 버그 신고 스크린샷에 키 끝자리가
+    찍힌다. 그래서 원문은 가린 뒤 로그에 남기고, 화면엔 401 이면 키 안내,
+    그 밖이면 로그 위치를 알려 주는 일반 안내만 돌려준다.
+    """
+    log_ai_failure("theme", error)
+    if is_invalid_key_error(error):
+        return invalid_key_message(language)
+    return tr(language, "theme_error_generic", path=str(ai_error_log_path()))
+

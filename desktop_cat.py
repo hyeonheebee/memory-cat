@@ -59,6 +59,7 @@ from personality import (
     preset_label,
     preset_names,
 )
+from ai_errors import theme_failure_text
 from vision_theme import ThemeGenerationError, build_theme as build_pet_theme
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -550,15 +551,22 @@ def _diagnosis_worker(personality, custom_personality, language, callback):
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
-def _pet_theme_worker(photo_path, theme_name, callback):
-    """Build a pet theme off the UI thread and return on the main queue."""
+def _pet_theme_worker(photo_path, theme_name, callback, language):
+    """Build a pet theme off the UI thread and return on the main queue.
+
+    실패 원문은 화면에 올리지 않는다(G-1). ``str(exc)`` 를 그대로 띄우면
+    401 원문의 키 끝자리(``sk-proj****abcd``)가 알림에 찍혔다. 윈도우와 같은
+    ``ai_errors.theme_failure_text`` 로 번역 안내만 돌려주고 원문은 가려서
+    로그로 보낸다.
+    """
     try:
         result = dict(build_pet_theme(photo_path, theme_name, "medium"))
         result["theme_name"] = theme_name
-    except ThemeGenerationError as exc:
-        result = {"theme_name": theme_name, "error": str(exc)}
     except Exception as exc:
-        result = {"theme_name": theme_name, "error": str(exc)}
+        result = {
+            "theme_name": theme_name,
+            "error": theme_failure_text(exc, language),
+        }
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
@@ -981,7 +989,7 @@ class CatController(NSObject):
         self._pet_theme_running = True
         self._pet_theme_thread = threading.Thread(
             target=_pet_theme_worker,
-            args=(photo_path, theme_name, self._finish_pet_theme),
+            args=(photo_path, theme_name, self._finish_pet_theme, self.language),
             name="memory-cat-pet-theme",
             daemon=True,
         )

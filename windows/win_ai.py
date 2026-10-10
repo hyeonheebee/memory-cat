@@ -256,13 +256,7 @@ def create_theme(photo_path, name, language="ko"):
     try:
         vision_theme.build_theme(Path(photo_path), name, quality="medium")
     except Exception as error:          # 네트워크·API·이미지 오류를 한 자리로
-        log_ai_failure("theme", error)
-        if _is_invalid_key_error(error):
-            message = invalid_key_message(language)
-        else:
-            message = tr(
-                language, "theme_error_generic", path=str(_ai_error_log_path()))
-        raise ThemeError(message) from error
+        raise ThemeError(ai_errors.theme_failure_text(error, language)) from error
     return name
 
 

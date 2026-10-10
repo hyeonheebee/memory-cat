@@ -236,7 +236,7 @@ class DesktopCatTests(unittest.TestCase):
             patch.object(desktop_cat, "NSOperationQueue", queue_provider),
         ):
             desktop_cat._pet_theme_worker(
-                "/photos/pet.jpg", "mypet", callback
+                "/photos/pet.jpg", "mypet", callback, "ko"
             )
 
         build.assert_called_once_with("/photos/pet.jpg", "mypet", "medium")
@@ -249,25 +249,69 @@ class DesktopCatTests(unittest.TestCase):
             }
         )
 
-    def test_pet_theme_worker_returns_readable_generation_error(self):
+    def _run_pet_theme_worker_failing_with(self, error, language="ko"):
+        """``build_pet_theme`` 이 ``error`` 를 내게 하고 워커 결과와 로그 글을 돌려준다."""
         callback = Mock()
         queue = Mock()
         queue.addOperationWithBlock_.side_effect = lambda block: block()
         queue_provider = Mock()
         queue_provider.mainQueue.return_value = queue
-        with (
-            patch.object(
-                desktop_cat,
-                "build_pet_theme",
-                side_effect=desktop_cat.ThemeGenerationError("API request failed"),
-            ),
-            patch.object(desktop_cat, "NSOperationQueue", queue_provider),
-        ):
-            desktop_cat._pet_theme_worker("/photos/pet.jpg", "mypet", callback)
+        with tempfile.TemporaryDirectory() as log_dir:
+            with (
+                patch.object(desktop_cat, "build_pet_theme", side_effect=error),
+                patch.object(desktop_cat, "NSOperationQueue", queue_provider),
+                patch.object(desktop_cat.apppaths, "log_dir",
+                             return_value=Path(log_dir)),
+            ):
+                desktop_cat._pet_theme_worker(
+                    "/photos/pet.jpg", "mypet", callback, language)
+            log_path = Path(log_dir) / "ai-errors.log"
+            log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+        callback.assert_called_once()
+        return callback.call_args.args[0], log_text
 
-        callback.assert_called_once_with(
-            {"theme_name": "mypet", "error": "API request failed"}
-        )
+    def test_pet_theme_worker_hides_the_raw_error_behind_a_translated_notice(self):
+        """G-1: 원문(영어)은 화면 대신 로그로 간다. 화면엔 로그 위치를 알려 준다."""
+        result, log_text = self._run_pet_theme_worker_failing_with(
+            desktop_cat.ThemeGenerationError("API request failed"))
+
+        self.assertEqual(result["theme_name"], "mypet")
+        self.assertNotIn("API request failed", result["error"])
+        self.assertIn("테마를 만들지 못했어요", result["error"])
+        self.assertIn("ai-errors.log", result["error"])
+        self.assertIn("API request failed", log_text)
+
+    def test_pet_theme_worker_never_shows_key_fragments_for_a_bad_key(self):
+        """G-1: 401 원문 ``Incorrect API key provided: sk-proj****abcd`` 의 키
+        끝자리가 알림·경고창(=버그 신고 스크린샷)에 찍히면 안 된다."""
+
+        class FakeAuthError(Exception):
+            status_code = 401
+
+        try:
+            try:
+                raise FakeAuthError(
+                    "Error code: 401 - Incorrect API key provided: sk-proj****abcd")
+            except FakeAuthError as cause:
+                raise desktop_cat.ThemeGenerationError(
+                    f"API request failed: {cause}") from cause
+        except desktop_cat.ThemeGenerationError as wrapped:
+            error = wrapped
+
+        result, log_text = self._run_pet_theme_worker_failing_with(error)
+
+        self.assertIn("API 키가 올바르지 않아요", result["error"])
+        self.assertIn(".env", result["error"])
+        for leaked in ("sk-", "abcd", "Incorrect API key"):
+            self.assertNotIn(leaked, result["error"])
+        self.assertIn("[REDACTED]", log_text)
+        self.assertNotIn("abcd", log_text)
+
+    def test_pet_theme_worker_speaks_the_app_language(self):
+        result, _ = self._run_pet_theme_worker_failing_with(
+            RuntimeError("boom"), language="en")
+        self.assertIn("Couldn't make the theme", result["error"])
+        self.assertNotIn("boom", result["error"])
 
     def test_finishing_pet_theme_applies_and_saves_it_immediately(self):
         controller = desktop_cat.CatController.alloc().init()
