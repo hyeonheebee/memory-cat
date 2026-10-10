@@ -29,7 +29,6 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from i18n import (
     LANGUAGE_AUTO,
     LANGUAGE_OVERRIDES,
-    chonk_stage,
     resolve_language,
     tr,
 )
@@ -38,6 +37,8 @@ from i18n import (
 # disk_usage·human_gb 는 이 파일의 같은 이름 함수가 그대로 위임할 것이라
 # 이름이 겹치지 않게 _metrics_* 로 따로 받는다.
 from metrics import (
+    DEFAULT_SIZE_SOURCE,
+    SIZE_SOURCES,
     disk_usage as _metrics_disk_usage,
     human_gb as _metrics_human_gb,
     ram_used_for_display,
@@ -108,7 +109,11 @@ SIZE_STRING_KEYS = {
     "크게": "size_large",
     "왕": "size_king",
 }
-DEFAULT = {"theme": "cute", "size": "보통", "language": LANGUAGE_AUTO}
+#: ``size_source`` = 무엇을 보고 몸집을 정할지(맥과 같은 선택지·기본값).
+#: v0.4.0 전 윈도우는 디스크만 봤다 — 설정 파일에 이 값이 없는 옛 사용자도
+#: 맥처럼 메모리로 시작한다.
+DEFAULT = {"theme": "cute", "size": "보통", "language": LANGUAGE_AUTO,
+           "size_source": DEFAULT_SIZE_SOURCE}
 
 
 def system_languages():
@@ -127,7 +132,9 @@ def load_config():
         return {"theme": c.get("theme", DEFAULT["theme"]),
                 "size": c.get("size", DEFAULT["size"]),
                 "language": language if language in LANGUAGE_OVERRIDES
-                else LANGUAGE_AUTO}
+                else LANGUAGE_AUTO,
+                "size_source": win_app.normalize_size_source(
+                    c.get("size_source"))}
     except Exception:
         return dict(DEFAULT)
 
@@ -318,23 +325,21 @@ class Cat(QtWidgets.QWidget):
             # 일부 환경은 swap_memory() 만 실패한다. 스왑을 0 으로 두고 계속한다.
             sw = SimpleNamespace(total=0, used=0, percent=0.0)
         dpct = disk.percent
-        self.score = dpct
         theme = self.cfg["theme"]
-        idx = int(round(dpct / 100 * (frame_count(theme) - 1)))
-        self.pix = QtGui.QPixmap(frame_path(theme, idx))
         language = self.language
-        self.l1 = f"{tr(language, 'disk')} {dpct:.0f}%"
-        self.l2 = f"{tr(language, 'ram')} {vm.percent:.0f}%"
+        # 몸집·두 줄·기분 줄은 맥과 같은 판단(metrics.size_reading)을 쓴다.
+        # 메모리 점수는 맥의 metrics.pressure_score 와 같은 vm.percent 다.
+        view = win_app.cat_view(
+            self.cfg["size_source"], memory=vm.percent, disk=dpct,
+            ram_percent=vm.percent, frames=frame_count(theme),
+            language=language)
+        self.score = view.score
+        self.pix = QtGui.QPixmap(frame_path(theme, view.index))
+        self.l1 = view.l1
+        self.l2 = view.l2
 
-        mood = chonk_stage(dpct, language)
         self.detail = [
-            # `source` 를 반드시 넘긴다. 이 문구는 맥판과 공유하는데, 맥은
-            # 메모리/디스크를 고를 수 있어서 무엇을 보고 있는지 밝혀야 한다.
-            # 윈도우판은 디스크만 본다. 이 인자를 빠뜨리면 KeyError 가 나고,
-            # 아래 refresh() 가 예외를 삼켜서 앱은 멀쩡히 도는데 이 정보창만
-            # 통째로 빈 채로 남는다(v0.3.0 에서 실제로 그랬다).
-            tr(language, "mood_detail", mood=mood, percent=round(dpct),
-               source=tr(language, "source_disk")),
+            view.mood_line,
             tr(language, "disk_detail", percent=dpct, used=human_gb(disk.used),
                total=human_gb(disk.total), free=human_gb(disk.free)),
             # 계산은 metrics.ram_used_for_display 가 한 곳에서 한다 —
@@ -420,6 +425,13 @@ class Cat(QtWidgets.QWidget):
             a.setCheckable(True)
             a.setChecked(label == self.cfg["size"])
             a.triggered.connect(lambda _=False, s=label: self.set_size(s))
+        srcm = menu.addMenu(tr(language, "menu_size_source"))
+        for option in SIZE_SOURCES:
+            a = srcm.addAction(tr(language, f"size_source_{option}"))
+            a.setCheckable(True)
+            a.setChecked(option == self.cfg["size_source"])
+            a.triggered.connect(
+                lambda _=False, o=option: self.set_size_source(o))
         lm = menu.addMenu(tr(language, "menu_language"))
         for choice in LANGUAGE_OVERRIDES:
             a = lm.addAction(tr(language, f"language_{choice}"))
@@ -492,6 +504,11 @@ class Cat(QtWidgets.QWidget):
 
     def set_theme(self, key):
         self.cfg["theme"] = key
+        save_config(self.cfg)
+        self.refresh()
+
+    def set_size_source(self, option):
+        self.cfg["size_source"] = win_app.normalize_size_source(option)
         save_config(self.cfg)
         self.refresh()
 

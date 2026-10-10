@@ -3,18 +3,22 @@
 맥 개발 환경에는 PySide6 가 없어서 Qt 를 import 하는 코드는 테스트를 못
 돈다. ``windows_cat.pyw`` 를 시작할 때 필요한 판단 중 Qt·openai·Pillow
 없이도 되는 것들을 여기 모아 두고 이 모듈에서 검사한다. stdlib 와
-``apppaths`` 만 쓴다 — ``windows_cat.pyw`` 가 **직접**(try/except 없이)
-import 하는 필수 모듈이라서, 여기서 무거운 의존성을 끌어오면 그 자체가
-고양이를 못 띄우는 이유가 된다.
+``apppaths``·``metrics``·``i18n`` 만 쓴다 — 셋 다 ``windows_cat.pyw`` 가
+이미 직접 import 하는 루트 모듈이다. ``windows_cat.pyw`` 가 이 모듈도
+**직접**(try/except 없이) import 하므로, 여기서 그 밖의 무거운 의존성을
+끌어오면 그 자체가 고양이를 못 띄우는 이유가 된다.
 """
 
 import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 # apppaths 는 저장소 루트의 가벼운 모듈이다(os·sys·pathlib 만) — Qt 도 없고
 # 무거운 의존성도 없어서 이 "Qt 없는" 모듈에서도 그대로 쓸 수 있다. 잠금
 # 파일이 살 폴더(맥과 같은 %APPDATA%\Memory Cat)를 여기서 받는다.
 import apppaths
+import metrics
+from i18n import chonk_stage, tr
 
 #: 맥의 desktop_cat.INSTANCE_LOCK_NAME 과 같은 이름 — 잠금은 플랫폼마다
 #: 따로지만(맥은 fcntl.flock, 윈도우는 QLockFile) 파일 이름은 맞춰 둔다.
@@ -146,3 +150,35 @@ def migrate_legacy_config(legacy_path, target_path):
             pass
         return False
     return True
+
+
+def normalize_size_source(value):
+    """설정의 ``size_source`` 를 아는 값으로. 없거나 모르면 메모리(맥과 같은 기본값)."""
+    return value if value in metrics.SIZE_SOURCES else metrics.DEFAULT_SIZE_SOURCE
+
+
+def cat_view(source, memory, disk, ram_percent, frames, language):
+    """화면 갱신 한 번에 그릴 값. 판단은 맥과 같은 ``metrics.size_reading``.
+
+    전엔 디스크를 직선으로 프레임에 꽂아 그림과 이름이 엇갈렸다(이슈 #40).
+    이제 그림이 이름 문턱(60·70·80·90·96)에서 같이 바뀐다.
+
+    - ``index``: 그릴 프레임 번호(``frames`` 장 중)
+    - ``l1``/``l2``: 고양이 아래 두 줄. 몸집을 정한 쪽이 첫 줄
+    - ``score``: 출렁임 세기에 쓰는 잰 값
+    - ``mood_line``: 정보창 첫 줄(이름·무엇을 보는지·퍼센트)
+    """
+    reading = metrics.size_reading(source, memory=memory, disk=disk)
+    index = int(round(reading.body / 100 * (max(int(frames), 1) - 1)))
+    disk_text = f"{tr(language, 'disk')} {disk:.0f}%"
+    ram_text = f"{tr(language, 'ram')} {ram_percent:.0f}%"
+    l1, l2 = (disk_text, ram_text) if reading.disk_first else (ram_text, disk_text)
+    mood_line = tr(
+        language, "mood_detail",
+        mood=chonk_stage(reading.percent, language),
+        percent=round(reading.percent),
+        source=tr(language, f"source_{reading.source}"),
+    )
+    return SimpleNamespace(
+        index=index, l1=l1, l2=l2, score=reading.percent, mood_line=mood_line)
+

@@ -746,3 +746,111 @@ class WindowsCatWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CatViewTests(unittest.TestCase):
+    """R7 #3: 윈도우도 맥과 같은 자로 몸집을 정한다(이슈 #40).
+
+    전엔 디스크를 직선으로 꽂아(``round(dpct/100*(n-1))``) 디스크 50% 에서
+    6장 중 4번째 그림인데 이름은 첫 단계였다. 이제 ``metrics.size_reading``
+    을 쓴다 — 그림은 이름 문턱(60·70·80·90·96)에서 바뀐다.
+    """
+
+    def _view(self, source, memory=72.0, disk=50.0, frames=40, language="ko"):
+        return win_app.cat_view(source, memory=memory, disk=disk,
+                                ram_percent=memory, frames=frames,
+                                language=language)
+
+    def test_memory_source_drives_the_body_and_the_first_line(self):
+        import metrics
+        view = self._view("memory")
+        self.assertEqual(view.index, round(metrics.body_percent(72.0) / 100 * 39))
+        self.assertEqual(view.l1, "램 72%")
+        self.assertEqual(view.l2, "디스크 50%")
+        self.assertEqual(view.score, 72.0)
+        self.assertIn("메모리 72%", view.mood_line)
+
+    def test_disk_below_the_first_threshold_keeps_the_first_picture(self):
+        """이름이 첫 단계면 그림도 첫 그림(프레임 0~3)이다 — 직선 매핑은 20."""
+        view = self._view("disk", disk=50.0)
+        self.assertLessEqual(view.index, 3)
+        self.assertEqual(view.l1, "디스크 50%")
+        self.assertIn("디스크 50%", view.mood_line)
+
+    def test_picture_and_name_change_together_at_90(self):
+        import i18n
+        below = self._view("disk", disk=89.9)
+        at = self._view("disk", disk=90.0)
+        self.assertLess(below.index, 28)
+        self.assertEqual(at.index, 28)
+        self.assertNotEqual(i18n.chonk_stage(89.9, "ko"),
+                            i18n.chonk_stage(90.0, "ko"))
+
+    def test_max_names_whichever_decided_the_body(self):
+        self.assertEqual(self._view("max", memory=61.0, disk=91.0).l1, "디스크 91%")
+        self.assertEqual(self._view("max", memory=71.5, disk=50.0).l1, "램 72%")
+
+    def test_few_frame_themes_stay_in_range(self):
+        for disk in (0.0, 59.0, 100.0):
+            with self.subTest(disk=disk):
+                self.assertIn(self._view("disk", disk=disk, frames=6).index,
+                              range(6))
+
+    def test_unknown_source_is_normalized_to_memory(self):
+        self.assertEqual(win_app.normalize_size_source("banana"), "memory")
+        self.assertEqual(win_app.normalize_size_source(None), "memory")
+        for value in ("memory", "disk", "max"):
+            self.assertEqual(win_app.normalize_size_source(value), value)
+
+
+class WindowsSizeSourceWiringTests(unittest.TestCase):
+    """``.pyw`` 는 못 돌리니 배선을 정적으로 본다."""
+
+    APP = _REPO / "windows" / "windows_cat.pyw"
+
+    def setUp(self):
+        if not self.APP.is_file():
+            self.skipTest(f"파일이 없습니다: {self.APP}")
+        self.source = self.APP.read_text(encoding="utf-8")
+        self.tree = ast.parse(self.source, filename=str(self.APP))
+
+    def _function(self, name):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        self.fail(f"windows_cat.pyw 에 {name} 이 없습니다")
+
+    @staticmethod
+    def _calls(node):
+        names = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                func = sub.func
+                if isinstance(func, ast.Attribute):
+                    names.add(func.attr)
+                elif isinstance(func, ast.Name):
+                    names.add(func.id)
+        return names
+
+    def test_refresh_uses_the_shared_view_not_a_linear_map(self):
+        refresh = self._function("_refresh_once")
+        self.assertIn("cat_view", self._calls(refresh))
+        dumped = ast.dump(refresh)
+        self.assertNotIn("Constant(value=100)", dumped,
+                         "_refresh_once 에 /100 직선 매핑이 남아 있습니다")
+
+    def test_config_keeps_the_size_source(self):
+        self.assertIn("normalize_size_source", self._calls(self._function("load_config")))
+        self.assertIn("size_source", ast.dump(self._function("load_config")))
+
+    def test_menu_offers_the_three_sources(self):
+        menu = self._function("contextMenuEvent")
+        dumped = ast.dump(menu)
+        self.assertIn("SIZE_SOURCES", dumped)
+        self.assertIn("menu_size_source", dumped)
+        self.assertIn("set_size_source", dumped)
+
+    def test_choosing_a_source_saves_and_redraws(self):
+        calls = self._calls(self._function("set_size_source"))
+        self.assertIn("save_config", calls)
+        self.assertIn("refresh", calls)
