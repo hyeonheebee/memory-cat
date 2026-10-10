@@ -45,6 +45,16 @@ class DiagnosisLinesTests(unittest.TestCase):
         free=100 * 1024 ** 3,
     )
 
+    def setUp(self):
+        # fallback 으로 떨어지는 테스트(키 없음)는 로그 한 줄을 남긴다.
+        # MEMORY_CAT_HOME 없이 돌려도 진짜 ~/Library/Logs 에 쓰지 않게 막는다.
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._log_patch = patch.object(
+            win_ai.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._log_patch.start()
+        self.addCleanup(self._log_patch.stop)
+
     def test_it_asks_for_a_diagnosis_without_cleanup(self):
         with patch.object(win_ai.brain, "diagnose", return_value=self.FAKE) as d, \
              patch.object(win_ai.brain, "disk_usage", return_value=self.FAKE_DISK):
@@ -2167,3 +2177,84 @@ class KeyCheckBeforePhotoPickerSourceTests(unittest.TestCase):
         ]
         self.assertEqual(len(guarded), 1,
                          "키 확인 if 문 안에 return 이 없습니다.")
+
+
+class SessionAndDiagnosisStartLogTests(unittest.TestCase):
+    """D-1 (PC1 제안): "첫 AI 동작에서만 멈추나"는 테스터가 순서를 지켜야만
+    판정되는 조건이라 두 라운드 연속 "엄밀히는 확인 못 함"으로 끝났다.
+    앱이 켜질 때와 진단이 시작될 때 한 줄씩 남기면, 로그만 보고
+    "session started 이후 첫 AI 이벤트가 이 진단이었다"를 확정할 수 있다."""
+
+    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\] ")
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        p = patch.object(win_ai.apppaths, "log_dir",
+                         return_value=Path(self._log_tmp.name))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _lines(self):
+        text = (Path(self._log_tmp.name) / "ai-errors.log").read_text(
+            encoding="utf-8")
+        return [line for line in text.splitlines() if line]
+
+    def test_session_and_diagnosis_lines_are_timestamped(self):
+        win_ai.log_session_started()
+        win_ai.log_diagnosis_started()
+        lines = self._lines()
+        self.assertEqual(len(lines), 2)
+        for line, word in zip(lines, ("session started", "diagnosis started")):
+            self.assertTrue(self._TIMESTAMP_RE.match(line), line)
+            self.assertTrue(line.endswith(word), line)
+
+    def test_they_never_raise_when_the_log_folder_cannot_be_created(self):
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("파일")
+        with patch.object(win_ai.apppaths, "log_dir", return_value=blocked / "logs"):
+            win_ai.log_session_started()
+            win_ai.log_diagnosis_started()
+
+
+class SessionAndDiagnosisStartWiringTests(unittest.TestCase):
+    """배선은 Qt 라 실행 못 하니 AST 로 본다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ui = ast.parse((Path(_WINDOWS_DIR) / "win_ai_ui.py").read_text(
+            encoding="utf-8"))
+        cls.cat = ast.parse((Path(_WINDOWS_DIR) / "windows_cat.pyw").read_text(
+            encoding="utf-8"))
+
+    @staticmethod
+    def _calls(node, name):
+        return [
+            n for n in ast.walk(node)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == name
+        ]
+
+    def test_diagnosis_worker_logs_before_anything_can_fail(self):
+        run = None
+        for node in ast.walk(self.ui):
+            if isinstance(node, ast.ClassDef) and node.name == "_DiagnosisWorker":
+                run = next(i for i in node.body
+                           if isinstance(i, ast.FunctionDef) and i.name == "run")
+        self.assertIsNotNone(run)
+        first = run.body[0]
+        self.assertTrue(
+            isinstance(first, ast.Expr) and self._calls(first, "log_diagnosis_started"),
+            "_DiagnosisWorker.run() 의 첫 문장이 log_diagnosis_started() 가 아닙니다 "
+            "— try 안에 두면 예외가 나는 경로에서 시작 줄이 빠집니다.")
+
+    def test_session_line_is_written_only_after_the_instance_lock(self):
+        """중복 실행으로 곧바로 접히는 두 번째 exe 가 session started 를 쓰면
+        "이번 세션의 첫 동작" 판정이 흐려진다 — 잠금을 통과한 뒤에만 쓴다."""
+        main = next(n for n in ast.walk(self.cat)
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        session = self._calls(main, "log_session_started")
+        claim = self._calls(main, "claim_single_instance")
+        self.assertEqual(len(session), 1, "main() 에 log_session_started() 가 하나여야 합니다.")
+        self.assertTrue(claim)
+        self.assertGreater(session[0].lineno, max(c.lineno for c in claim))

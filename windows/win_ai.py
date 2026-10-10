@@ -199,6 +199,24 @@ def log_theme_worker_started():
     _append_log_line("theme worker started")
 
 
+def log_session_started():
+    """D-1: 앱이 켜졌다는 표시. 이 줄 뒤 첫 AI 이벤트가 "세션 첫 AI 동작"이다.
+
+    "첫 AI 동작에서만 멈추나"는 테스터가 순서를 지켜야만 판정되던 조건이라
+    두 라운드 연속 못 닫혔다 — 이제 로그가 순서를 증명한다.
+    """
+    _append_log_line("session started")
+
+
+def log_diagnosis_started():
+    """D-1: 진단 워커가 실제로 돌기 시작했다는 표시(성공·실패 무관).
+
+    전엔 진단이 성공하면 아무 줄도 안 남아서, 로그만으로는 진단이 있었는지
+    조차 알 수 없었다.
+    """
+    _append_log_line("diagnosis started")
+
+
 def has_api_key() -> bool:
     return bool(brain._load_api_key())
 

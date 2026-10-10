@@ -98,6 +98,8 @@ class _DiagnosisWorker(QtCore.QThread):
         self._language = language
 
     def run(self):
+        # D-1: 시작 줄은 try 보다 앞 — 실패하는 경로에서도 남아야 한다.
+        win_ai.log_diagnosis_started()
         try:
             lines = win_ai.diagnosis_lines(self._language)
         except Exception as error:

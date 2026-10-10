@@ -537,6 +537,15 @@ def main():
             win_app.log_instance_already_running()
             return
 
+    # D-1: 잠금을 통과한 뒤에만 남긴다 — 곧바로 접히는 두 번째 exe 가 이 줄을
+    # 쓰면 "이번 세션의 첫 AI 동작" 판정이 흐려진다. 로그 함수는 OSError 를
+    # 삼키지만, 고양이가 뜨는 걸 막을 이유는 없으니 그 밖의 예외도 막는다.
+    if win_ai is not None:
+        try:
+            win_ai.log_session_started()
+        except Exception:
+            pass
+
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
     cat = Cat()
