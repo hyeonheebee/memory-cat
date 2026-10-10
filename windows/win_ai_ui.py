@@ -221,6 +221,24 @@ def _finish_theme(parent, language, on_done, name):
     box.exec()
 
 
+def _key_problem_shown(parent, language):
+    """F-2: 키가 무효면 안내창을 띄우고 ``True``. 그 밖엔 ``False``.
+
+    판정은 ``win_ai.theme_key_problem`` 이 한다. 확인은 GUI 스레드에서 돌지만
+    최대 5초·재시도 없음이고, 사용자가 메뉴를 막 누른 순간이라 대기 커서로
+    기다리는 중임을 보여준다. 대기 커서는 어떤 경우에도 되돌린다(finally).
+    """
+    QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+    try:
+        message = win_ai.theme_key_problem(language)
+    finally:
+        QtWidgets.QApplication.restoreOverrideCursor()
+    if message is None:
+        return False
+    _show_theme_failure(parent, language, message)
+    return True
+
+
 def make_theme(parent, language, bundled_frames_dir, on_done):
     """사진을 골라 테마 생성을 워커 스레드에서 시작하고 워커를 돌려준다.
 
@@ -229,6 +247,11 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
     """
     if not win_ai.has_api_key():
         _explain_missing_key(parent, language)
+        return None
+
+    # F-2: 키가 "있지만 무효"면 여기서 멈춘다 — 사진을 고르고 전송에
+    # 동의한 뒤에야 401 을 알리던 순서를 바로잡는다.
+    if _key_problem_shown(parent, language):
         return None
 
     photo, _ = QtWidgets.QFileDialog.getOpenFileName(

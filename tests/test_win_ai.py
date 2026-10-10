@@ -775,9 +775,11 @@ class LogConsentTests(unittest.TestCase):
     파일에 남긴다. 다음 실기에서 "shown 줄은 있는데 accepted 가 없는데
     업로드가 됐다" 같은 모양이 나오면 버그 위치가 바로 잡힌다."""
 
-    #: ``datetime.isoformat(timespec="seconds")`` 형식. ``log_ai_failure`` 가
-    #: 쓰는 것과 같은 타임스탬프 모양이어야 한 파일을 같이 훑어볼 수 있다.
-    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] ")
+    #: ``datetime.isoformat(timespec="milliseconds")`` 형식(R6). 초 단위로는
+    #: shown→accepted 간격이 0.2초인지 0.8초인지 못 가른다 — 같은 초면
+    #: "의심", 1초 차이면 "보류"로 남던 판정을 밀리초가 끝낸다.
+    #: ``log_ai_failure`` 와 같은 모양이어야 한 파일을 같이 훑어볼 수 있다.
+    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\] ")
 
     def setUp(self):
         self._log_tmp = tempfile.TemporaryDirectory()
@@ -859,7 +861,7 @@ class ThemeWorkerStartedLogTests(unittest.TestCase):
     실패든) 한 줄을 남겨, 다음 실기에서 "consent accepted 줄 없이 이 줄만
     있다"는 모양이 나오면 그 자체로 동의 없이 워커가 돈 증거가 된다."""
 
-    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\] ")
+    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\] ")
 
     def setUp(self):
         self._log_tmp = tempfile.TemporaryDirectory()
@@ -1996,3 +1998,172 @@ class UploadRequiresConsentGuardrailTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LogAiFailureTimestampTests(unittest.TestCase):
+    """R6: 실패 기록도 동의 줄과 같은 밀리초 타임스탬프를 쓴다 — 한 파일에서
+    "worker started → 401" 간격까지 같은 자로 잰다."""
+
+    _TIMESTAMP_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\] ")
+
+    def test_failure_entry_uses_millisecond_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(win_ai.apppaths, "log_dir", return_value=Path(tmp)):
+            win_ai.log_ai_failure("theme", RuntimeError("boom"))
+            first = (Path(tmp) / "ai-errors.log").read_text(
+                encoding="utf-8").splitlines()[0]
+        self.assertTrue(
+            self._TIMESTAMP_RE.match(first), f"밀리초 형식이 아닙니다: {first!r}")
+
+
+class _FakeModels:
+    def __init__(self, error=None):
+        self._error = error
+        self.calls = 0
+
+    def list(self):
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return SimpleNamespace(data=[])
+
+
+class _FakeClient:
+    """``OpenAI(...)`` 대역. 받은 인자와 호출을 기록한다 — 이미지 API 는
+    일부러 없다. 키 확인이 ``images`` 를 건드리면 AttributeError 로 터진다."""
+
+    instances = []
+
+    def __init__(self, error=None, **kwargs):
+        self.kwargs = kwargs
+        self.models = _FakeModels(error)
+        _FakeClient.instances.append(self)
+
+
+def _fake_openai(error=None):
+    _FakeClient.instances = []
+    return lambda **kwargs: _FakeClient(error=error, **kwargs)
+
+
+class FakeForbiddenError(Exception):
+    status_code = 403
+
+
+class ThemeKeyProblemTests(unittest.TestCase):
+    """F-2: 키가 있지만 무효일 때 테마는 사진 선택 → 전송 동의 → 업로드까지
+    다 간 뒤에야 401 로 실패했다(진단은 바로 오프라인 폴백). 사진을 고르기
+    **전에** 모델 목록 GET 한 번(사진 없음·과금 없음)으로 키가 통하는지 본다.
+
+    401 만 "무효"로 판정한다. 그 밖의 실패(네트워크·403·타임아웃)는 판정하지
+    않고 지금까지처럼 진행한다 — 키 확인이 새 실패 경로를 만들면 안 된다.
+    예: 권한을 좁힌 프로젝트 키는 모델 목록에 403 을 내도 이미지 생성은 될 수
+    있다.
+    """
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        for target, value in (
+            (patch.object(win_ai.apppaths, "log_dir",
+                          return_value=Path(self._log_tmp.name)), None),
+            (patch.object(win_ai.brain, "_load_api_key",
+                          return_value="sk-test-FAKEFAKEFAKE"), None),
+        ):
+            target.start()
+            self.addCleanup(target.stop)
+
+    def _log_text(self):
+        path = Path(self._log_tmp.name) / "ai-errors.log"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def _run(self, error=None):
+        with patch.object(win_ai, "OpenAI", _fake_openai(error)):
+            return win_ai.theme_key_problem("ko")
+
+    def test_a_working_key_lets_the_flow_continue(self):
+        self.assertIsNone(self._run())
+        self.assertIn("key check: ok", self._log_text())
+
+    def test_a_401_stops_before_the_photo_with_the_env_path(self):
+        message = self._run(FakeAuthError("Incorrect API key provided: sk-xyz"))
+        self.assertIsNotNone(message)
+        self.assertIn("API 키가 올바르지 않아요", message)
+        self.assertIn(".env", message)
+        self.assertIn("key check: invalid", self._log_text())
+
+    def test_other_failures_do_not_block(self):
+        for error in (ConnectionError("offline"), TimeoutError("slow"),
+                      FakeForbiddenError("restricted key")):
+            with self.subTest(error=type(error).__name__):
+                self.assertIsNone(self._run(error))
+        self.assertEqual(self._log_text().count("key check: unknown"), 3)
+
+    def test_the_check_is_short_and_never_retries(self):
+        self._run()
+        client = _FakeClient.instances[-1]
+        self.assertEqual(client.models.calls, 1)
+        self.assertEqual(client.kwargs.get("max_retries"), 0)
+        self.assertLessEqual(client.kwargs.get("timeout"), 5.0)
+
+    def test_no_key_text_is_ever_logged(self):
+        self._run(FakeAuthError("Incorrect API key provided: sk-proj-LEAKME"))
+        text = self._log_text()
+        self.assertNotIn("LEAKME", text)
+        self.assertNotIn("FAKEFAKEFAKE", text)
+
+    def test_invalid_key_wording_matches_the_upload_failure(self):
+        """사전 확인에서 막히든 업로드 뒤 401 이든 사용자는 같은 안내를 본다."""
+        early = self._run(FakeAuthError("bad key"))
+        with patch.object(win_ai.vision_theme, "build_theme",
+                          side_effect=_raise_401_from_vision_theme), \
+             patch.object(win_ai, "check_photo", return_value=None):
+            with self.assertRaises(win_ai.ThemeError) as caught:
+                win_ai.create_theme("cat.png", "mypet", "ko")
+        self.assertEqual(early, str(caught.exception))
+
+
+class KeyCheckBeforePhotoPickerSourceTests(unittest.TestCase):
+    """F-2 배선: ``make_theme`` 안에서 키 확인이 파일 선택창보다 **앞**에 있고,
+    막혔으면 그 자리에서 돌아간다. Qt 라 실행은 못 하니 AST 로 본다."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = Path(_WINDOWS_DIR) / "win_ai_ui.py"
+        cls.tree = ast.parse(path.read_text(encoding="utf-8"))
+
+    def _make_theme(self):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "make_theme":
+                return node
+        self.fail("make_theme() 를 못 찾았습니다.")
+
+    def _first_call_line(self, func, name):
+        lines = [
+            n.lineno for n in ast.walk(func)
+            if isinstance(n, ast.Call) and (
+                (isinstance(n.func, ast.Attribute) and n.func.attr == name)
+                or (isinstance(n.func, ast.Name) and n.func.id == name))
+        ]
+        self.assertTrue(lines, f"make_theme() 안에 {name}() 호출이 없습니다.")
+        return min(lines)
+
+    def test_key_check_runs_before_the_file_picker(self):
+        func = self._make_theme()
+        self.assertLess(
+            self._first_call_line(func, "_key_problem_shown"),
+            self._first_call_line(func, "getOpenFileName"),
+            "키 확인이 사진 선택보다 뒤에 있습니다 — F-2 가 그대로 남습니다.")
+
+    def test_a_blocked_key_returns_before_the_picker(self):
+        func = self._make_theme()
+        picker_line = self._first_call_line(func, "getOpenFileName")
+        guarded = [
+            n for n in ast.walk(func)
+            if isinstance(n, ast.If) and n.lineno < picker_line
+            and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                    and c.func.id == "_key_problem_shown"
+                    for c in ast.walk(n.test))
+            and any(isinstance(s, ast.Return) for s in n.body)
+        ]
+        self.assertEqual(len(guarded), 1,
+                         "키 확인 if 문 안에 return 이 없습니다.")
