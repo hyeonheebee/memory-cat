@@ -249,10 +249,6 @@ class I18nTests(unittest.TestCase):
         self.assertIn("#", comment_window)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CleanPetNameTests(unittest.TestCase):
     """맥·윈도우가 이름을 같은 규칙으로 저장한다(전엔 맥 두 곳에 같은 식이 따로 있었다)."""
 
@@ -264,3 +260,7 @@ class CleanPetNameTests(unittest.TestCase):
         for raw in (None, "", "   "):
             with self.subTest(raw=raw):
                 self.assertEqual(i18n.clean_pet_name(raw), "")
+
+
+if __name__ == "__main__":
+    unittest.main()

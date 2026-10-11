@@ -1028,7 +1028,13 @@ class WindowsPetNameWiringTests(_PywStatic, unittest.TestCase):
 
     def test_diagnosis_gets_the_pet_name(self):
         start = self._function("_start_diagnosis")
-        self.assertIn("pet_name", ast.dump(start))
+        calls = [n for n in ast.walk(start) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "show_diagnosis"]
+        self.assertTrue(calls, "_start_diagnosis 가 show_diagnosis 를 안 부릅니다")
+        pet = [k for k in calls[0].keywords if k.arg == "pet"]
+        self.assertTrue(pet, "show_diagnosis 에 pet= 을 안 넘깁니다")
+        self.assertIn("pet_name", ast.dump(pet[0].value))
         ui = ast.parse(self.UI.read_text(encoding="utf-8"))
         shows = [n for n in ast.walk(ui)
                  if isinstance(n, ast.FunctionDef) and n.name == "_show_diagnosis"]
