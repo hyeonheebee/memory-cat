@@ -201,4 +201,3 @@ def theme_failure_text(error, language):
     if is_invalid_key_error(error):
         return invalid_key_message(language)
     return tr(language, "theme_error_generic", path=str(ai_error_log_path()))
-

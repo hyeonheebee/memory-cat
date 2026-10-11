@@ -251,6 +251,10 @@ def set_autostart(enabled, command, reg):
                     reg.DeleteValue(key, AUTOSTART_VALUE_NAME)
                 except FileNotFoundError:
                     pass
+    except FileNotFoundError:
+        # 끄려는데 Run 키 자체가 없으면 이미 꺼진 것이다. 켜기는 CreateKey 라
+        # 이 예외가 안 난다.
+        return not enabled
     except OSError:
         return False
     return True
@@ -270,4 +274,3 @@ def refresh_autostart(command, reg):
         return
     if current and current != command:
         set_autostart(True, command, reg)
-

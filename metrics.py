@@ -142,6 +142,7 @@ SIZE_SOURCES = (SOURCE_MEMORY, SOURCE_DISK, SOURCE_MAX)
 #: 디스크로 돌고 있었다. 느려짐의 실제 원인도 메모리 쪽이라 메모리로 둔다.
 DEFAULT_SIZE_SOURCE = SOURCE_MEMORY
 
+
 def size_percent(source=None, memory=None, disk=None):
     """고양이 몸집을 정할 0~100 값. 어느 지표를 볼지는 ``source`` 가 정한다.
 

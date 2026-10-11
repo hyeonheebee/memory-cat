@@ -947,6 +947,16 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(reg.values, {})
         self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
 
+    def test_turning_off_when_the_run_key_does_not_exist_is_success(self):
+        """Run 키 자체가 없으면 끌 것도 없다 — 실패 안내를 띄우면 안 된다."""
+        reg = FakeWinreg()
+
+        def missing(*args, **kwargs):
+            raise FileNotFoundError("Run key missing")
+
+        reg.OpenKey = missing
+        self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
+
     def test_registry_errors_report_failure_instead_of_crashing(self):
         reg = FakeWinreg(fail=True)
         self.assertFalse(win_app.set_autostart(True, '"x.exe"', reg))
