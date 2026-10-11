@@ -1080,3 +1080,20 @@ class CatStaysAliveAfterDialogsTests(_PywStatic, unittest.TestCase):
         self.assertGreater(min(quit_on), max(flags),
                            "WA_QuitOnClose 를 setWindowFlags 앞에서 켭니다 — "
                            "setWindowFlags 가 다시 끕니다")
+
+
+class PySideIsPinnedTests(unittest.TestCase):
+    """PySide6 는 정확한 버전으로 고정한다.
+
+    ``>=6.5,<7`` 범위였을 때 빌드마다 그날 최신이 들어갔고, 6.11.2 → 6.12.0
+    으로 바뀐 빌드부터 대화상자를 닫으면 고양이가 꺼졌다(코드는 그대로).
+    맥에서 두 버전으로 같은 재현 스크립트를 돌려 확인했다. Qt 를 올릴 때는
+    일부러 올리고 실기로 확인한다.
+    """
+
+    def test_requirements_pin_an_exact_pyside6_version(self):
+        text = (_REPO / "windows" / "requirements.txt").read_text(encoding="ascii")
+        lines = [l.strip() for l in text.splitlines()
+                 if l.strip().lower().startswith("pyside6")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], r"^PySide6==\d+\.\d+\.\d+$")

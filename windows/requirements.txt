@@ -2,10 +2,14 @@
 # Upper bounds block the next major: this app gets registered to start
 # automatically, so an unannounced major upgrade must not break it.
 #
+# PySide6 is pinned exactly: 6.12.0 changed when the app quits after a
+# dialog closes (the Tool-window cat stopped counting). Upgrade on purpose
+# and re-test on a real Windows PC.
+#
 # Keep this file ASCII. pip decodes requirements files with the system
 # encoding when there is no BOM, so Korean comments here fail with
 # UnicodeDecodeError (cp949) on a Korean-language Windows install.
-PySide6>=6.5,<7
+PySide6==6.12.0
 psutil>=5.9,<8
 
 # Optional AI features: diagnosis (brain.py) and custom pet themes
