@@ -403,6 +403,18 @@ def diagnosis_personality_descriptor(label: str, language: str) -> str:
 DEFAULT_PET_NAME = {LANGUAGE_KO: "뚱냥이", LANGUAGE_EN: "Memory Cat"}
 
 
+#: 이름 길이 상한. 알림 제목·창 첫 줄에 들어가므로 길면 잘린다.
+PET_NAME_MAX = 40
+
+
+def clean_pet_name(raw) -> str:
+    """설정에 저장할 이름. 앞뒤 공백을 떼고 40자까지. 비우면 ``""``(=기본 호칭).
+
+    맥·윈도우가 같은 규칙으로 저장하도록 한 곳에 둔다.
+    """
+    return str(raw or "").strip()[:PET_NAME_MAX]
+
+
 def pet_name(configured: Optional[str], language: str) -> str:
     """화면에 부를 이름. 안 지었으면 기본 호칭으로 돌아간다.
 

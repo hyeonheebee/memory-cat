@@ -59,6 +59,7 @@ from i18n import (
     LANGUAGE_OVERRIDES,
     chonk_stage,
     diagnosis_personality_descriptor,
+    clean_pet_name,
     pet_name,
     resolve_language,
     tr,
@@ -200,7 +201,7 @@ def load_config(path=None):
     cfg = dict(DEFAULT)
     if isinstance(loaded, dict):
         cfg["theme"] = loaded.get("theme", DEFAULT["theme"])
-        cfg["pet_name"] = str(loaded.get("pet_name", "") or "").strip()[:40]
+        cfg["pet_name"] = clean_pet_name(loaded.get("pet_name"))
         size = loaded.get("size", DEFAULT["size"])
         cfg["size"] = size if size in SIZES else DEFAULT["size"]
         selection, custom = config_personality(loaded)
@@ -957,7 +958,7 @@ class CatController(NSObject):
             return
 
         # 비우면 기본 호칭으로 돌아간다. 이름을 지우는 것도 선택이다.
-        self.cfg["pet_name"] = str(field.stringValue() or "").strip()[:40]
+        self.cfg["pet_name"] = clean_pet_name(field.stringValue())
         save_config(self.cfg)
         self.refresh_(None)
         self._notify(

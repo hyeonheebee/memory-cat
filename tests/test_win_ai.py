@@ -2259,3 +2259,19 @@ class SessionAndDiagnosisStartWiringTests(unittest.TestCase):
         self.assertEqual(len(session), 1, "main() 에 log_session_started() 가 하나여야 합니다.")
         self.assertTrue(claim)
         self.assertGreater(session[0].lineno, max(c.lineno for c in claim))
+
+
+class DiagnosisHeadingTests(unittest.TestCase):
+    """이름 지어주기: 윈도우 진단 결과 첫 줄도 맥 결과창 제목과 같은 문구."""
+
+    def test_it_uses_the_pet_name(self):
+        self.assertEqual(win_ai.diagnosis_heading("ko", "몽이"), "몽이가 배부른 이유예요.")
+
+    def test_no_name_falls_back_to_the_default_in_that_language(self):
+        self.assertEqual(win_ai.diagnosis_heading("ko", ""), "뚱냥이가 배부른 이유예요.")
+        self.assertIn("Memory Cat", win_ai.diagnosis_heading("en", None))
+
+    def test_it_matches_the_mac_wording(self):
+        self.assertEqual(
+            win_ai.diagnosis_heading("ko", "몽이"),
+            i18n.tr("ko", "diagnosis_result_fallback_title", pet="몽이"))

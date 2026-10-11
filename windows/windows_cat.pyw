@@ -29,6 +29,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from i18n import (
     LANGUAGE_AUTO,
     LANGUAGE_OVERRIDES,
+    clean_pet_name,
+    pet_name,
     resolve_language,
     tr,
 )
@@ -113,7 +115,7 @@ SIZE_STRING_KEYS = {
 #: v0.4.0 전 윈도우는 디스크만 봤다 — 설정 파일에 이 값이 없는 옛 사용자도
 #: 맥처럼 메모리로 시작한다.
 DEFAULT = {"theme": "cute", "size": "보통", "language": LANGUAGE_AUTO,
-           "size_source": DEFAULT_SIZE_SOURCE}
+           "size_source": DEFAULT_SIZE_SOURCE, "pet_name": ""}
 
 
 def system_languages():
@@ -134,7 +136,8 @@ def load_config():
                 "language": language if language in LANGUAGE_OVERRIDES
                 else LANGUAGE_AUTO,
                 "size_source": win_app.normalize_size_source(
-                    c.get("size_source"))}
+                    c.get("size_source")),
+                "pet_name": clean_pet_name(c.get("pet_name"))}
     except Exception:
         return dict(DEFAULT)
 
@@ -445,6 +448,9 @@ class Cat(QtWidgets.QWidget):
             a.setChecked(choice == self.cfg["language"])
             a.triggered.connect(lambda _=False, c=choice: self.set_language(c))
 
+        a = menu.addAction(tr(language, "menu_pet_name"))
+        a.triggered.connect(lambda _=False: self.set_pet_name())
+
         if win_ai_ui is not None:
             menu.addSeparator()
             if worker_running(self._diagnosis_worker):
@@ -478,7 +484,8 @@ class Cat(QtWidgets.QWidget):
     # 일어난 줄 안다 — 잡아서 보여 준다.
     def _start_diagnosis(self, language):
         try:
-            self._diagnosis_worker = win_ai_ui.show_diagnosis(self, language)
+            self._diagnosis_worker = win_ai_ui.show_diagnosis(
+                self, language, pet=self.cfg["pet_name"])
         except Exception as error:
             # 워커가 시작되기 전에 터진 예외(예: has_api_key() 가 부르는
             # dotenv 로더)라 _DiagnosisWorker.run() 의 안전망을 안 거친다 —
@@ -519,6 +526,22 @@ class Cat(QtWidgets.QWidget):
         self.cfg["theme"] = key
         save_config(self.cfg)
         self.refresh()
+
+    def set_pet_name(self):
+        # 맥 setPetName_ 과 같은 흐름: 묻고 → 다듬어 저장 → 확인. 비우면 기본
+        # 호칭으로 돌아간다(이름을 지우는 것도 선택이다).
+        language = self.language
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, tr(language, "pet_name_title"), tr(language, "pet_name_hint"),
+            QtWidgets.QLineEdit.EchoMode.Normal, self.cfg["pet_name"])
+        if not ok:
+            return
+        self.cfg["pet_name"] = clean_pet_name(text)
+        save_config(self.cfg)
+        QtWidgets.QMessageBox.information(
+            self, tr(language, "menu_pet_name"),
+            tr(language, "pet_name_saved_title",
+               pet=pet_name(self.cfg["pet_name"], language)))
 
     def toggle_autostart(self, enabled):
         # 레지스트리 값이 곧 상태라 설정 파일엔 적지 않는다. 막혀서 못 바꾸면

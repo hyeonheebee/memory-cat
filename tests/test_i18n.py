@@ -251,3 +251,16 @@ class I18nTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleanPetNameTests(unittest.TestCase):
+    """맥·윈도우가 이름을 같은 규칙으로 저장한다(전엔 맥 두 곳에 같은 식이 따로 있었다)."""
+
+    def test_it_trims_and_caps_at_forty(self):
+        self.assertEqual(i18n.clean_pet_name("  몽이 "), "몽이")
+        self.assertEqual(len(i18n.clean_pet_name("가" * 50)), 40)
+
+    def test_empty_or_missing_means_no_name(self):
+        for raw in (None, "", "   "):
+            with self.subTest(raw=raw):
+                self.assertEqual(i18n.clean_pet_name(raw), "")

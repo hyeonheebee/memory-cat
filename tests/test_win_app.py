@@ -1000,3 +1000,37 @@ class WindowsAutostartWiringTests(_PywStatic, unittest.TestCase):
         for key in ("menu_autostart", "autostart_error"):
             for language in ("ko", "en"):
                 self.assertIn(key, i18n._STRINGS[language])
+
+
+class WindowsPetNameWiringTests(_PywStatic, unittest.TestCase):
+    """이름 지어주기 배선(.pyw 는 못 돌리니 정적으로)."""
+
+    UI = _REPO / "windows" / "win_ai_ui.py"
+
+    def test_config_keeps_a_cleaned_pet_name(self):
+        load = self._function("load_config")
+        self.assertIn("clean_pet_name", self._calls(load))
+        self.assertIn("pet_name", ast.dump(load))
+
+    def test_menu_has_the_name_item(self):
+        dumped = ast.dump(self._function("contextMenuEvent"))
+        self.assertIn("menu_pet_name", dumped)
+        self.assertIn("set_pet_name", dumped)
+
+    def test_naming_asks_cleans_saves_and_confirms(self):
+        setter = self._function("set_pet_name")
+        calls = self._calls(setter)
+        for name in ("getText", "clean_pet_name", "save_config"):
+            self.assertIn(name, calls)
+        dumped = ast.dump(setter)
+        for key in ("pet_name_title", "pet_name_hint", "pet_name_saved_title"):
+            self.assertIn(key, dumped)
+
+    def test_diagnosis_gets_the_pet_name(self):
+        start = self._function("_start_diagnosis")
+        self.assertIn("pet_name", ast.dump(start))
+        ui = ast.parse(self.UI.read_text(encoding="utf-8"))
+        shows = [n for n in ast.walk(ui)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_show_diagnosis"]
+        self.assertTrue(shows, "win_ai_ui._show_diagnosis 가 없습니다")
+        self.assertIn("diagnosis_heading", self._calls(shows[0]))

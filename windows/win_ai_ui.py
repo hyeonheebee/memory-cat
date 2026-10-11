@@ -142,7 +142,7 @@ class _ThemeWorker(QtCore.QThread):
         self.finished_ok.emit(name)
 
 
-def _show_diagnosis(parent, language, lines):
+def _show_diagnosis(parent, language, lines, pet=None):
     # I1: 진단도 워커가 수십 초 뒤에 끝나서 비동기로 뜨는 창이다 — 동의창·
     # 완료 알림과 같은 처지라 _bring_to_front 를 똑같이 적용한다. 그 전엔
     # 정적(static) QMessageBox.information() 호출이라 다른 창 뒤에 숨을 수
@@ -151,7 +151,8 @@ def _show_diagnosis(parent, language, lines):
     box = _new_top_box(parent)
     box.setIcon(QtWidgets.QMessageBox.Icon.Information)
     box.setWindowTitle(tr(language, "diagnosis_title"))
-    box.setText("\n".join(lines))
+    # 첫 줄은 맥 결과창 제목과 같은 "○○가 배부른 이유예요."(이름 지어주기).
+    box.setText("\n".join([win_ai.diagnosis_heading(language, pet), ""] + lines))
     _bring_to_front(box)
     box.exec()
 
@@ -168,7 +169,7 @@ def _show_diagnosis_failure(parent, language, message):
     box.exec()
 
 
-def show_diagnosis(parent, language):
+def show_diagnosis(parent, language, pet=None):
     """진단을 워커 스레드에서 시작하고 워커를 돌려준다. 키가 없으면 ``None``.
 
     호출부는 돌려받은 워커를 붙잡고 있어야 한다. 지역 변수로 두면 GC 가 도는
@@ -180,7 +181,7 @@ def show_diagnosis(parent, language):
 
     worker = _DiagnosisWorker(language)
     worker.finished_ok.connect(
-        lambda lines: _show_diagnosis(parent, language, lines), _queued())
+        lambda lines: _show_diagnosis(parent, language, lines, pet), _queued())
     worker.failed.connect(
         lambda message: _show_diagnosis_failure(parent, language, message),
         _queued())

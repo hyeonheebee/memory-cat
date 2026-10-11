@@ -25,7 +25,7 @@ from ai_errors import (
     redact_secrets,
     theme_key_problem,
 )
-from i18n import tr
+from i18n import pet_name, tr
 
 # 키 가리기·401 판정·로그·사전 키 확인은 R7 에서 맥과 같이 쓰려고
 # ``ai_errors`` 로 옮겼다. 윈도우 쪽 호출부와 테스트가 쓰던 옛 이름은 그대로 둔다.
@@ -152,6 +152,16 @@ def _disk_detail_line(language):
         )
     except Exception:
         return None
+
+
+def diagnosis_heading(language, pet=None):
+    """진단 결과창 첫 줄. 맥 결과창 제목과 같은 문구("○○가 배부른 이유예요.").
+
+    윈도우는 성격 설정이 없어서 맥의 성격 없는 제목을 쓴다. 이름을 안
+    지었으면 그 언어의 기본 호칭.
+    """
+    return tr(language, "diagnosis_result_fallback_title",
+              pet=pet_name(pet, language))
 
 
 def diagnosis_lines(language):
