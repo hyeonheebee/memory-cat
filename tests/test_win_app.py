@@ -1040,3 +1040,43 @@ class WindowsPetNameWiringTests(_PywStatic, unittest.TestCase):
                  if isinstance(n, ast.FunctionDef) and n.name == "_show_diagnosis"]
         self.assertTrue(shows, "win_ai_ui._show_diagnosis 가 없습니다")
         self.assertIn("diagnosis_heading", self._calls(shows[0]))
+
+
+class CatStaysAliveAfterDialogsTests(_PywStatic, unittest.TestCase):
+    """R7 실기: 진단 결과창·테마 안내창·사진 선택창을 닫으면 고양이가 꺼졌다.
+
+    고양이 창은 ``Tool`` 창이라 Qt 가 ``WA_QuitOnClose`` 를 꺼 둔다(앱을
+    붙잡는 창으로 안 센다). 그래서 대화상자가 닫히면 Qt 는 "마지막 창이
+    닫혔다" 고 보고 ``setQuitOnLastWindowClosed(True)`` 에 따라 앱을 끝낸다.
+    PySide6 6.12 로 맥에서 재현·확인: 속성을 켜면 대화상자를 닫아도 살고,
+    고양이 창을 닫으면 정상 종료. **setWindowFlags 뒤에** 켜야 한다 — 앞에서
+    켜면 setWindowFlags 가 다시 끈다(같은 실험으로 확인).
+    """
+
+    @staticmethod
+    def _is_quit_on_close_on(node):
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setAttribute"
+                and len(node.args) >= 2
+                and "WA_QuitOnClose" in ast.dump(node.args[0])
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value is True)
+
+    def test_cat_window_counts_as_the_window_that_keeps_the_app_alive(self):
+        init = None
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef) and node.name == "Cat":
+                init = next(n for n in node.body
+                            if isinstance(n, ast.FunctionDef) and n.name == "__init__")
+        self.assertIsNotNone(init, "Cat.__init__ 이 없습니다")
+        flags = [n.lineno for n in ast.walk(init) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "setWindowFlags"]
+        quit_on = [n.lineno for n in ast.walk(init) if self._is_quit_on_close_on(n)]
+        self.assertTrue(quit_on, "Cat 창에 WA_QuitOnClose 를 켜지 않습니다 — "
+                        "대화상자를 닫으면 앱이 꺼집니다")
+        self.assertTrue(flags, "Cat.__init__ 에 setWindowFlags 가 없습니다")
+        self.assertGreater(min(quit_on), max(flags),
+                           "WA_QuitOnClose 를 setWindowFlags 앞에서 켭니다 — "
+                           "setWindowFlags 가 다시 끕니다")

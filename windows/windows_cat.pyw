@@ -275,6 +275,11 @@ class Cat(QtWidgets.QWidget):
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
             | QtCore.Qt.WindowType.Tool)
+        # Tool 창은 Qt 가 WA_QuitOnClose 를 꺼 둔다 — 앱을 붙잡는 창으로 안
+        # 센다. 그러면 진단 결과창·안내창·사진 선택창이 닫히는 순간 Qt 가
+        # "마지막 창이 닫혔다" 고 보고 앱을 끝낸다(R7 실기: 고양이가 꺼짐).
+        # setWindowFlags 가 이 속성을 다시 끄므로 반드시 그 **뒤에** 켠다.
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_QuitOnClose, True)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle("MemoryCat")
 
