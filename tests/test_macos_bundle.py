@@ -1173,9 +1173,6 @@ class BuiltBundleFloorTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class WindowsVersionInfoTests(unittest.TestCase):
     """exe 속성 → 자세히 에 회사명·저작권·버전이 보이게(R7 추가 요청).
@@ -1239,3 +1236,7 @@ class WindowsVersionInfoTests(unittest.TestCase):
         parts = tuple(int(p) for p in build_app.VERSION.split(".")) + (0,)
         self.assertEqual(fixed.kwargs["filevers"], parts)
         self.assertEqual(fixed.kwargs["prodvers"], parts)
+
+
+if __name__ == "__main__":
+    unittest.main()

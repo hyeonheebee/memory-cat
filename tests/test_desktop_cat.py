@@ -1087,6 +1087,8 @@ class SizeSourceTests(unittest.TestCase):
         link_item = items[titles.index(link)]
         credit_item.setEnabled_.assert_called_with(False)
         self.assertEqual(link_item.action, b"openCreditLink:")
+        # target 이 없으면 메뉴 항목이 회색이 되거나 눌러도 아무 일이 없다.
+        link_item.setTarget_.assert_called_with(controller)
         self.assertLess(titles.index(link), titles.index("새로고침"))
 
     def test_credit_link_opens_the_repo_in_the_browser(self):

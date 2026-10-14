@@ -850,7 +850,7 @@ class CatController(NSObject):
             return
 
         # F-2: 키가 있어도 무효면 사진·동의·업로드를 다 거친 뒤에야 401 로
-        # 실패했다. 모델 목록 GET 한 번(사진 없음·과금 없음, 최대 5초·재시도
+        # 실패했다. 이미지 모델 하나 조회 GET 한 번(사진 없음·과금 없음, 최대 5초·재시도
         # 없음)으로 먼저 본다. 401 만 막고 나머지(네트워크·403)는 진행한다.
         problem = theme_key_problem(self.language)
         if problem:
