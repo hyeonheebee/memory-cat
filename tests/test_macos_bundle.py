@@ -1175,3 +1175,67 @@ class BuiltBundleFloorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsVersionInfoTests(unittest.TestCase):
+    """exe 속성 → 자세히 에 회사명·저작권·버전이 보이게(R7 추가 요청).
+
+    PyInstaller 는 ``--version-file`` 의 내용을 ``eval()`` 해서
+    ``VSVersionInfo`` 를 만든다(6.22.3 ``load_version_info_from_text_file``).
+    PyInstaller 가 없는 맥 테스트에서는 같은 이름의 가짜 틀로 읽어 값을 본다.
+    """
+
+    VERSION_FILE = _REPO / "windows" / "version_info.txt"
+    BAT = _REPO / "windows" / "build_exe.bat"
+
+    class _Node:
+        def __init__(self, *args, **kwargs):
+            self.args, self.kwargs = args, kwargs
+
+    def _load(self):
+        names = {name: type(name, (self._Node,), {}) for name in (
+            "VSVersionInfo", "FixedFileInfo", "StringFileInfo", "StringTable",
+            "StringStruct", "VarFileInfo", "VarStruct")}
+        text = self.VERSION_FILE.read_text(encoding="utf-8")
+        info = eval(text, {"__builtins__": {}}, names)  # noqa: S307 — 우리 파일
+        strings = {}
+        stack = [info]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, self._Node):
+                if type(node).__name__ == "StringStruct":
+                    strings[node.args[0]] = node.args[1]
+                stack.extend(node.args)
+                stack.extend(node.kwargs.values())
+            elif isinstance(node, (list, tuple)):
+                stack.extend(node)
+        fixed = info.kwargs["ffi"]
+        return strings, fixed
+
+    def test_bat_passes_the_version_file_and_checks_it_exists(self):
+        bat = self.BAT.read_text(encoding="utf-8")
+        self.assertIn('--version-file "version_info.txt"', bat)
+        self.assertIn('if not exist "version_info.txt"', bat)
+
+    def test_file_declares_utf8_for_the_korean_copyright(self):
+        first = self.VERSION_FILE.read_text(encoding="utf-8").splitlines()[0]
+        self.assertRegex(first, r"coding[:=]\s*utf-8")
+
+    def test_strings_name_the_product_and_the_license_holder(self):
+        strings, _ = self._load()
+        license_line = next(
+            line for line in (_REPO / "LICENSE").read_text(encoding="utf-8").splitlines()
+            if line.startswith("Copyright"))
+        self.assertEqual(strings["ProductName"], "Memory Cat")
+        self.assertEqual(strings["LegalCopyright"], license_line)
+        self.assertIn("Hyeonhee Shim", strings["CompanyName"])
+        self.assertTrue(strings["FileDescription"])
+        self.assertEqual(strings["OriginalFilename"], "MemoryCat.exe")
+
+    def test_windows_exe_stamps_the_same_version_as_the_mac_builds(self):
+        strings, fixed = self._load()
+        self.assertEqual(strings["FileVersion"], build_app.VERSION)
+        self.assertEqual(strings["ProductVersion"], build_app.VERSION)
+        parts = tuple(int(p) for p in build_app.VERSION.split(".")) + (0,)
+        self.assertEqual(fixed.kwargs["filevers"], parts)
+        self.assertEqual(fixed.kwargs["prodvers"], parts)

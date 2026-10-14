@@ -33,6 +33,16 @@ if not exist "frames" (
     exit /b 1
 )
 
+REM exe 속성(회사명·저작권·버전)은 version_info.txt 에서 온다.
+if not exist "version_info.txt" (
+    echo.
+    echo [X] version_info.txt 가 없습니다. exe 속성에 저작권이 빠집니다.
+    echo     저장소를 통째로 받았는지 확인하세요.
+    popd
+    pause
+    exit /b 1
+)
+
 REM i18n.py / metrics.py / apppaths.py 는 저장소 루트에 있다. windows 폴더만 복사해 온
 REM 경우 여기서 걸러 준다. 없으면 빌드는 되지만 실행할 때 죽는다.
 if not exist "..\i18n.py" (
@@ -74,6 +84,7 @@ REM 바로 import 한다(필수 설정 이전 기능). 못 담으면 exe 가 켜
 REM 조용히 죽는다.
 pyinstaller --noconsole --onefile --name MemoryCat ^
     --add-data "frames;frames" ^
+    --version-file "version_info.txt" ^
     --paths ".." ^
     --hidden-import i18n ^
     --hidden-import metrics ^
