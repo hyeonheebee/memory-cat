@@ -172,6 +172,7 @@ _STRINGS = {
         "menu_language": "언어",
         "menu_refresh": "새로고침",
         "menu_quit": "종료",
+        "credit_line": "만든 사람: 심현희 (Hyeonhee Shim)",
         "language_auto": "자동 ({language})",
         "language_ko": "한국어",
         "language_en": "English",
@@ -324,6 +325,7 @@ _STRINGS = {
         "menu_language": "Language",
         "menu_refresh": "Refresh",
         "menu_quit": "Quit",
+        "credit_line": "Made by Hyeonhee Shim (심현희)",
         "language_auto": "Automatic ({language})",
         "language_ko": "한국어",
         "language_en": "English",
@@ -401,6 +403,21 @@ def diagnosis_personality_descriptor(label: str, language: str) -> str:
 
 #: 이름을 안 지어 줬을 때 쓰는 기본 호칭.
 DEFAULT_PET_NAME = {LANGUAGE_KO: "뚱냥이", LANGUAGE_EN: "Memory Cat"}
+
+
+#: 만든 사람 표시가 가리키는 공개 저장소. exe 만 따로 퍼져도 출처가 남게
+#: 맥·윈도우 우클릭 메뉴에 같은 링크를 둔다.
+CREDIT_URL = "https://github.com/hyeonheebee/memory-cat"
+
+
+def credit_lines(language):
+    """우클릭 메뉴 아래쪽 두 줄: (만든 사람, 저장소 링크 글자).
+
+    링크 글자는 주소를 그대로 보여 준다 — 눌러지지 않는 환경(스크린샷)에서도
+    출처가 남아야 해서다. 맥·윈도우가 같은 함수를 쓴다.
+    """
+    return (tr(language, "credit_line"),
+            CREDIT_URL.replace("https://", "") + " ↗")
 
 
 #: 이름 길이 상한. 알림 제목·창 첫 줄에 들어가므로 길면 잘린다.

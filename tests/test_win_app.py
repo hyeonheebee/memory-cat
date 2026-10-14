@@ -1097,3 +1097,14 @@ class PySideIsPinnedTests(unittest.TestCase):
                  if l.strip().lower().startswith("pyside6")]
         self.assertEqual(len(lines), 1, lines)
         self.assertRegex(lines[0], r"^PySide6==\d+\.\d+\.\d+$")
+
+
+class WindowsCreditWiringTests(_PywStatic, unittest.TestCase):
+    """만든 사람 표시: 우클릭 메뉴에 크레딧 줄 + 누르면 저장소가 열리는 링크."""
+
+    def test_menu_shows_the_shared_credit_lines(self):
+        menu = self._function("contextMenuEvent")
+        calls = self._calls(menu)
+        self.assertIn("credit_lines", calls)
+        self.assertIn("openUrl", calls)
+        self.assertIn("CREDIT_URL", ast.dump(menu))

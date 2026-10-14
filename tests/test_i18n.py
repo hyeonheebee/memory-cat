@@ -262,5 +262,32 @@ class CleanPetNameTests(unittest.TestCase):
                 self.assertEqual(i18n.clean_pet_name(raw), "")
 
 
+class CreditTests(unittest.TestCase):
+    """만든 사람 표시(R7 추가 요청): exe 가 퍼져도 출처가 남게.
+
+    이름은 LICENSE 저작권자와 같은 사람이어야 한다 — 한쪽만 고치는 일을 막는다.
+    """
+
+    LICENSE = pathlib.Path(__file__).resolve().parent.parent / "LICENSE"
+
+    def test_url_points_at_the_public_repo(self):
+        self.assertEqual(i18n.CREDIT_URL, "https://github.com/hyeonheebee/memory-cat")
+
+    def test_both_languages_name_the_license_holder(self):
+        holder = next(line for line in self.LICENSE.read_text(encoding="utf-8").splitlines()
+                      if line.startswith("Copyright"))
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                credit, link = i18n.credit_lines(language)
+                self.assertIn("Hyeonhee Shim", credit)
+                self.assertIn("심현희", credit)
+                self.assertIn("Hyeonhee Shim (심현희)", holder)
+                self.assertIn("github.com/hyeonheebee/memory-cat", link)
+
+    def test_korean_and_english_wording(self):
+        self.assertTrue(i18n.credit_lines("ko")[0].startswith("만든 사람"))
+        self.assertTrue(i18n.credit_lines("en")[0].startswith("Made by"))
+
+
 if __name__ == "__main__":
     unittest.main()

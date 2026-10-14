@@ -28,8 +28,10 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from i18n import (
     LANGUAGE_AUTO,
+    CREDIT_URL,
     LANGUAGE_OVERRIDES,
     clean_pet_name,
+    credit_lines,
     pet_name,
     resolve_language,
     tr,
@@ -479,6 +481,15 @@ class Cat(QtWidgets.QWidget):
         # 안 넘기는 경우 기본값(False)으로 "끄기" 가 돼 버린다.
         a.triggered.connect(
             lambda _=False, act=a: self.toggle_autostart(act.isChecked()))
+        menu.addSeparator()
+        # 만든 사람 표시: exe 만 따로 퍼져도 출처가 남게(맥과 같은 문구).
+        credit, link = credit_lines(language)
+        a = menu.addAction(credit)
+        a.setEnabled(False)
+        a = menu.addAction(link)
+        a.triggered.connect(lambda _=False: QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl(CREDIT_URL)))
+        menu.addSeparator()
         menu.addAction(tr(language, "menu_refresh"), self.refresh)
         menu.addAction(tr(language, "menu_quit"), QtWidgets.QApplication.quit)
         menu.exec(e.globalPos())

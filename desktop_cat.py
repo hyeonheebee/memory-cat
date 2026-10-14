@@ -29,12 +29,13 @@ from AppKit import (
     NSRectFillUsingOperation, NSApp,
     NSAlert, NSTextField, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
     NSAlertThirdButtonReturn,
-    NSOpenPanel, NSModalResponseOK,
+    NSOpenPanel, NSModalResponseOK, NSWorkspace,
 )
 from Foundation import (
     NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString,
     NSOperationQueue, NSUserNotification, NSUserNotificationCenter,
     NSDistributedNotificationCenter, NSRunLoop, NSDate, NSDefaultRunLoopMode,
+    NSURL,
 )
 
 import apppaths
@@ -59,7 +60,9 @@ from i18n import (
     LANGUAGE_OVERRIDES,
     chonk_stage,
     diagnosis_personality_descriptor,
+    CREDIT_URL,
     clean_pet_name,
+    credit_lines,
     pet_name,
     resolve_language,
     tr,
@@ -1436,6 +1439,15 @@ class CatController(NSObject):
         menu.addItem_(name_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
+        # 만든 사람 표시: exe·앱이 따로 퍼져도 출처가 남게(윈도우와 같은 문구).
+        credit, link = credit_lines(self.language)
+        credit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(credit, None, "")
+        credit_item.setEnabled_(False)
+        menu.addItem_(credit_item)
+        link_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(link, b"openCreditLink:", "")
+        link_item.setTarget_(self)
+        menu.addItem_(link_item)
+        menu.addItem_(NSMenuItem.separatorItem())
         r = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_refresh"), b"refresh:", "")
         r.setTarget_(self)
         menu.addItem_(r)
@@ -1443,6 +1455,9 @@ class CatController(NSObject):
         q.setTarget_(self)
         menu.addItem_(q)
         NSMenu.popUpContextMenu_withEvent_forView_(menu, event, self.view)
+
+    def openCreditLink_(self, sender):
+        NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(CREDIT_URL))
 
     def quit_(self, sender):
         NSApp.terminate_(self)

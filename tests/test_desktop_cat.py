@@ -1053,6 +1053,51 @@ class SizeSourceTests(unittest.TestCase):
             [(call.args[0], call.args[1]) for call in menu_calls],
         )
 
+    def test_context_menu_credits_the_author_above_refresh_and_quit(self):
+        """만든 사람 표시: 크레딧 줄(누를 수 없음) + 저장소 링크(누르면 열림)."""
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT)
+        controller.language = "ko"
+        controller.detail = ["Disk 50%"]
+        controller._diagnosis_running = False
+        controller.view = Mock()
+        items = []
+
+        def new_item(title, action, key):
+            item = Mock(title=title, action=action)
+            items.append(item)
+            return item
+
+        menu_class = Mock()
+        item_class = Mock()
+        item_class.alloc.return_value.initWithTitle_action_keyEquivalent_.side_effect = new_item
+        item_class.separatorItem.side_effect = lambda: Mock(title="separator")
+        with (
+            patch.object(desktop_cat, "NSMenu", menu_class),
+            patch.object(desktop_cat, "NSMenuItem", item_class),
+            patch.object(desktop_cat, "discover_themes", return_value=["cute"]),
+        ):
+            controller.popUpMenu_(Mock())
+
+        credit, link = i18n.credit_lines("ko")
+        titles = [item.title for item in items]
+        self.assertIn(credit, titles)
+        self.assertIn(link, titles)
+        credit_item = items[titles.index(credit)]
+        link_item = items[titles.index(link)]
+        credit_item.setEnabled_.assert_called_with(False)
+        self.assertEqual(link_item.action, b"openCreditLink:")
+        self.assertLess(titles.index(link), titles.index("새로고침"))
+
+    def test_credit_link_opens_the_repo_in_the_browser(self):
+        controller = desktop_cat.CatController.alloc().init()
+        workspace = Mock()
+        with patch.object(desktop_cat, "NSWorkspace", workspace), \
+             patch.object(desktop_cat, "NSURL", Mock(URLWithString_=lambda u: ("url", u))):
+            controller.openCreditLink_(None)
+        workspace.sharedWorkspace.return_value.openURL_.assert_called_once_with(
+            ("url", i18n.CREDIT_URL))
+
     def test_finishing_diagnosis_stores_start_context_and_close_skips_cleanup(self):
         controller = desktop_cat.CatController.alloc().init()
         controller.language = "en"
