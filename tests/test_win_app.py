@@ -1108,3 +1108,30 @@ class WindowsCreditWiringTests(_PywStatic, unittest.TestCase):
         self.assertIn("credit_lines", calls)
         self.assertIn("openUrl", calls)
         self.assertIn("CREDIT_URL", ast.dump(menu))
+
+
+class ThemePickerTimingWiringTests(unittest.TestCase):
+    """R7 실기 3a: 테마 메뉴 → 사진 창 약 4초. 키 확인과 사진 창 중 어디가
+    느린지 로그로 가른다 — 메뉴 누름·사진 창 여는 중·닫힘을 남긴다."""
+
+    UI = _REPO / "windows" / "win_ai_ui.py"
+
+    def test_make_theme_logs_around_the_photo_picker(self):
+        tree = ast.parse(self.UI.read_text(encoding="utf-8"))
+        make = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "make_theme")
+        events = []
+        for node in ast.walk(make):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr == "log_theme_step" and node.args:
+                events.append((node.lineno, node.args[0].value))
+            elif node.func.attr == "getOpenFileName":
+                events.append((node.lineno, "<picker>"))
+            elif node.func.attr == "has_api_key":
+                events.append((node.lineno, "<key exists?>"))
+        order = [name for _, name in sorted(events)]
+        self.assertEqual(order[:2], ["menu clicked", "<key exists?>"], order)
+        i = order.index("<picker>")
+        self.assertEqual(order[i - 1], "photo picker opening", order)
+        self.assertEqual(order[i + 1], "photo picker closed", order)

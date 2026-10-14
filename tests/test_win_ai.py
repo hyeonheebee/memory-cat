@@ -2031,12 +2031,22 @@ class _FakeModels:
     def __init__(self, error=None):
         self._error = error
         self.calls = 0
+        self.listed = 0
+        self.retrieved = []
 
     def list(self):
         self.calls += 1
+        self.listed += 1
         if self._error is not None:
             raise self._error
         return SimpleNamespace(data=[])
+
+    def retrieve(self, model):
+        self.calls += 1
+        self.retrieved.append(model)
+        if self._error is not None:
+            raise self._error
+        return SimpleNamespace(id=model)
 
 
 class _FakeClient:
@@ -2115,6 +2125,26 @@ class ThemeKeyProblemTests(unittest.TestCase):
         self.assertEqual(client.models.calls, 1)
         self.assertEqual(client.kwargs.get("max_retries"), 0)
         self.assertLessEqual(client.kwargs.get("timeout"), 5.0)
+
+    def test_it_asks_about_the_one_image_model_not_the_whole_list(self):
+        """R7 실기 3a: 맞는 키로 사진 창까지 약 4초(느린 네트워크). 모델 목록
+        전체는 답이 크다 — 테마가 실제로 쓰는 모델 하나만 묻는다. 틀린 키면
+        똑같이 401(가짜 키로 실제 API 에 보내 확인)."""
+        self._run()
+        models = _FakeClient.instances[-1].models
+        self.assertEqual(models.retrieved, [win_ai.vision_theme.MODEL])
+        self.assertEqual(models.listed, 0)
+
+    def test_a_missing_model_does_not_block(self):
+        """404(그 키로 모델을 못 봄)는 무효 키가 아니다 — 막지 않는다."""
+        class FakeNotFound(Exception):
+            status_code = 404
+        self.assertIsNone(self._run(FakeNotFound("no such model")))
+        self.assertIn("key check: unknown", self._log_text())
+
+    def test_the_log_says_how_long_the_check_took(self):
+        self._run()
+        self.assertRegex(self._log_text(), r"key check: ok \(\d+ ms\)")
 
     def test_no_key_text_is_ever_logged(self):
         self._run(FakeAuthError("Incorrect API key provided: sk-proj-LEAKME"))
@@ -2275,3 +2305,17 @@ class DiagnosisHeadingTests(unittest.TestCase):
         self.assertEqual(
             win_ai.diagnosis_heading("ko", "몽이"),
             i18n.tr("ko", "diagnosis_result_fallback_title", pet="몽이"))
+
+
+class LogThemeStepTests(unittest.TestCase):
+    def test_known_steps_are_logged_and_unknown_ones_refused(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(win_ai.apppaths, "log_dir", return_value=Path(tmp)):
+            for step in ("menu clicked", "photo picker opening", "photo picker closed"):
+                win_ai.log_theme_step(step)
+            with self.assertRaises(ValueError):
+                win_ai.log_theme_step("C:/Users/me/cat.jpg")
+            text = (Path(tmp) / "ai-errors.log").read_text(encoding="utf-8")
+        for step in ("menu clicked", "photo picker opening", "photo picker closed"):
+            self.assertIn(f"theme {step}", text)
+        self.assertNotIn("cat.jpg", text)

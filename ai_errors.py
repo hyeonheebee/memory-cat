@@ -10,12 +10,14 @@ Qt 도 AppKit 도 import 하지 않는다. 맥 ``desktop_cat`` 과 윈도우 ``w
 import datetime
 import re
 import threading
+import time
 import traceback
 
 from openai import OpenAI
 
 import apppaths
 import brain
+import vision_theme
 from i18n import tr
 
 #: 로그 파일 이름. ``apppaths.log_dir()`` 아래에 둔다.
@@ -152,9 +154,13 @@ _KEY_CHECK_TIMEOUT = 5.0
 def check_api_key():
     """키가 실제로 통하는지 ``"ok"``·``"invalid"``·``"unknown"`` 중 하나로.
 
-    모델 목록 GET 한 번이다 — 사진을 보내지 않고 과금도 없다. 재시도는 하지
-    않는다. **401 만** ``"invalid"`` 다. 그 밖의 실패(네트워크·타임아웃·403)는
-    ``"unknown"`` — 예를 들어 권한을 좁힌 프로젝트 키는 모델 목록엔 403 을
+    테마가 실제로 쓰는 이미지 모델 **하나**를 조회한다(GET 한 번) — 사진을
+    보내지 않고 과금도 없다. 재시도는 하지 않는다. R7 실기: 전엔 모델 목록
+    전체를 받았는데 답이 커서, 느린 네트워크에서 맞는 키일 때만 사진 창까지
+    약 4초 걸렸다(틀린 키는 짧은 401 이라 바로). 틀린 키면 이쪽도 똑같이
+    401 이다(가짜 키로 실제 API 에 보내 확인). **401 만** ``"invalid"`` 다. 그 밖의 실패(네트워크·타임아웃·403)는
+    ``"unknown"``(404 도 — 그 키로 모델을 못 보는 것일 뿐 키가 틀린 건
+    아니다). 예를 들어 권한을 좁힌 프로젝트 키는 모델 조회엔 403 을
     내도 이미지 생성은 될 수 있다. 모르는 걸 무효로 판정하면 멀쩡한 사용자를
     막는다.
     """
@@ -162,7 +168,7 @@ def check_api_key():
         client = OpenAI(
             api_key=brain._load_api_key(),
             timeout=_KEY_CHECK_TIMEOUT, max_retries=0)
-        client.models.list()
+        client.models.retrieve(vision_theme.MODEL)
     except Exception as error:
         return "invalid" if is_invalid_key_error(error) else "unknown"
     return "ok"
@@ -183,8 +189,11 @@ def theme_key_problem(language):
     unknown)는 동의 줄과 같은 로그에 한 줄 남긴다 — 키나 오류 원문은 남기지
     않는다.
     """
+    started = time.monotonic()
     status = check_api_key()
-    append_log_line(f"key check: {status}")
+    elapsed_ms = round((time.monotonic() - started) * 1000)
+    # 걸린 시간도 남긴다 — 사진 창까지 느릴 때 키 확인 탓인지 가른다(R7 3a).
+    append_log_line(f"key check: {status} ({elapsed_ms} ms)")
     if status == "invalid":
         return invalid_key_message(language)
     return None

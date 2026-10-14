@@ -70,6 +70,22 @@ def log_consent(stage):
     _append_log_line(f"consent {stage}")
 
 
+#: 테마 메뉴 흐름에서 남기는 단계. 사진 경로·파일명은 절대 안 남긴다.
+_THEME_STEPS = ("menu clicked", "photo picker opening", "photo picker closed")
+
+
+def log_theme_step(step):
+    """R7 실기 3a: 테마 메뉴 → 사진 창이 약 4초. 키 확인(``key check`` 줄에
+    ms 가 남는다)과 사진 창 중 어디가 느린지 이 줄들의 시각으로 가른다.
+
+    ``log_consent`` 와 같은 규칙: 정해진 단계 이름만 받고, 그 밖은
+    ``ValueError`` 로 바로 드러낸다.
+    """
+    if step not in _THEME_STEPS:
+        raise ValueError(f"알 수 없는 테마 단계: {step!r}")
+    _append_log_line(f"theme {step}")
+
+
 def log_theme_worker_started():
     """R5 K-1: 테마 워커가 실제로 돌기 시작했다는 증거 한 줄을 남긴다.
 

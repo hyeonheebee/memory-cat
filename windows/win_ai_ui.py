@@ -248,6 +248,7 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
     중간에 그만두면(키 없음·취소·형식 오류·동의 안 함) ``None``.
     ``on_done(name)`` 은 GUI 스레드에서 불린다.
     """
+    win_ai.log_theme_step("menu clicked")
     if not win_ai.has_api_key():
         _explain_missing_key(parent, language)
         return None
@@ -257,8 +258,10 @@ def make_theme(parent, language, bundled_frames_dir, on_done):
     if _key_problem_shown(parent, language):
         return None
 
+    win_ai.log_theme_step("photo picker opening")
     photo, _ = QtWidgets.QFileDialog.getOpenFileName(
         parent, tr(language, "menu_pet_theme"), "", IMAGE_FILTER)
+    win_ai.log_theme_step("photo picker closed")
     if not photo:
         return None
 
