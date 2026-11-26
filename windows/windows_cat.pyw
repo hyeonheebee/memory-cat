@@ -450,7 +450,7 @@ class Cat(QtWidgets.QWidget):
                 lambda _=False, o=option: self.set_size_source(o))
         lm = menu.addMenu(tr(language, "menu_language"))
         for choice in LANGUAGE_OVERRIDES:
-            a = lm.addAction(tr(language, f"language_{choice}"))
+            a = lm.addAction(win_app.language_menu_label(language, choice))
             a.setCheckable(True)
             a.setChecked(choice == self.cfg["language"])
             a.triggered.connect(lambda _=False, c=choice: self.set_language(c))
