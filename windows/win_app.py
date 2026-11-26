@@ -19,7 +19,7 @@ from types import SimpleNamespace
 # 파일이 살 폴더(맥과 같은 %APPDATA%\Memory Cat)를 여기서 받는다.
 import apppaths
 import metrics
-from i18n import chonk_stage, tr
+from i18n import LANGUAGE_AUTO, chonk_stage, tr
 
 #: 맥의 desktop_cat.INSTANCE_LOCK_NAME 과 같은 이름 — 잠금은 플랫폼마다
 #: 따로지만(맥은 fcntl.flock, 윈도우는 QLockFile) 파일 이름은 맞춰 둔다.
@@ -156,6 +156,20 @@ def migrate_legacy_config(legacy_path, target_path):
 def normalize_size_source(value):
     """설정의 ``size_source`` 를 아는 값으로. 없거나 모르면 메모리(맥과 같은 기본값)."""
     return value if value in metrics.SIZE_SOURCES else metrics.DEFAULT_SIZE_SOURCE
+
+
+def language_menu_label(language, choice):
+    """우클릭 "언어" 메뉴 한 줄의 글자.
+
+    "자동" 문구는 ``자동 ({language})`` 처럼 빈자리가 있어서, 지금 판별된
+    언어 이름을 넘겨야 한다. 안 넘기면 ``tr()`` 이 채우기를 건너뛰어 빈자리가
+    글자 그대로 메뉴에 나온다(11/24 PC1 실기). 맥판 ``desktop_cat.py`` 의
+    언어 메뉴와 같은 규칙이다. ``language`` 는 판별이 끝난 표시 언어다.
+    """
+    if choice == LANGUAGE_AUTO:
+        current = tr(language, f"language_{language}")
+        return tr(language, "language_auto", language=current)
+    return tr(language, f"language_{choice}")
 
 
 def cat_view(source, memory, disk, ram_percent, frames, language):

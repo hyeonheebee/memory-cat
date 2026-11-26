@@ -297,6 +297,35 @@ class LogInstanceAlreadyRunningTests(unittest.TestCase):
             win_app.log_instance_already_running()      # 예외가 새면 실패
 
 
+class LanguageMenuLabelTests(unittest.TestCase):
+    """언어 메뉴 라벨에 ``{language}`` 같은 빈자리가 그대로 남지 않아야 한다.
+
+    11/24 PC1 실기에서 첫 항목이 ``자동 ({language})`` 로 보였다. ``tr()`` 은
+    값을 하나도 안 받으면 채우기를 하지 않으니, 문구가 **있는지만** 보는
+    시험은 이것을 못 잡는다. 그래서 라벨 글자 자체를 본다.
+    """
+
+    def test_no_label_keeps_a_placeholder(self):
+        from i18n import LANGUAGE_OVERRIDES
+        for language in ("ko", "en"):
+            for choice in LANGUAGE_OVERRIDES:
+                with self.subTest(language=language, choice=choice):
+                    label = win_app.language_menu_label(language, choice)
+                    self.assertNotIn("{", label)
+                    self.assertNotIn("}", label)
+
+    def test_auto_names_the_language_in_use(self):
+        self.assertEqual(win_app.language_menu_label("ko", "auto"), "자동 (한국어)")
+        self.assertEqual(
+            win_app.language_menu_label("en", "auto"), "Automatic (English)")
+
+    def test_fixed_choices_keep_their_own_names(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                self.assertEqual(win_app.language_menu_label(language, "ko"), "한국어")
+                self.assertEqual(win_app.language_menu_label(language, "en"), "English")
+
+
 class WindowsCatWiringTests(unittest.TestCase):
     """``windows_cat.pyw`` 는 못 돌리니 소스를 정적으로 검사한다."""
 
@@ -334,6 +363,11 @@ class WindowsCatWiringTests(unittest.TestCase):
             imports_win_app_at_top_level,
             "windows_cat.pyw 최상위에서 `import win_app` 을 직접 하지 않습니다.",
         )
+
+    def test_language_menu_uses_language_menu_label(self):
+        """메뉴가 ``tr(language, f"language_{choice}")`` 로 빈자리를 남기지 않는다."""
+        self.assertIn("win_app.language_menu_label(", self.source)
+        self.assertNotIn('f"language_{choice}"', self.source)
 
     def _main_function(self):
         for node in ast.walk(self.tree):
