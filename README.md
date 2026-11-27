@@ -216,16 +216,17 @@ Each band gets its own picture instead. Inside a band the movement is linear, so
 themes that really are forty separate drawings, like *Wake-up call*, still
 animate smoothly.
 
-The Windows build follows storage only.<br>
-Windows 버전은 저장공간 사용량만을 기준으로 크기가 변합니다.
+The Windows build has the same menu and the same three choices, with memory as
+the default.<br>
+Windows 버전에도 같은 메뉴와 세 가지 선택지가 있고, 기본값은 메모리입니다.
 
 <a id="give-your-pet-a-name"></a>
 
 ## Give your pet a name · 반려동물 이름 짓기
 
-On macOS, right-click the pet and choose **Give it a name…**. Leave the field
+On macOS and Windows, right-click the pet and choose **Give it a name…**. Leave the field
 empty to use the default name, or enter a name such as `수다리`.<br>
-macOS에서 반려동물을 우클릭하고 <strong>이름 지어주기…</strong>를 선택하세요. 입력란을
+macOS와 Windows에서 반려동물을 우클릭하고 <strong>이름 지어주기…</strong>를 선택하세요. 입력란을
 비워두면 기본 이름을 사용하고, `수다리`와 같은 이름을 입력할 수 있습니다.
 
 For example, a generated theme may be stored under an automatically assigned
@@ -585,25 +586,28 @@ GPT-5.6 진단과 커스텀 반려동물 테마를 켜려면 [AI 기능 켜기](
 
 ## Install on Windows · Windows 설치
 
-> **What the Windows build includes.** The disk-driven cat, RAM and swap
-> readouts, top memory consumers, theme and size switching, and the Korean /
-> English language toggle. **🐾 What did you eat? diagnosis** and **custom pet
-> theme** creation are here too, optional, and need your own
-> `OPENAI_API_KEY` — see [Turning on AI features](#turning-on-ai-features).
-> Windows only explains: it never deletes or moves anything, and without a
-> key those two menu items just say one is needed. Safe cleanup and
-> personalities stay **macOS only**. With no key, the Windows build makes no
-> network requests at all.
+> **What the Windows build includes.** The cat (memory by default, or storage,
+> or whichever is fuller: see [What makes him chonky](#what-makes-him-chonky)),
+> RAM and swap readouts, top memory consumers, theme and size switching, the
+> Korean / English language toggle, naming your pet, and an optional
+> **Start with Windows** item in the right-click menu (off by default).
+> **🐾 What did you eat? diagnosis** and **custom pet theme** creation are here
+> too, optional, and need your own `OPENAI_API_KEY`. See
+> [Turning on AI features](#turning-on-ai-features). Windows only explains: it
+> never deletes or moves anything, and without a key those two menu items just
+> say one is needed. Safe cleanup and personalities stay **macOS only**. With no
+> key, the Windows build makes no network requests at all.
 >
-> **Windows 버전에 포함된 기능.** 디스크 사용량을 기준으로 변하는 고양이,
-> RAM·스왑 정보, 메모리를 많이 사용하는 앱 목록, 테마 및 크기 전환,
-> 한국어·영어 언어 전환을 제공합니다. **🐾 뭘 먹은 거야? 진단**과 **커스텀
-> 반려동물 테마** 만들기도 있으며, 둘 다 선택 사항으로 본인의
-> `OPENAI_API_KEY`가 필요합니다 — [AI 기능 켜기](#turning-on-ai-features)를
-> 참고하세요. Windows는 설명만 할 뿐 아무것도 지우거나 옮기지 않으며, 키가
-> 없으면 두 메뉴 모두 키가 필요하다는 안내만 뜹니다. 안전한 용량 정리와 성격
-> 기능은 **macOS 전용**입니다. 키가 없으면 Windows 버전은 네트워크 요청을
-> 전혀 하지 않습니다.
+> **Windows 버전에 포함된 기능.** 고양이(기본은 메모리, 저장공간이나 둘 중
+> 배부른 쪽으로 바꿀 수 있음. [무엇을 기준으로 통통해질까요?](#what-makes-him-chonky)
+> 참고), RAM과 스왑 정보, 메모리를 많이 사용하는 앱 목록, 테마와 크기 전환,
+> 한국어와 영어 전환, 이름 지어주기, 우클릭 메뉴의 <strong>윈도우 켤 때 같이 실행</strong>(기본 꺼짐)을
+> 제공합니다. <strong>🐾 뭘 먹은 거야? 진단</strong>과 <strong>커스텀 반려동물 테마</strong> 만들기도
+> 있으며, 둘 다 선택 사항으로 본인의 `OPENAI_API_KEY`가 필요합니다.
+> [AI 기능 켜기](#turning-on-ai-features)를 참고하세요. Windows는 설명만 할 뿐
+> 아무것도 지우거나 옮기지 않으며, 키가 없으면 두 메뉴 모두 키가 필요하다는
+> 안내만 뜹니다. 안전한 용량 정리와 성격 기능은 <strong>macOS 전용</strong>입니다. 키가
+> 없으면 Windows 버전은 네트워크 요청을 전혀 하지 않습니다.
 
 See [`windows/README.txt`](windows/README.txt) for the full instructions. In
 short:
