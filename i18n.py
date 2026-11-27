@@ -43,6 +43,8 @@ _STRINGS = {
         "source_disk": "디스크",
         "source_max": "메모리·디스크",
         "menu_size_source": "무엇으로 뚱뚱해질까",
+        "menu_autostart": "윈도우 켤 때 같이 실행",
+        "autostart_error": "자동 실행 설정을 바꾸지 못했어요. 회사 PC 라면 보안 정책이 막았을 수 있어요.",
         "size_source_memory": "메모리 (앱을 닫으면 홀쭉해져요)",
         "size_source_disk": "저장공간 (파일을 지우면 홀쭉해져요)",
         "size_source_max": "둘 중 배부른 쪽",
@@ -70,6 +72,9 @@ _STRINGS = {
         "diagnosis_running_title": "🐾 살펴보는 중…",
         "diagnosis_running_body": "{pet}가 얼마나 배부른지 살펴보고 있어요.",
         "diagnosis_source_fallback": "⚠️ 오프라인 진단 · 성격 미적용 · {reason}",
+        # 윈도우판엔 성격 기능이 없다. 맥 문구를 그대로 쓰면 없는 기능이
+        # 빠졌다는 듯 읽힌다 — 따로 둔다.
+        "windows_diagnosis_source_fallback": "⚠️ 오프라인 진단 · {reason}",
         "diagnosis_result_openai_title": "{personality} {pet}가 배부른 이유예요.",
         "diagnosis_result_fallback_title": "{pet}가 배부른 이유예요.",
         "fallback_missing_api_key": "API 키 없음",
@@ -121,6 +126,32 @@ _STRINGS = {
         "menu_theme": "테마",
         "menu_pet_theme": "내 반려동물로 테마 만들기…",
         "menu_pet_theme_running": "테마 만드는 중…",
+        "diagnosis_title": "🐾 뭘 먹었냐면",
+        "windows_delete_warning": (
+            "윈도우판은 파일을 지우지 않습니다. 직접 정리하실 때는 지운 파일을 "
+            "되돌릴 수 없으니 먼저 꼭 확인해 주세요."
+        ),
+        # R5 J-1 이 이 키를 쓰던 "만드는 중" 모달을 없앴다(OK 를 눌러야
+        # 닫히는 모달이라 워커 시작 자체를 늦췄다) — 지금은 쓰는 곳이
+        # 없지만, 키는 일부러 남겨 둔다(M9).
+        "theme_working": "테마를 만드는 중이에요… 1~2분 걸립니다.",
+        "theme_done_title": "테마를 완성했어요",
+        "theme_done_body": "우클릭 메뉴에서 새로 만든 테마를 골라 보세요.",
+        "theme_error_format": "PNG, JPEG, WebP 파일만 됩니다.",
+        "theme_error_heic": "HEIC 사진은 쓸 수 없어요. JPEG 로 바꿔서 다시 골라 주세요.",
+        "theme_error_unreadable": "이 사진을 읽을 수 없어요. PNG, JPEG, WebP 사진인지 확인해 주세요.",
+        "theme_error_invalid_key": (
+            "API 키가 올바르지 않아요. 키가 틀렸거나 만료됐거나 결제에 문제가 "
+            "있을 수 있어요.\n"
+            "아래 파일의 키를 확인해 주세요.\n"
+            "{path}\n\n"
+            "고친 뒤 뚱냥이를 껐다 켜 주세요."
+        ),
+        "theme_error_generic": (
+            "테마를 만들지 못했어요. 잠시 뒤 다시 해 주세요.\n\n"
+            "자세한 오류는 아래 파일에 기록됩니다.\n"
+            "{path}"
+        ),
         "pet_theme_consent_title": "사진 전송 안내",
         "pet_theme_consent_body": "선택한 사진이 테마 생성을 위해 OpenAI로 전송됩니다",
         "pet_theme_continue": "진행",
@@ -141,6 +172,7 @@ _STRINGS = {
         "menu_language": "언어",
         "menu_refresh": "새로고침",
         "menu_quit": "종료",
+        "credit_line": "만든 사람: 심현희 (Hyeonhee Shim)",
         "language_auto": "자동 ({language})",
         "language_ko": "한국어",
         "language_en": "English",
@@ -166,6 +198,8 @@ _STRINGS = {
         "source_disk": "Disk",
         "source_max": "Memory/Disk",
         "menu_size_source": "What makes him chonky",
+        "menu_autostart": "Start with Windows",
+        "autostart_error": "Couldn't change the start-with-Windows setting. A work PC's security policy may block it.",
         "size_source_memory": "Memory (closing apps slims him)",
         "size_source_disk": "Storage (deleting files slims him)",
         "size_source_max": "Whichever is fuller",
@@ -193,6 +227,9 @@ _STRINGS = {
         "diagnosis_running_title": "🐾 Checking…",
         "diagnosis_running_body": "{pet} is checking how full things feel.",
         "diagnosis_source_fallback": "⚠️ Offline diagnosis · Personality not applied · {reason}",
+        # The Windows build has no personality feature. Reusing the Mac
+        # string would imply a missing feature, so it gets its own key.
+        "windows_diagnosis_source_fallback": "⚠️ Offline diagnosis · {reason}",
         "diagnosis_result_openai_title": "Here’s why your {personality} {pet} feels full.",
         "diagnosis_result_fallback_title": "Here’s why {pet} feels full.",
         "fallback_missing_api_key": "API key missing",
@@ -244,6 +281,29 @@ _STRINGS = {
         "menu_theme": "Theme",
         "menu_pet_theme": "Make a theme from my pet…",
         "menu_pet_theme_running": "Making theme…",
+        "diagnosis_title": "🐾 Here's what he ate",
+        "windows_delete_warning": (
+            "The Windows version doesn't delete files. If you clean up on "
+            "your own, check first — deleted files can't be recovered."
+        ),
+        "theme_working": "Building your theme… this takes a minute or two.",
+        "theme_done_title": "Your theme is ready",
+        "theme_done_body": "Pick your new theme from the right-click menu.",
+        "theme_error_format": "Only PNG, JPEG, and WebP files work.",
+        "theme_error_heic": "HEIC photos can't be used here. Save the photo as JPEG and try again.",
+        "theme_error_unreadable": "Could not read this photo. Make sure it's a PNG, JPEG, or WebP file.",
+        "theme_error_invalid_key": (
+            "The API key isn't valid. It may be wrong, expired, or have a "
+            "billing problem.\n"
+            "Please check the key in this file.\n"
+            "{path}\n\n"
+            "Then quit and reopen Memory Cat."
+        ),
+        "theme_error_generic": (
+            "Couldn't make the theme. Please try again shortly.\n\n"
+            "The details were logged to this file.\n"
+            "{path}"
+        ),
         "pet_theme_consent_title": "Photo upload notice",
         "pet_theme_consent_body": "Your photo will be sent to OpenAI to generate the theme",
         "pet_theme_continue": "Continue",
@@ -265,6 +325,7 @@ _STRINGS = {
         "menu_language": "Language",
         "menu_refresh": "Refresh",
         "menu_quit": "Quit",
+        "credit_line": "Made by Hyeonhee Shim (심현희)",
         "language_auto": "Automatic ({language})",
         "language_ko": "한국어",
         "language_en": "English",
@@ -342,6 +403,33 @@ def diagnosis_personality_descriptor(label: str, language: str) -> str:
 
 #: 이름을 안 지어 줬을 때 쓰는 기본 호칭.
 DEFAULT_PET_NAME = {LANGUAGE_KO: "뚱냥이", LANGUAGE_EN: "Memory Cat"}
+
+
+#: 만든 사람 표시가 가리키는 공개 저장소. exe 만 따로 퍼져도 출처가 남게
+#: 맥·윈도우 우클릭 메뉴에 같은 링크를 둔다.
+CREDIT_URL = "https://github.com/hyeonheebee/memory-cat"
+
+
+def credit_lines(language):
+    """우클릭 메뉴 아래쪽 두 줄: (만든 사람, 저장소 링크 글자).
+
+    링크 글자는 주소를 그대로 보여 준다 — 눌러지지 않는 환경(스크린샷)에서도
+    출처가 남아야 해서다. 맥·윈도우가 같은 함수를 쓴다.
+    """
+    return (tr(language, "credit_line"),
+            CREDIT_URL.replace("https://", "") + " ↗")
+
+
+#: 이름 길이 상한. 알림 제목·창 첫 줄에 들어가므로 길면 잘린다.
+PET_NAME_MAX = 40
+
+
+def clean_pet_name(raw) -> str:
+    """설정에 저장할 이름. 앞뒤 공백을 떼고 40자까지. 비우면 ``""``(=기본 호칭).
+
+    맥·윈도우가 같은 규칙으로 저장하도록 한 곳에 둔다.
+    """
+    return str(raw or "").strip()[:PET_NAME_MAX]
 
 
 def pet_name(configured: Optional[str], language: str) -> str:

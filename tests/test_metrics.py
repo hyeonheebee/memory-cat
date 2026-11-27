@@ -91,6 +91,61 @@ class MetricsTests(unittest.TestCase):
         self.assertIs(measured_vm, vm)
         self.assertEqual((swap.total, swap.used, swap.percent), (0, 0, 0.0))
 
+    def test_windows_tries_the_system_drive_first(self):
+        """exe 를 D:\\Downloads 에서 띄워도 C: 를 봐야 한다.
+
+        ``"/"`` 는 윈도우에서 현재 작업 디렉터리가 있는 드라이브의 루트라,
+        cwd 가 다른 드라이브면 windows_cat 의 C: 라벨과 어긋난다.
+        """
+        measured = DiskUsage(total=1000, used=250, free=750, percent=25.0)
+        seen_paths = []
+
+        def fake_disk_usage(path):
+            seen_paths.append(path)
+            return measured
+
+        with (
+            patch.object(metrics.sys, "platform", "win32"),
+            patch.dict("os.environ", {"SystemDrive": "D:"}, clear=False),
+            patch.object(metrics.psutil, "disk_usage", side_effect=fake_disk_usage),
+        ):
+            metrics.disk_usage()
+
+        self.assertEqual(seen_paths[0], "D:\\")
+
+    def test_windows_falls_back_to_c_drive_when_systemdrive_is_unset(self):
+        measured = DiskUsage(total=1000, used=250, free=750, percent=25.0)
+        seen_paths = []
+
+        def fake_disk_usage(path):
+            seen_paths.append(path)
+            return measured
+
+        with (
+            patch.object(metrics.sys, "platform", "win32"),
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(metrics.psutil, "disk_usage", side_effect=fake_disk_usage),
+        ):
+            metrics.disk_usage()
+
+        self.assertEqual(seen_paths[0], "C:\\")
+
+    def test_darwin_path_order_is_unchanged(self):
+        measured = DiskUsage(total=1000, used=250, free=750, percent=25.0)
+        seen_paths = []
+
+        def fake_disk_usage(path):
+            seen_paths.append(path)
+            return measured
+
+        with (
+            patch.object(metrics.sys, "platform", "darwin"),
+            patch.object(metrics.psutil, "disk_usage", side_effect=fake_disk_usage),
+        ):
+            metrics.disk_usage()
+
+        self.assertEqual(seen_paths[0], "/System/Volumes/Data")
+
     def test_safe_pressure_score_passes_swap_through_when_available(self):
         vm = SimpleNamespace(total=8, used=4, percent=50.0)
         sw = SimpleNamespace(total=2, used=1, percent=25.0)
@@ -194,3 +249,51 @@ class RamDisplayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SizeReadingTests(unittest.TestCase):
+    """R7: 몸집 판단을 맥·윈도우가 같이 쓴다(이슈 #40).
+
+    전엔 맥만 ``desktop_cat.body_percent`` 로 그림을 이름 문턱(60·70·80·
+    90·96)에 맞췄고, 윈도우는 디스크를 직선으로 꽂아 그림과 이름이 엇갈렸다.
+    """
+
+    def test_sources_and_default_match_the_mac(self):
+        self.assertEqual(metrics.SIZE_SOURCES, ("memory", "disk", "max"))
+        self.assertEqual(metrics.DEFAULT_SIZE_SOURCE, "memory")
+
+    def test_body_changes_picture_exactly_at_the_name_thresholds(self):
+        # 그림 경계 프레임(4·12·20·28·36)을 39 로 나눈 값이 문턱에서 시작된다.
+        for percent, frame in ((59.9, None), (60, 4), (70, 12), (80, 20),
+                               (90, 28), (96, 36), (100, 39)):
+            with self.subTest(percent=percent):
+                body = metrics.body_percent(percent)
+                if frame is None:
+                    self.assertLess(body, 4 / 39 * 100)
+                else:
+                    self.assertAlmostEqual(body, frame / 39 * 100)
+
+    def test_reading_follows_the_chosen_source(self):
+        mem = metrics.size_reading("memory", memory=72.0, disk=50.0)
+        self.assertEqual(mem.percent, 72.0)
+        self.assertEqual(mem.body, metrics.body_percent(72.0))
+        self.assertFalse(mem.disk_first)
+
+        dsk = metrics.size_reading("disk", memory=72.0, disk=50.0)
+        self.assertEqual(dsk.percent, 50.0)
+        self.assertEqual(dsk.body, metrics.body_percent(50.0))
+        self.assertTrue(dsk.disk_first)
+
+    def test_max_picks_the_fatter_body_and_names_it_first(self):
+        # 메모리 71.5 / 디스크 50: 몸집 눈금으로 메모리가 더 뚱뚱하다.
+        r = metrics.size_reading("max", memory=71.5, disk=50.0)
+        self.assertEqual(r.body, metrics.body_percent(71.5))
+        self.assertFalse(r.disk_first)
+        r = metrics.size_reading("max", memory=61.0, disk=91.0)
+        self.assertEqual(r.body, metrics.body_percent(91.0))
+        self.assertTrue(r.disk_first)
+
+    def test_unknown_source_falls_back_to_memory(self):
+        r = metrics.size_reading("banana", memory=72.0, disk=50.0)
+        self.assertEqual(r.percent, 72.0)
+        self.assertFalse(r.disk_first)

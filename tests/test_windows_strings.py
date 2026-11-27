@@ -23,7 +23,8 @@ class WindowsStringTests(unittest.TestCase):
 
     def test_every_translated_key_exists_in_both_languages(self):
         keys = set(re.findall(r"tr\(\s*language\s*,\s*[\"']([a-z_]+)[\"']", self.source))
-        keys |= set(re.findall(r"[\"'](theme_[a-z]+|size_[a-z]+)[\"']", self.source))
+        # "size_source" 는 설정 키(cfg["size_source"])라 번역 키가 아니다.
+        keys |= set(re.findall(r"[\"'](theme_[a-z]+|size_(?!source[\"'])[a-z]+)[\"']", self.source))
         self.assertTrue(keys, "번역 키를 하나도 찾지 못했다면 정규식이 낡은 것이다")
         for key in sorted(keys):
             with self.subTest(key=key):
@@ -35,6 +36,14 @@ class WindowsStringTests(unittest.TestCase):
             with self.subTest(choice=choice):
                 for language in ("ko", "en"):
                     i18n.tr(language, f"language_{choice}")
+
+    def test_the_size_source_menu_can_label_every_choice(self):
+        import metrics
+        for option in metrics.SIZE_SOURCES:
+            with self.subTest(option=option):
+                for language in ("ko", "en"):
+                    self.assertIn(f"size_source_{option}", i18n._STRINGS[language])
+                    self.assertIn(f"source_{option}", i18n._STRINGS[language])
 
     def test_no_korean_is_hardcoded_in_the_interface(self):
         # 주석과 독스트링은 한국어로 두되, 화면에 나가는 문자열은 i18n 을 거쳐야 한다.

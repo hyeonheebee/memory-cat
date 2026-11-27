@@ -296,6 +296,44 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(moved["themes"], [])
 
 
+class AppModulesCoverImportsTests(unittest.TestCase):
+    """R7: 맥 번들(``install_mac.command`` 경로)은 ``APP_MODULES`` 에 적힌
+    파일만 복사한다. ``desktop_cat`` 이 새 루트 모듈을 쓰기 시작했는데 목록에
+    안 넣으면, 저장소에선 멀쩡하고 설치한 앱만 켜자마자 ImportError 로 죽는다.
+
+    번들에 들어가는 모듈들이 import 하는 루트 모듈을 따라가며(간접 포함)
+    전부 목록에 있는지 본다.
+    """
+
+    @staticmethod
+    def _root_imports(path):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add(alias.name.split(".")[0])
+        return {n for n in names if (_REPO / f"{n}.py").is_file()}
+
+    def test_every_root_module_the_bundle_imports_is_copied(self):
+        declared = {Path(name).stem for name in build_app.APP_MODULES}
+        seen, todo = set(), ["desktop_cat"]
+        while todo:
+            name = todo.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            todo.extend(self._root_imports(_REPO / f"{name}.py"))
+        missing = sorted(seen - declared)
+        self.assertEqual(
+            missing, [],
+            "macos/build_app.py APP_MODULES 에 빠진 모듈: " + ", ".join(missing)
+            + " — 설치한 앱이 켜자마자 죽습니다",
+        )
+
+
 class AssembleTests(unittest.TestCase):
     def _fake_source(self, root: Path) -> Path:
         source = root / "repo"
@@ -670,6 +708,17 @@ class InstallScriptTests(unittest.TestCase):
 
 
 
+#: exe 에 반드시 담겨야 하는 모듈. 저장소 루트 모듈만이 아니다 —
+#: `win_ai`·`win_ai_ui` 는 `windows/` 안에 있지만, `windows_cat.pyw` 가
+#: `try/except ImportError` 로 가져오므로 PyInstaller 가 못 담으면 빌드는
+#: 멀쩡하고 exe 에서 AI 메뉴만 소리 없이 사라진다.
+MODULES_THE_WINDOWS_EXE_MUST_BUNDLE = (
+    "i18n", "metrics", "apppaths", "brain", "personality",
+    "vision_theme", "import_theme", "ai_errors",
+    "win_ai", "win_ai_ui", "win_app",
+)
+
+
 class WindowsBuildScriptTests(unittest.TestCase):
     """윈도우 exe 가 저장소 루트 모듈을 실제로 담는지.
 
@@ -681,6 +730,12 @@ class WindowsBuildScriptTests(unittest.TestCase):
 
     루트 모듈을 하나 더 쓰기 시작했는데 bat 을 안 고치는 것이 이 검사가
     막으려는 일이다.
+
+    위 `_root_modules_imported()` 기반 검사는 `windows_cat.pyw` 가 **직접**
+    import 하는 것만 본다 — `win_ai` 를 거쳐 들어오는 `brain`·`vision_theme`
+    같은 루트 모듈은 AST 에 안 잡히고, `windows/` 안의 `win_ai`·`win_ai_ui`
+    는 루트 모듈이 아니라서 안 잡힌다. 그런 모듈은
+    `MODULES_THE_WINDOWS_EXE_MUST_BUNDLE` 명시 목록이 대신 지킨다.
     """
 
     BAT = _REPO / "windows" / "build_exe.bat"
@@ -726,6 +781,27 @@ class WindowsBuildScriptTests(unittest.TestCase):
             missing, [],
             "build_exe.bat 이 존재 확인을 안 하는 루트 모듈: " + ", ".join(missing),
         )
+
+    def test_every_root_module_is_hidden_imported(self):
+        """PyInstaller 는 --paths 만으로는 루트 모듈을 안 끌고 간다.
+        빠뜨리면 --noconsole 이라 오류 한 줄 없이 죽는다."""
+        for module in MODULES_THE_WINDOWS_EXE_MUST_BUNDLE:
+            with self.subTest(module=module):
+                self.assertIn(f"--hidden-import {module}", self.bat)
+
+    def test_requirements_stay_ascii(self):
+        """한국어 윈도우(cp949)에서 pip 가 UnicodeDecodeError 로 죽는다."""
+        raw = (_REPO / "windows" / "requirements.txt").read_bytes()
+        try:
+            raw.decode("ascii")
+        except UnicodeDecodeError as exc:
+            self.fail(f"windows/requirements.txt 에 ASCII 가 아닌 바이트가 있습니다: {exc}")
+
+    def test_the_ai_packages_are_listed(self):
+        text = (_REPO / "windows" / "requirements.txt").read_text(encoding="ascii")
+        for package in ("openai", "pydantic", "python-dotenv", "Pillow", "numpy"):
+            with self.subTest(package=package):
+                self.assertIn(package, text)
 
 
 class WindowsSourceRunTests(unittest.TestCase):
@@ -789,6 +865,84 @@ class WindowsSourceRunTests(unittest.TestCase):
             "import 경로에 없어서입니다 — 소스로 실행하는 사람은 전부 "
             f"걸립니다:\n{proc.stderr}",
         )
+
+
+class WindowsOptionalImportLoggingTests(unittest.TestCase):
+    """R7(선택 import)이 흔적 없이 사라지지 않는지 본다.
+
+    exe 가 pydantic_core·jiter·numpy DLL 을 못 담으면 ``win_ai_ui`` import
+    가 실패한다. windows_cat.pyw 는 그걸 삼키고 고양이를 계속 띄우는데
+    (R7), 지금까지는 그 실패가 어디에도 안 남았다 — 메뉴가 그냥 조용히
+    사라질 뿐이었다.
+
+    ``WindowsSourceRunTests`` 의 Qt 표식은 의존성이 다 있어서 ``win_ai_ui``
+    안까지 들어갔을 때 켜진다. 여기서는 정반대를 본다 — ``openai`` 를
+    ImportError 로 죽는 가짜로 세워 ``win_ai_ui`` import **자체**가
+    실패하게 만든 뒤에도, (1) 고양이가 Qt 표식까지 도달하는지(선택 import
+    실패가 앱을 안 죽인다는 R7 의 증거)와 (2) 그 실패가
+    ``ai-features-unavailable.log`` 에 남는지를 함께 확인한다.
+    """
+
+    APP = _REPO / "windows" / "windows_cat.pyw"
+    MARKER = "STUB-QT-REACHED"
+
+    def setUp(self):
+        if not self.APP.is_file():
+            self.skipTest(f"파일이 없습니다: {self.APP}")
+
+    def _stubs(self, parent):
+        """Qt·psutil 가짜 + import 만 해도 ImportError 로 죽는 가짜 openai."""
+        stub = Path(parent) / "stubs"
+        (stub / "PySide6").mkdir(parents=True)
+        (stub / "psutil.py").write_text("", encoding="utf-8")
+        (stub / "PySide6" / "__init__.py").write_text("", encoding="utf-8")
+        for name in ("QtCore", "QtGui", "QtWidgets"):
+            (stub / "PySide6" / f"{name}.py").write_text(
+                f"def __getattr__(name):\n"
+                f"    raise SystemExit({self.MARKER!r})\n",
+                encoding="utf-8",
+            )
+        (stub / "openai").mkdir(parents=True)
+        (stub / "openai" / "__init__.py").write_text(
+            "raise ImportError('stubbed: no openai in this test')\n",
+            encoding="utf-8",
+        )
+        return stub
+
+    def test_broken_optional_import_is_logged_and_the_cat_still_starts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(self._stubs(tmp))
+            # PYTHONPATH 가 site-packages 보다 먼저라 가짜 openai 가 진짜를
+            # 가린다. MEMORY_CAT_HOME 이 없으면 apppaths.log_dir() 은 맥에서
+            # Path.home() 을 쓰므로, 변수를 빼고 HOME 을 임시 폴더로 옮긴다.
+            env.pop("MEMORY_CAT_HOME", None)
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [sys.executable, str(self.APP)],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertIn(
+                self.MARKER, proc.stderr,
+                "win_ai_ui import 가 실패하자 고양이가 Qt 에 닿기도 전에 "
+                f"죽었습니다(R7 위반):\n{proc.stderr}",
+            )
+            log_path = (
+                home / "Library" / "Logs" / "Memory Cat"
+                / "ai-features-unavailable.log"
+            )
+            self.assertTrue(
+                log_path.is_file(),
+                f"win_ai_ui import 실패가 로그로 안 남았습니다: {log_path}\n"
+                f"stderr:\n{proc.stderr}",
+            )
+            self.assertIn("ImportError", log_path.read_text(encoding="utf-8"))
 
 
 class WindowsWorkflowTests(unittest.TestCase):
@@ -1017,6 +1171,71 @@ class BuiltBundleFloorTests(unittest.TestCase):
             f"실행 파일이 없습니다: {info_exe}. LaunchAgent 가 이 절대경로를 "
             f"가리키므로 이름이 바뀌면 기존 설치자의 로그인 실행이 깨진다.",
         )
+
+
+
+class WindowsVersionInfoTests(unittest.TestCase):
+    """exe 속성 → 자세히 에 회사명·저작권·버전이 보이게(R7 추가 요청).
+
+    PyInstaller 는 ``--version-file`` 의 내용을 ``eval()`` 해서
+    ``VSVersionInfo`` 를 만든다(6.22.3 ``load_version_info_from_text_file``).
+    PyInstaller 가 없는 맥 테스트에서는 같은 이름의 가짜 틀로 읽어 값을 본다.
+    """
+
+    VERSION_FILE = _REPO / "windows" / "version_info.txt"
+    BAT = _REPO / "windows" / "build_exe.bat"
+
+    class _Node:
+        def __init__(self, *args, **kwargs):
+            self.args, self.kwargs = args, kwargs
+
+    def _load(self):
+        names = {name: type(name, (self._Node,), {}) for name in (
+            "VSVersionInfo", "FixedFileInfo", "StringFileInfo", "StringTable",
+            "StringStruct", "VarFileInfo", "VarStruct")}
+        text = self.VERSION_FILE.read_text(encoding="utf-8")
+        info = eval(text, {"__builtins__": {}}, names)  # noqa: S307 — 우리 파일
+        strings = {}
+        stack = [info]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, self._Node):
+                if type(node).__name__ == "StringStruct":
+                    strings[node.args[0]] = node.args[1]
+                stack.extend(node.args)
+                stack.extend(node.kwargs.values())
+            elif isinstance(node, (list, tuple)):
+                stack.extend(node)
+        fixed = info.kwargs["ffi"]
+        return strings, fixed
+
+    def test_bat_passes_the_version_file_and_checks_it_exists(self):
+        bat = self.BAT.read_text(encoding="utf-8")
+        self.assertIn('--version-file "version_info.txt"', bat)
+        self.assertIn('if not exist "version_info.txt"', bat)
+
+    def test_file_declares_utf8_for_the_korean_copyright(self):
+        first = self.VERSION_FILE.read_text(encoding="utf-8").splitlines()[0]
+        self.assertRegex(first, r"coding[:=]\s*utf-8")
+
+    def test_strings_name_the_product_and_the_license_holder(self):
+        strings, _ = self._load()
+        license_line = next(
+            line for line in (_REPO / "LICENSE").read_text(encoding="utf-8").splitlines()
+            if line.startswith("Copyright"))
+        self.assertEqual(strings["ProductName"], "Memory Cat")
+        self.assertEqual(strings["LegalCopyright"], license_line)
+        self.assertIn("Hyeonhee Shim", strings["CompanyName"])
+        self.assertTrue(strings["FileDescription"])
+        self.assertEqual(strings["OriginalFilename"], "MemoryCat.exe")
+
+    def test_windows_exe_stamps_the_same_version_as_the_mac_builds(self):
+        strings, fixed = self._load()
+        self.assertEqual(strings["FileVersion"], build_app.VERSION)
+        self.assertEqual(strings["ProductVersion"], build_app.VERSION)
+        parts = tuple(int(p) for p in build_app.VERSION.split(".")) + (0,)
+        self.assertEqual(fixed.kwargs["filevers"], parts)
+        self.assertEqual(fixed.kwargs["prodvers"], parts)
 
 
 if __name__ == "__main__":

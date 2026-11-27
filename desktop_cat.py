@@ -29,16 +29,29 @@ from AppKit import (
     NSRectFillUsingOperation, NSApp,
     NSAlert, NSTextField, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
     NSAlertThirdButtonReturn,
-    NSOpenPanel, NSModalResponseOK,
+    NSOpenPanel, NSModalResponseOK, NSWorkspace,
 )
 from Foundation import (
     NSObject, NSMakeRect, NSMakePoint, NSMakeSize, NSAttributedString,
     NSOperationQueue, NSUserNotification, NSUserNotificationCenter,
     NSDistributedNotificationCenter, NSRunLoop, NSDate, NSDefaultRunLoopMode,
+    NSURL,
 )
 
 import apppaths
 import metrics as mc
+# 몸집 판단(무엇을 보고·어느 문턱에서 그림을 바꿀지)은 R7 에서 윈도우와 같이
+# 쓰려고 metrics 로 옮겼다(이슈 #40). 맥 호출부·테스트가 쓰던 이름은 그대로다.
+from metrics import (
+    SIZE_SOURCES,
+    SOURCE_DISK,
+    SOURCE_MAX,
+    SOURCE_MEMORY,
+    body_percent,
+    body_size_percent,
+    size_percent,
+    size_reading,
+)
 from brain import _load_api_key, diagnose as run_diagnosis, safe_trash
 from i18n import (
     LANGUAGE_AUTO,
@@ -47,6 +60,9 @@ from i18n import (
     LANGUAGE_OVERRIDES,
     chonk_stage,
     diagnosis_personality_descriptor,
+    CREDIT_URL,
+    clean_pet_name,
+    credit_lines,
     pet_name,
     resolve_language,
     tr,
@@ -59,6 +75,7 @@ from personality import (
     preset_label,
     preset_names,
 )
+from ai_errors import theme_failure_text, theme_key_problem
 from vision_theme import ThemeGenerationError, build_theme as build_pet_theme
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -104,16 +121,6 @@ SIZE_STRING_KEYS = {
     "크게": "size_large",
     "왕": "size_king",
 }
-#: 고양이 몸집을 무엇으로 정할지.
-#:
-#: 메모리(책상)와 디스크(창고)는 성격이 다르다. 메모리는 앱을 닫으면 몇 초
-#: 안에 내려가고, 디스크는 파일을 지워야 내려간다. 그래서 같은 그림이라도
-#: 무엇에 반응하느냐에 따라 전혀 다른 물건이 된다. 사용자가 고른다.
-SOURCE_MEMORY = "memory"
-SOURCE_DISK = "disk"
-SOURCE_MAX = "max"
-SIZE_SOURCES = (SOURCE_MEMORY, SOURCE_DISK, SOURCE_MAX)
-
 DEFAULT = {
     "theme": "cute",
     "pet_name": "",
@@ -125,119 +132,6 @@ DEFAULT = {
     # 원인도 메모리 쪽이라(스왑을 오가느라 버벅인다) 기본값을 메모리로 둔다.
     "size_source": SOURCE_MEMORY,
 }
-
-
-def size_percent(source=None, memory=None, disk=None):
-    """고양이 몸집을 정할 0~100 값. 어느 지표를 볼지는 ``source`` 가 정한다.
-
-    ``memory``/``disk`` 를 주면 그 값을 쓰고 다시 재지 않는다. 화면 갱신은
-    이미 두 지표를 다 재 놓고 들어오므로, 여기서 또 재면 1초마다 프로세스
-    목록을 두 번 훑게 된다.
-
-    측정이 실패해도 예외를 내지 않는다. 숫자를 못 읽었다고 고양이가 화면에서
-    사라지면 안 되므로, 못 읽은 지표는 0 으로 두고 남은 것으로 정한다.
-    """
-    if source not in SIZE_SOURCES:
-        source = DEFAULT["size_source"]
-
-    def _memory():
-        if memory is not None:
-            return float(memory)
-        try:
-            return float(mc.safe_pressure_score()[0])
-        except Exception:
-            return 0.0
-
-    def _disk():
-        if disk is not None:
-            return float(disk)
-        try:
-            return float(mc.disk_usage().percent)
-        except Exception:
-            return 0.0
-
-    if source == SOURCE_MEMORY:
-        return _memory()
-    if source == SOURCE_DISK:
-        return _disk()
-    return max(_memory(), _disk())
-
-
-#: 사진으로 만든 테마의 그림 여섯 장이 각각 차지하는 프레임 구간. 40개 파일
-#: 중 서로 다른 그림은 여섯 장뿐이고 나머지는 복제본이다. 기본 테마
-#: `cute`·`simple` 도, `vision_theme` 이 반려동물 사진으로 만드는 테마도
-#: 그렇다 — `import_theme.save_theme_frames` 가 `smooth=False` 로 가장 가까운
-#: 단계를 그대로 쓴다. 섞으면 귀와 눈이 겹쳐 유령처럼 보이기 때문이다.
-_PICTURE_FRAMES = ((0, 3), (4, 11), (12, 19), (20, 27), (28, 35), (36, 39))
-
-#: 그 여섯 장을 어느 메모리 값에서 바꿀지. `i18n.chonk_stage` 의 영어 문턱과
-#: **같은 값이다.** 몸과 이름이 같은 지점에서 바뀌어야 "HEFTYCHONK" 이 뜨는
-#: 순간 몸이 그 그림이 된다.
-_MEMORY_EDGES = (0.0, 60.0, 70.0, 80.0, 90.0, 96.0, 100.0)
-
-#: 프레임 번호를 0~100 으로 되돌릴 때 쓰는 마지막 번호. 사진 테마가 40장
-#: 파일로 나오므로 39 다.
-_LAST_FRAME = 39.0
-
-
-def body_percent(percent):
-    """잰 값 0~100 을 몸집 0~100 으로 옮긴다. **메모리·디스크가 같은 자를 쓴다.**
-
-    메모리 사용률은 0 근처로 내려가지 않는다 — 도는 맥은 늘 절반쯤 쓰고
-    있다. 0~100 을 그대로 옮기면 그림 여섯 장 중 두 장밖에 안 쓰인다.
-    실측(18GB, macOS 15.4.1): 관측된 값이 61~80% 였고 재부팅 직후에도 80%
-    였다.
-
-    그래서 메모리 구간을 그림 구간에 하나씩 대응시킨다. 구간 경계를 이름
-    문턱에 맞춰 두었으므로 몸과 이름이 같은 지점에서 바뀐다. 구간 **안에서는**
-    직선이라 `derpy` 처럼 진짜 40장인 테마는 계속 부드럽게 움직인다.
-
-    디스크도 같은 자를 쓴다. 앱은 이미 디스크에도 같은 문턱으로 이름을
-    붙인다(`brain.collect_metrics` 가 `chonk_stage(disk.percent)`). 자를
-    따로 쓰면 ``max`` 가 깨진다 — 메모리 71.5% 가 디스크 50% 에 지고,
-    "둘 중 더 찬 쪽" 이 사실상 디스크 전용이 된다.
-
-    화면에 적히는 숫자는 이 값이 아니다. 정보창의 "RAM 65%" 와 기분 줄은
-    잰 그대로를 쓴다 — 몸집을 보기 좋게 만들자고 숫자를 바꾸면 두 개가
-    서로 다른 말을 하게 된다.
-    """
-    percent = min(max(float(percent), 0.0), 100.0)
-    last = len(_PICTURE_FRAMES) - 1
-    for i, (first_frame, final_frame) in enumerate(_PICTURE_FRAMES):
-        lo, hi = _MEMORY_EDGES[i], _MEMORY_EDGES[i + 1]
-        # 경계값은 **위쪽** 구간이 가져간다. 이름도 그렇게 바뀐다
-        # (`chonk_stage` 가 `percent < 60` 이면 첫 단계다). 여기서 아래쪽이
-        # 가져가면 90% 에서 이름은 MEGACHONKER 인데 몸은 그 전 그림이 된다.
-        if percent < hi or i == last:
-            span = final_frame - first_frame
-            t = 0.0 if hi == lo else (percent - lo) / (hi - lo)
-            frame = first_frame + span * min(max(t, 0.0), 1.0)
-            return frame / _LAST_FRAME * 100.0
-    return 100.0
-
-
-def body_size_percent(source=None, memory=None, disk=None):
-    """몸집을 정할 0~100. **눈금을 맞춘 뒤에** 지표를 고른다.
-
-    :func:`size_percent` 와 순서가 다르다. 저쪽은 잰 값끼리 비교해서 "더 찬
-    쪽" 을 고르고, 이쪽은 각자 몸집 눈금으로 옮긴 다음 "더 뚱뚱한 쪽" 을
-    고른다. 순서를 섞으면 ``max`` 가 깨진다 — 메모리만 눈금을 다시 매긴
-    채로 잰 값끼리 비교하면, 고른 결과가 두 선택지 **어느 쪽보다도** 뚱뚱해
-    진다. 실측: 메모리 71.5% / 디스크 50% 에서 memory=20, disk=20 인데
-    max=28 이 나왔다. 메뉴에서 바꾸기만 했는데 고양이가 8프레임 부푼다.
-
-    화면에 적히는 숫자는 이 값이 아니다. 그건 :func:`size_percent` 가 내는
-    잰 값을 쓴다.
-    """
-    if source not in SIZE_SOURCES:
-        source = DEFAULT["size_source"]
-    mem = body_percent(size_percent(SOURCE_MEMORY, memory=memory, disk=disk))
-    dsk = body_percent(size_percent(SOURCE_DISK, memory=memory, disk=disk))
-    if source == SOURCE_MEMORY:
-        return mem
-    if source == SOURCE_DISK:
-        return dsk
-    return max(mem, dsk)
 
 
 def frame_index_for(theme, percent):
@@ -310,7 +204,7 @@ def load_config(path=None):
     cfg = dict(DEFAULT)
     if isinstance(loaded, dict):
         cfg["theme"] = loaded.get("theme", DEFAULT["theme"])
-        cfg["pet_name"] = str(loaded.get("pet_name", "") or "").strip()[:40]
+        cfg["pet_name"] = clean_pet_name(loaded.get("pet_name"))
         size = loaded.get("size", DEFAULT["size"])
         cfg["size"] = size if size in SIZES else DEFAULT["size"]
         selection, custom = config_personality(loaded)
@@ -550,15 +444,22 @@ def _diagnosis_worker(personality, custom_personality, language, callback):
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
-def _pet_theme_worker(photo_path, theme_name, callback):
-    """Build a pet theme off the UI thread and return on the main queue."""
+def _pet_theme_worker(photo_path, theme_name, callback, language):
+    """Build a pet theme off the UI thread and return on the main queue.
+
+    실패 원문은 화면에 올리지 않는다(G-1). ``str(exc)`` 를 그대로 띄우면
+    401 원문의 키 끝자리(``sk-proj****abcd``)가 알림에 찍혔다. 윈도우와 같은
+    ``ai_errors.theme_failure_text`` 로 번역 안내만 돌려주고 원문은 가려서
+    로그로 보낸다.
+    """
     try:
         result = dict(build_pet_theme(photo_path, theme_name, "medium"))
         result["theme_name"] = theme_name
-    except ThemeGenerationError as exc:
-        result = {"theme_name": theme_name, "error": str(exc)}
     except Exception as exc:
-        result = {"theme_name": theme_name, "error": str(exc)}
+        result = {
+            "theme_name": theme_name,
+            "error": theme_failure_text(exc, language),
+        }
     NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: callback(result))
 
 
@@ -895,24 +796,17 @@ class CatController(NSObject):
         # 몸집은 설정이 고른 지표를 따른다. 디스크 경고는 그것과 무관하게
         # 언제나 디스크를 본다 — 정리할 대상이 디스크이기 때문이다.
         source = self.cfg.get("size_source", DEFAULT["size_source"])
-        pct = size_percent(source, memory=score, disk=dpct)
+        reading = size_reading(source, memory=score, disk=dpct)
+        pct = reading.percent
         self.score = pct
         self._maybe_prompt_disk_full(dpct)
         theme = self.cfg["theme"]
         # 몸집만 눈금을 다시 매긴다. 아래에 적히는 숫자들은 잰 그대로다.
-        body = body_size_percent(source, memory=score, disk=dpct)
-        idx = frame_index_for(theme, body)
+        idx = frame_index_for(theme, reading.body)
         img = NSImage.alloc().initWithContentsOfFile_(frame_path(theme, idx))
         language = self.language
-        # 큰 숫자가 몸집을 설명해야 한다. 메모리로 부풀었는데 디스크가 크게
-        # 적혀 있으면 왜 뚱뚱한지 읽을 수 없다.
-        #
-        # 비교는 **몸집을 고른 것과 같은 자로** 해야 한다. 몸집은 눈금을
-        # 맞춘 뒤에 고르는데(body_size_percent) 여기서 잰 값끼리 비교하면,
-        # 디스크가 정한 몸집인데 첫 줄에는 메모리가 적히는 일이 생긴다.
-        if source == SOURCE_DISK or (
-                source == SOURCE_MAX
-                and body_percent(dpct) >= body_percent(score)):
+        # 큰 숫자가 몸집을 설명해야 한다(판단은 metrics.size_reading).
+        if reading.disk_first:
             first = f"{tr(language, 'disk')} {dpct:.0f}%"
             second = f"{tr(language, 'ram')} {vm.percent:.0f}%"
         else:
@@ -955,6 +849,15 @@ class CatController(NSObject):
             self._show_missing_api_key_alert()
             return
 
+        # F-2: 키가 있어도 무효면 사진·동의·업로드를 다 거친 뒤에야 401 로
+        # 실패했다. 이미지 모델 하나 조회 GET 한 번(사진 없음·과금 없음, 최대 5초·재시도
+        # 없음)으로 먼저 본다. 401 만 막고 나머지(네트워크·403)는 진행한다.
+        problem = theme_key_problem(self.language)
+        if problem:
+            self._show_information_alert(
+                tr(self.language, "pet_theme_error_title"), problem)
+            return
+
         panel = NSOpenPanel.openPanel()
         panel.setCanChooseFiles_(True)
         panel.setCanChooseDirectories_(False)
@@ -981,7 +884,7 @@ class CatController(NSObject):
         self._pet_theme_running = True
         self._pet_theme_thread = threading.Thread(
             target=_pet_theme_worker,
-            args=(photo_path, theme_name, self._finish_pet_theme),
+            args=(photo_path, theme_name, self._finish_pet_theme, self.language),
             name="memory-cat-pet-theme",
             daemon=True,
         )
@@ -1058,7 +961,7 @@ class CatController(NSObject):
             return
 
         # 비우면 기본 호칭으로 돌아간다. 이름을 지우는 것도 선택이다.
-        self.cfg["pet_name"] = str(field.stringValue() or "").strip()[:40]
+        self.cfg["pet_name"] = clean_pet_name(field.stringValue())
         save_config(self.cfg)
         self.refresh_(None)
         self._notify(
@@ -1536,6 +1439,15 @@ class CatController(NSObject):
         menu.addItem_(name_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
+        # 만든 사람 표시: exe·앱이 따로 퍼져도 출처가 남게(윈도우와 같은 문구).
+        credit, link = credit_lines(self.language)
+        credit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(credit, None, "")
+        credit_item.setEnabled_(False)
+        menu.addItem_(credit_item)
+        link_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(link, b"openCreditLink:", "")
+        link_item.setTarget_(self)
+        menu.addItem_(link_item)
+        menu.addItem_(NSMenuItem.separatorItem())
         r = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(tr(self.language, "menu_refresh"), b"refresh:", "")
         r.setTarget_(self)
         menu.addItem_(r)
@@ -1543,6 +1455,9 @@ class CatController(NSObject):
         q.setTarget_(self)
         menu.addItem_(q)
         NSMenu.popUpContextMenu_withEvent_forView_(menu, event, self.view)
+
+    def openCreditLink_(self, sender):
+        NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(CREDIT_URL))
 
     def quit_(self, sender):
         NSApp.terminate_(self)

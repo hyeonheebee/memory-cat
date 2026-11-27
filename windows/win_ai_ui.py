@@ -1,0 +1,328 @@
+"""PySide6 대화상자. **판단은 하지 않는다** — win_ai 가 정한 것을 띄우기만.
+
+맥 개발 환경에는 PySide6 가 없어 이 파일은 테스트가 안 돈다. 그래서 조건문을
+여기 두면 아무도 검사하지 못한다. 새 규칙이 생기면 win_ai 에 넣는다.
+
+스레드 규칙 두 가지:
+
+* 워커의 ``run()`` 안에서는 Qt 위젯을 절대 만지지 않는다. 결과는 시그널로만
+  내보낸다.
+* 워커 시그널을 lambda·일반 함수에 이을 때는 ``QueuedConnection`` 을 명시한다.
+  그래야 메시지 상자가 반드시 GUI 스레드에서 뜬다. 자동 연결에 맡기면 받는 쪽이
+  QObject 가 아닐 때 PySide6 버전에 따라 워커 스레드에서 바로 불릴 수 있다.
+"""
+
+from PySide6 import QtCore, QtWidgets
+
+import win_ai
+from i18n import tr
+
+#: 파일 고르기 창의 형식 필터. 사용자에게 보이는 문장이 아니라 Qt 문법이다.
+IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.webp)"
+
+
+def _queued():
+    return QtCore.Qt.ConnectionType.QueuedConnection
+
+
+def _explain_missing_key(parent, language):
+    title, body = win_ai.api_key_missing_message(language)
+    QtWidgets.QMessageBox.information(parent, title, body)
+
+
+def _new_top_box(parent):
+    """항상-위 대화상자를 하나 만든다. 창 플래그는 **내용을 채우기 전에** 준다.
+
+    고양이 창은 ``FramelessWindowHint | WindowStaysOnTopHint | Tool``
+    이다(``windows_cat.pyw``). 윈도우에서 ``Tool`` 창의 자식 대화상자는 그
+    항상-위를 물려받지 못해 다른 창 뒤에서 열릴 수 있다 — 대화상자
+    자신에게도 항상-위 플래그를 직접 준다.
+
+    R5 M10: 예전엔 이 플래그를 ``_bring_to_front`` 안에서, 즉 아이콘·제목·
+    본문을 다 채운 **뒤에** 줬다. ``setWindowFlag()``/``setWindowFlags()``
+    는 최상위 창을 다시 만들며(내부적으로 ``setParent()`` 를 부른다) 그
+    창을 숨긴다 — 문서가 "You must call show() to make the widget visible
+    again" 라고 경고한다. 아직 한 번도 보이지 않은 위젯이면 이 재생성이
+    화면에 보이는 효과는 없지만, 플래그를 대화상자를 만들자마자(내용을
+    채우기 전에) 주면 "그 뒤로는 이 대화상자가 다시 만들어질 일이 없다"
+    는 걸 코드 순서만으로 보장할 수 있다 — 나중에 누가 아이콘·제목·본문을
+    채우는 도중에 ``show()`` 를 끼워 넣어도(예: 진행 중 표시) 이미 보이는
+    창을 재생성해 깜빡이는 경로가 생기지 않는다.
+
+    화면 앞으로 끌어오는 일(show→raise_→activateWindow)은 내용을 다 채운
+    뒤 ``exec()`` 직전에 ``_bring_to_front`` 가 따로 맡는다.
+    """
+    box = QtWidgets.QMessageBox(parent)
+    box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+    return box
+
+
+def _bring_to_front(box):
+    """내용을 다 채운 대화상자를 화면 맨 앞으로 끌어온다.
+
+    항상-위 플래그는 ``_new_top_box`` 가 생성 직후에 이미 줬다 — 여기서는
+    플래그를 다시 건드리지 않는다. 아이콘·제목·본문을 다 채운 뒤,
+    ``box.exec()`` 직전에 부른다.
+
+    순서 근거(Qt 문서, PySide6 도 같은 C++ API 를 그대로 감싼다):
+
+    * ``activateWindow()`` 는 창이 이미 보이는 상태가 아니면 아무 효과가
+      없다 — 문서: "Note that the window must be visible, otherwise
+      activateWindow() has no effect." 그래서 ``show()`` **뒤에** 부른다.
+    * 같은 문서가 쌓임 순서까지 확실히 하려면 ``raise_()`` 도 같이 부르라고
+      되어 있다("If you want to ensure that the window is stacked on top
+      as well you should also call raise_()") — 그래서 ``raise_()`` 를
+      ``activateWindow()`` 바로 앞에 둔다.
+    * 뒤이어 부르는 ``box.exec()`` 는 이미 보이는 창을 다시 숨겼다 띄우지
+      않는다 — ``QDialog.exec()`` 문서는 "always pops up the dialog as
+      modal"(modal 프로퍼티 값과 무관하게 언제나 모달로 띄운다)이라고만
+      말할 뿐, 창 플래그(항상-위 등)에 대해서는 아무 조건을 걸지 않는다.
+      즉 여기서 준 ``WindowStaysOnTopHint`` 는 ``exec()`` 의 모달성과
+      서로 다른 축(플래그 vs 모달리티)이라 충돌하지 않고, 모달 동작은
+      그대로 유지된다.
+    """
+    box.show()
+    box.raise_()
+    box.activateWindow()
+
+
+class _DiagnosisWorker(QtCore.QThread):
+    """``brain.diagnose`` 는 OpenAI 타임아웃 20초·재시도 1회라 수십 초 걸릴 수
+    있다. UI 스레드에서 부르면 그동안 고양이가 얼어붙는다."""
+
+    finished_ok = QtCore.Signal(object)     # 줄 목록(list[str])
+    failed = QtCore.Signal(str)
+
+    def __init__(self, language):
+        super().__init__()
+        self._language = language
+
+    def run(self):
+        # D-1: 시작 줄은 try 보다 앞 — 실패하는 경로에서도 남아야 한다.
+        win_ai.log_diagnosis_started()
+        try:
+            lines = win_ai.diagnosis_lines(self._language)
+        except Exception as error:
+            # 원문은 로그로만 보낸다 — 로그 함수 자체는 예외를 내지 않으므로
+            # 워커 스레드에서 새 예외가 생길 걱정은 없다. 시그널에도 원문
+            # 대신 번역된 안내만 실어 보낸다(R26) — 받는 쪽이 실수로 원문을
+            # 그대로 띄우는 일이 없도록 애초에 안전한 문자열만 내보낸다.
+            win_ai.log_ai_failure("diagnosis", error)
+            self.failed.emit(tr(self._language, "diagnosis_error"))
+            return
+        self.finished_ok.emit(lines)
+
+
+class _ThemeWorker(QtCore.QThread):
+    """생성은 1~2 분 걸린다. UI 스레드에서 돌리면 앱이 얼어붙는다."""
+
+    finished_ok = QtCore.Signal(str)        # 만든 테마 이름
+    failed = QtCore.Signal(str)
+
+    def __init__(self, photo, name, language):
+        super().__init__()
+        self._photo, self._name, self._language = photo, name, language
+
+    def run(self):
+        # R5 K-1: 이 워커가 실제로(워커 스레드에서) 돌기 시작했다는 증거를
+        # 성공·실패에 상관없이 항상 남긴다 — try 블록보다 앞이어야 예외가
+        # 나도 이 줄은 남는다. 지금까지는 "사진이 나갔다"는 증거가 401
+        # 트레이스백(호출이 실패했을 때만) 뿐이었다.
+        win_ai.log_theme_worker_started()
+        try:
+            name = win_ai.create_theme(self._photo, self._name, self._language)
+        except Exception as error:
+            # create_theme 이 내는 ThemeError 는 이미 번역된 메시지다. 그 밖의
+            # (있어선 안 되는) 예외가 새 나오면 원문 대신 일반 안내로 감춘다
+            # — 판단은 win_ai.theme_failure_message 가, 여기서는 결과만 emit.
+            if not isinstance(error, win_ai.ThemeError):
+                win_ai.log_ai_failure("theme", error)
+            self.failed.emit(win_ai.theme_failure_message(error, self._language))
+            return
+        self.finished_ok.emit(name)
+
+
+def _show_diagnosis(parent, language, lines, pet=None):
+    # I1: 진단도 워커가 수십 초 뒤에 끝나서 비동기로 뜨는 창이다 — 동의창·
+    # 완료 알림과 같은 처지라 _bring_to_front 를 똑같이 적용한다. 그 전엔
+    # 정적(static) QMessageBox.information() 호출이라 다른 창 뒤에 숨을 수
+    # 있었다(J-1 로 "만드는 중" 모달이 없어진 지금은 그게 "아무 일도 안
+    # 일어난 것"처럼 보인다).
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+    box.setWindowTitle(tr(language, "diagnosis_title"))
+    # 첫 줄은 맥 결과창 제목과 같은 "○○가 배부른 이유예요."(이름 지어주기).
+    box.setText("\n".join([win_ai.diagnosis_heading(language, pet), ""] + lines))
+    _bring_to_front(box)
+    box.exec()
+
+
+def _show_diagnosis_failure(parent, language, message):
+    # message 는 워커가 이미 번역해서 emit 한 안내 문구다(원문은 로그로만
+    # 간다) — 여기서 다시 tr() 을 불러 따로 만들지 않고 그대로 띄운다.
+    # I1: _show_diagnosis 와 같은 이유로 _bring_to_front 를 적용한다.
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr(language, "diagnosis_title"))
+    box.setText(message)
+    _bring_to_front(box)
+    box.exec()
+
+
+def show_diagnosis(parent, language, pet=None):
+    """진단을 워커 스레드에서 시작하고 워커를 돌려준다. 키가 없으면 ``None``.
+
+    호출부는 돌려받은 워커를 붙잡고 있어야 한다. 지역 변수로 두면 GC 가 도는
+    스레드를 거둬 가서 앱이 죽는다.
+    """
+    if not win_ai.has_api_key():
+        _explain_missing_key(parent, language)
+        return None
+
+    worker = _DiagnosisWorker(language)
+    worker.finished_ok.connect(
+        lambda lines: _show_diagnosis(parent, language, lines, pet), _queued())
+    worker.failed.connect(
+        lambda message: _show_diagnosis_failure(parent, language, message),
+        _queued())
+    worker.start()
+    return worker
+
+
+def _show_theme_failure(parent, language, message):
+    # I1: 테마 실패도 워커가 1~2 분 뒤에 끝나서 비동기로 뜨는 창이다 —
+    # 동의창·완료 알림과 같은 처지라 _bring_to_front 를 똑같이 적용한다.
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr(language, "pet_theme_error_title"))
+    box.setText(message)
+    _bring_to_front(box)
+    box.exec()
+
+
+def _finish_theme(parent, language, on_done, name):
+    """워커의 ``finished_ok`` 가 오면 불린다(``QueuedConnection`` 이라 GUI
+    스레드에서 실행된다).
+
+    순서가 중요하다: 테마를 먼저 적용하고(``on_done``) **그 뒤에** 완료
+    알림을 띄운다. 반대로 하면 알림이 모달이라 사용자가 닫을 때까지
+    적용이 늦어진다 — 이번 라운드가 고치는 "만드는 중" 모달 문제와 같은
+    모양이 완료 쪽에도 생긴다.
+
+    문구 판단은 여기서 하지 않는다(모듈 맨 위 설명대로) — ``win_ai.
+    theme_done_message`` 가 정한 (제목, 본문) 을 그대로 띄운다.
+    """
+    on_done(name)
+    title, body = win_ai.theme_done_message(language)
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+    box.setWindowTitle(title)
+    box.setText(body)
+    # 동의창과 같은 이유: 고양이 창은 Tool 이라 자식 대화상자가 항상-위를
+    # 물려받지 못한다 — _bring_to_front 로 직접 준다(box.exec() 전에).
+    _bring_to_front(box)
+    box.exec()
+
+
+def _key_problem_shown(parent, language):
+    """F-2: 키가 무효면 안내창을 띄우고 ``True``. 그 밖엔 ``False``.
+
+    판정은 ``win_ai.theme_key_problem`` 이 한다. 확인은 GUI 스레드에서 돌지만
+    최대 5초·재시도 없음이고, 사용자가 메뉴를 막 누른 순간이라 대기 커서로
+    기다리는 중임을 보여준다. 대기 커서는 어떤 경우에도 되돌린다(finally).
+    """
+    QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+    try:
+        message = win_ai.theme_key_problem(language)
+    finally:
+        QtWidgets.QApplication.restoreOverrideCursor()
+    if message is None:
+        return False
+    _show_theme_failure(parent, language, message)
+    return True
+
+
+def make_theme(parent, language, bundled_frames_dir, on_done):
+    """사진을 골라 테마 생성을 워커 스레드에서 시작하고 워커를 돌려준다.
+
+    중간에 그만두면(키 없음·취소·형식 오류·동의 안 함) ``None``.
+    ``on_done(name)`` 은 GUI 스레드에서 불린다.
+    """
+    win_ai.log_theme_step("menu clicked")
+    if not win_ai.has_api_key():
+        _explain_missing_key(parent, language)
+        return None
+
+    # F-2: 키가 "있지만 무효"면 여기서 멈춘다 — 사진을 고르고 전송에
+    # 동의한 뒤에야 401 을 알리던 순서를 바로잡는다.
+    if _key_problem_shown(parent, language):
+        return None
+
+    win_ai.log_theme_step("photo picker opening")
+    photo, _ = QtWidgets.QFileDialog.getOpenFileName(
+        parent, tr(language, "menu_pet_theme"), "", IMAGE_FILTER)
+    win_ai.log_theme_step("photo picker closed")
+    if not photo:
+        return None
+
+    problem = win_ai.check_photo(photo, language)
+    if problem:
+        QtWidgets.QMessageBox.warning(parent, tr(language, "menu_pet_theme"), problem)
+        return None
+
+    # QMessageBox.question 의 기본 Yes/No 는 버튼이 영어이고 기본 버튼이
+    # Yes 라 엔터 한 번에 사진이 전송된다. 직접 만들어 한국어 버튼을 달고
+    # 기본·Esc 버튼을 모두 "취소"로 둔다.
+    box = _new_top_box(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+    box.setWindowTitle(tr(language, "pet_theme_consent_title"))
+    box.setText(tr(language, "pet_theme_consent_body"))
+    continue_label, cancel_label = win_ai.consent_button_labels(language)
+    continue_button = box.addButton(
+        continue_label, QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+    cancel_button = box.addButton(
+        cancel_label, QtWidgets.QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel_button)
+    box.setEscapeButton(cancel_button)
+
+    # K-1: 무효 키로도 동의창이 안 보였다는 실기 보고가 있었다 — 코드로는
+    # 원인이 밝혀지지 않아(추정하지 않는다) 유일한 코드 근거인 이 지점만
+    # 고친다. 동의 3지점(shown·accepted·declined)도 같은 로그에 남겨 다음
+    # 실기에서 기록으로 판정한다.
+    win_ai.log_consent("shown")
+    _bring_to_front(box)
+    box.exec()
+    if box.clickedButton() is continue_button:
+        win_ai.log_consent("accepted")
+    else:
+        win_ai.log_consent("declined")
+        return None
+
+    # 기본 테마·이미 만든 테마와 겹치지 않는 이름(mypet, mypet2, ...).
+    # vision_theme 은 있는 폴더를 덮어쓰지 않으므로 고정 이름을 쓰면 두 번째부터 실패한다.
+    name = win_ai.next_theme_name(bundled_frames_dir)
+
+    # J-1: 예전엔 여기서 "만드는 중" 모달을 띄웠다(주석: "예외가 났을 때
+    # 도는 워커를 아무도 붙잡지 않은 채 GC 에 넘기는 것을 피하려고 워커를
+    # 만들기 전에 띄운다"). 그런데 그 모달은 OK 를 눌러야 닫히는 모달이라,
+    # 워커가 **시작조차** 안 된 채로 사용자가 한참 기다리는 원인이었다
+    # (실기 R3). 진행 상황은 이미 있는 우클릭 메뉴 항목
+    # (``menu_pet_theme_running``, ``windows_cat`` 이 단다)이 맡으므로
+    # 여기서 새로 만들 것은 없다 — 조용히 바로 시작한다.
+    #
+    # GC 안전 계약: 걱정했던 문제(붙잡히지 않은 워커가 GC 에 넘어가는 것)는
+    # 모달을 없앤 것과 별개로 계속 막아야 한다 — 아래에서 워커를 만든
+    # 뒤로는 예외를 낼 수 있는 코드를 두지 않는다(연결·시작은 실패하지
+    # 않는다고 보는 Qt API 호출뿐). 그리고 이 함수는 만든 워커를 그대로
+    # **반환**해야 한다 — 호출부(``windows_cat.Cat._start_theme``)가 그
+    # 반환값을 ``self._theme_worker`` 에 담아 참조를 잡고 있다는 계약이다.
+    # 이 함수를 고칠 때 반환을 빼먹으면 그 계약이 깨지고, 참조를 잃은
+    # 스레드는 GC 가 도는 대로 죽는다.
+    worker = _ThemeWorker(photo, name, language)
+    worker.finished_ok.connect(
+        lambda done_name: _finish_theme(parent, language, on_done, done_name),
+        _queued())
+    worker.failed.connect(
+        lambda message: _show_theme_failure(parent, language, message), _queued())
+    worker.start()
+    return worker          # 참조를 잡아 두지 않으면 GC 가 스레드를 죽인다

@@ -151,6 +151,22 @@ def system_prompt_for(
     )
 
 
+_NO_CLEANUP_PROMPT_NOTES = {
+    LANGUAGE_KO: (
+        "이번 진단에는 정리 기능이 없습니다.\n"
+        "- recommendations는 빈 리스트로 둡니다.\n"
+        "- 파일이나 폴더를 지우거나 휴지통으로 옮기라는 제안을 하지 않습니다.\n"
+        "- 운영체제를 macOS로 단정하지 않습니다."
+    ),
+    LANGUAGE_EN: (
+        "This diagnosis has no cleanup feature.\n"
+        "- Leave recommendations as an empty list.\n"
+        "- Never suggest deleting files or folders or moving them to the Trash.\n"
+        "- Do not assume the operating system is macOS."
+    ),
+}
+
+
 def _category_info(category: str, language: str) -> Dict[str, str]:
     return _CATEGORY_INFO[category][canonical_language(language)]
 
@@ -355,6 +371,7 @@ def _fallback_ai(
     snapshot: Mapping[str, Any],
     candidates: List[Dict[str, Any]],
     language: str = LANGUAGE_KO,
+    include_cleanup: bool = True,
 ) -> _AIDiagnosis:
     lang = canonical_language(language)
     disk = snapshot.get("disk", {})
@@ -438,12 +455,16 @@ def _fallback_ai(
     ]
 
     if lang == LANGUAGE_EN:
-        if disk_percent >= 80:
+        if disk_percent >= 80 and not include_cleanup:
+            advice = "Check which files and apps take up the most space, and review them yourself."
+        elif disk_percent >= 80:
             advice = "Review the largest allowlisted items first, move approved ones to Trash, then empty it yourself."
         elif pressure >= 65:
             advice = "Save your work, then close unneeded apps starting with the largest memory users."
         else:
             advice = "Avoid unnecessary cleanup for now and keep watching disk and memory trends."
+    elif disk_percent >= 80 and not include_cleanup:
+        advice = "용량을 많이 차지하는 파일과 앱부터 직접 확인해 보세요."
     elif disk_percent >= 80:
         advice = "큰 화이트리스트 항목부터 휴지통으로 옮긴 뒤 직접 확인하고 비우세요."
     elif pressure >= 65:
@@ -514,11 +535,35 @@ def _assemble_result(
     }
 
 
+def load_dotenv_candidates() -> None:
+    """``apppaths.dotenv_candidates()`` 순서대로 ``.env`` 를 읽어 환경에 채운다.
+
+    윈도우 메모장은 ``.env`` 를 UTF-8(BOM 포함)이나 UTF-16("유니코드")으로도
+    저장한다. 후보마다 :func:`apppaths.dotenv_encoding` 으로 인코딩을 고른
+    뒤 그 인코딩으로 연다 — 기본 utf-8 로 읽으면 BOM 이 키 이름 앞에 붙어
+    ``OPENAI_API_KEY`` 를 못 찾거나(BOM), ``UnicodeDecodeError`` 로 죽는다
+    (UTF-16). 디코딩할 수 없는 후보는 건너뛴다(다음 후보를 본다) — 여기서
+    죽으면 경고창에 코덱 오류 원문이 뜬다. override=False 라서 먼저 읽힌
+    값이 이긴다.
+
+    ``vision_theme.generate_sheet`` 도 이 함수를 그대로 쓴다 — 같은 루프를
+    두 곳에 두지 않으려고 여기 하나로 모았다(``vision_theme`` 은 ``brain``
+    을 순환 없이 import 할 수 있다).
+    """
+    for candidate in apppaths.dotenv_candidates():
+        encoding = apppaths.dotenv_encoding(candidate)
+        if encoding is None:
+            continue
+        try:
+            load_dotenv(candidate, override=False, encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+
+
 def _load_api_key() -> Optional[str]:
     # 설치된 앱은 사용자 폴더의 .env 를, 저장소에서 바로 돌릴 때는 소스 옆의
-    # .env 를 읽는다. override=False 라서 먼저 읽힌 쪽이 이긴다.
-    for candidate in apppaths.dotenv_candidates():
-        load_dotenv(candidate, override=False)
+    # .env 를 읽는다.
+    load_dotenv_candidates()
     return os.getenv("OPENAI_API_KEY")
 
 
@@ -527,11 +572,16 @@ def diagnose(
     personality: Optional[str] = None,
     custom_personality: Optional[str] = None,
     language: str = LANGUAGE_KO,
+    include_cleanup: bool = True,
 ) -> Dict[str, Any]:
     """성능 원인과 안전한 정리 추천을 JSON 직렬화 가능한 dict로 반환한다.
 
     API 키 누락, 네트워크 오류, 모델/스키마 오류는 모두 같은 입력에 같은
     결과를 내는 로컬 fallback으로 처리한다.
+
+    ``include_cleanup=False`` 면 정리 후보를 **수집조차 하지 않는다.**
+    윈도우판이 쓰는 길이다 — 거기엔 지울 수 있는 안전한 목록도, 되돌릴 수
+    있는 휴지통 API 도 없다. 설명만 한다.
     """
     lang = canonical_language(language)
     snapshot = (
@@ -543,10 +593,12 @@ def diagnose(
     stage = chonk_stage(float(disk.get("percent", 0)), lang)
     disk["chonk_stage"] = stage
     snapshot["disk"] = disk
-    candidates = collect_cleanup_candidates(language=lang)
+    candidates = collect_cleanup_candidates(language=lang) if include_cleanup else []
     api_key = _load_api_key()
     if not api_key:
-        fallback = _fallback_ai(snapshot, candidates, language=lang)
+        fallback = _fallback_ai(
+            snapshot, candidates, language=lang, include_cleanup=include_cleanup
+        )
         return _assemble_result(
             fallback,
             candidates,
@@ -557,12 +609,13 @@ def diagnose(
         )
 
     try:
+        instructions = system_prompt_for(personality, custom_personality, language=lang)
+        if not include_cleanup:
+            instructions = f"{instructions}\n\n{_NO_CLEANUP_PROMPT_NOTES[lang]}"
         client = OpenAI(api_key=api_key, timeout=20.0, max_retries=1)
         response = client.responses.parse(
             model=MODEL,
-            instructions=system_prompt_for(
-                personality, custom_personality, language=lang
-            ),
+            instructions=instructions,
             input=json.dumps(
                 {
                     "metrics": snapshot,
@@ -587,7 +640,9 @@ def diagnose(
             stage=stage,
         )
     except Exception:
-        fallback = _fallback_ai(snapshot, candidates, language=lang)
+        fallback = _fallback_ai(
+            snapshot, candidates, language=lang, include_cleanup=include_cleanup
+        )
         return _assemble_result(
             fallback,
             candidates,

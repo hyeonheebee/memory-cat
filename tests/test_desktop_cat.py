@@ -236,7 +236,7 @@ class DesktopCatTests(unittest.TestCase):
             patch.object(desktop_cat, "NSOperationQueue", queue_provider),
         ):
             desktop_cat._pet_theme_worker(
-                "/photos/pet.jpg", "mypet", callback
+                "/photos/pet.jpg", "mypet", callback, "ko"
             )
 
         build.assert_called_once_with("/photos/pet.jpg", "mypet", "medium")
@@ -249,25 +249,69 @@ class DesktopCatTests(unittest.TestCase):
             }
         )
 
-    def test_pet_theme_worker_returns_readable_generation_error(self):
+    def _run_pet_theme_worker_failing_with(self, error, language="ko"):
+        """``build_pet_theme`` 이 ``error`` 를 내게 하고 워커 결과와 로그 글을 돌려준다."""
         callback = Mock()
         queue = Mock()
         queue.addOperationWithBlock_.side_effect = lambda block: block()
         queue_provider = Mock()
         queue_provider.mainQueue.return_value = queue
-        with (
-            patch.object(
-                desktop_cat,
-                "build_pet_theme",
-                side_effect=desktop_cat.ThemeGenerationError("API request failed"),
-            ),
-            patch.object(desktop_cat, "NSOperationQueue", queue_provider),
-        ):
-            desktop_cat._pet_theme_worker("/photos/pet.jpg", "mypet", callback)
+        with tempfile.TemporaryDirectory() as log_dir:
+            with (
+                patch.object(desktop_cat, "build_pet_theme", side_effect=error),
+                patch.object(desktop_cat, "NSOperationQueue", queue_provider),
+                patch.object(desktop_cat.apppaths, "log_dir",
+                             return_value=Path(log_dir)),
+            ):
+                desktop_cat._pet_theme_worker(
+                    "/photos/pet.jpg", "mypet", callback, language)
+            log_path = Path(log_dir) / "ai-errors.log"
+            log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+        callback.assert_called_once()
+        return callback.call_args.args[0], log_text
 
-        callback.assert_called_once_with(
-            {"theme_name": "mypet", "error": "API request failed"}
-        )
+    def test_pet_theme_worker_hides_the_raw_error_behind_a_translated_notice(self):
+        """G-1: 원문(영어)은 화면 대신 로그로 간다. 화면엔 로그 위치를 알려 준다."""
+        result, log_text = self._run_pet_theme_worker_failing_with(
+            desktop_cat.ThemeGenerationError("API request failed"))
+
+        self.assertEqual(result["theme_name"], "mypet")
+        self.assertNotIn("API request failed", result["error"])
+        self.assertIn("테마를 만들지 못했어요", result["error"])
+        self.assertIn("ai-errors.log", result["error"])
+        self.assertIn("API request failed", log_text)
+
+    def test_pet_theme_worker_never_shows_key_fragments_for_a_bad_key(self):
+        """G-1: 401 원문 ``Incorrect API key provided: sk-proj****abcd`` 의 키
+        끝자리가 알림·경고창(=버그 신고 스크린샷)에 찍히면 안 된다."""
+
+        class FakeAuthError(Exception):
+            status_code = 401
+
+        try:
+            try:
+                raise FakeAuthError(
+                    "Error code: 401 - Incorrect API key provided: sk-proj****abcd")
+            except FakeAuthError as cause:
+                raise desktop_cat.ThemeGenerationError(
+                    f"API request failed: {cause}") from cause
+        except desktop_cat.ThemeGenerationError as wrapped:
+            error = wrapped
+
+        result, log_text = self._run_pet_theme_worker_failing_with(error)
+
+        self.assertIn("API 키가 올바르지 않아요", result["error"])
+        self.assertIn(".env", result["error"])
+        for leaked in ("sk-", "abcd", "Incorrect API key"):
+            self.assertNotIn(leaked, result["error"])
+        self.assertIn("[REDACTED]", log_text)
+        self.assertNotIn("abcd", log_text)
+
+    def test_pet_theme_worker_speaks_the_app_language(self):
+        result, _ = self._run_pet_theme_worker_failing_with(
+            RuntimeError("boom"), language="en")
+        self.assertIn("Couldn't make the theme", result["error"])
+        self.assertNotIn("boom", result["error"])
 
     def test_finishing_pet_theme_applies_and_saves_it_immediately(self):
         controller = desktop_cat.CatController.alloc().init()
@@ -1008,6 +1052,53 @@ class SizeSourceTests(unittest.TestCase):
             ("Make a theme from my pet…", b"makePetTheme:"),
             [(call.args[0], call.args[1]) for call in menu_calls],
         )
+
+    def test_context_menu_credits_the_author_above_refresh_and_quit(self):
+        """만든 사람 표시: 크레딧 줄(누를 수 없음) + 저장소 링크(누르면 열림)."""
+        controller = desktop_cat.CatController.alloc().init()
+        controller.cfg = dict(desktop_cat.DEFAULT)
+        controller.language = "ko"
+        controller.detail = ["Disk 50%"]
+        controller._diagnosis_running = False
+        controller.view = Mock()
+        items = []
+
+        def new_item(title, action, key):
+            item = Mock(title=title, action=action)
+            items.append(item)
+            return item
+
+        menu_class = Mock()
+        item_class = Mock()
+        item_class.alloc.return_value.initWithTitle_action_keyEquivalent_.side_effect = new_item
+        item_class.separatorItem.side_effect = lambda: Mock(title="separator")
+        with (
+            patch.object(desktop_cat, "NSMenu", menu_class),
+            patch.object(desktop_cat, "NSMenuItem", item_class),
+            patch.object(desktop_cat, "discover_themes", return_value=["cute"]),
+        ):
+            controller.popUpMenu_(Mock())
+
+        credit, link = i18n.credit_lines("ko")
+        titles = [item.title for item in items]
+        self.assertIn(credit, titles)
+        self.assertIn(link, titles)
+        credit_item = items[titles.index(credit)]
+        link_item = items[titles.index(link)]
+        credit_item.setEnabled_.assert_called_with(False)
+        self.assertEqual(link_item.action, b"openCreditLink:")
+        # target 이 없으면 메뉴 항목이 회색이 되거나 눌러도 아무 일이 없다.
+        link_item.setTarget_.assert_called_with(controller)
+        self.assertLess(titles.index(link), titles.index("새로고침"))
+
+    def test_credit_link_opens_the_repo_in_the_browser(self):
+        controller = desktop_cat.CatController.alloc().init()
+        workspace = Mock()
+        with patch.object(desktop_cat, "NSWorkspace", workspace), \
+             patch.object(desktop_cat, "NSURL", Mock(URLWithString_=lambda u: ("url", u))):
+            controller.openCreditLink_(None)
+        workspace.sharedWorkspace.return_value.openURL_.assert_called_once_with(
+            ("url", i18n.CREDIT_URL))
 
     def test_finishing_diagnosis_stores_start_context_and_close_skips_cleanup(self):
         controller = desktop_cat.CatController.alloc().init()
@@ -1782,6 +1873,89 @@ class RevealTests(unittest.TestCase):
         self.assertEqual(title, "API 키가 필요해요")
         self.assertIn("OPENAI_API_KEY=sk-...", body)
         self.assertIn(".env", body)
+
+    def _pet_theme_controller(self):
+        controller = desktop_cat.CatController.alloc().init()
+        controller.language = "ko"
+        controller._pet_theme_running = False
+        controller._show_information_alert = Mock()
+        return controller
+
+    def test_pet_theme_checks_the_key_works_before_asking_for_a_photo(self):
+        """F-2: 키가 있지만 무효면 사진 선택·동의·업로드까지 다 간 뒤에야 401
+        로 실패했다. 사진 고르기 전에 막고, 윈도우와 같은 안내를 보인다."""
+        controller = self._pet_theme_controller()
+        panel_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value="sk-test"),
+            patch.object(desktop_cat, "theme_key_problem",
+                         return_value="API 키가 올바르지 않아요 …") as check,
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+        ):
+            controller.makePetTheme_(None)
+
+        check.assert_called_once_with("ko")
+        panel_class.openPanel.assert_not_called()
+        controller._show_information_alert.assert_called_once_with(
+            "테마를 만들지 못했어요", "API 키가 올바르지 않아요 …")
+        self.assertFalse(controller._pet_theme_running)
+
+    def test_pet_theme_goes_on_to_the_photo_when_the_key_is_not_known_bad(self):
+        controller = self._pet_theme_controller()
+        panel_class = Mock()
+        panel_class.openPanel.return_value.runModal.return_value = (
+            desktop_cat.NSModalResponseOK + 1)  # 사진 고르기 취소
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value="sk-test"),
+            patch.object(desktop_cat, "theme_key_problem", return_value=None),
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+            patch.object(desktop_cat, "NSApp", Mock()),
+        ):
+            controller.makePetTheme_(None)
+
+        panel_class.openPanel.assert_called_once()
+        controller._show_information_alert.assert_not_called()
+
+    def test_pet_theme_without_a_key_does_not_touch_the_network(self):
+        controller = self._pet_theme_controller()
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value=None),
+            patch.object(desktop_cat, "theme_key_problem") as check,
+            patch.object(desktop_cat, "NSOpenPanel", Mock()),
+        ):
+            controller.makePetTheme_(None)
+        check.assert_not_called()
+
+    def test_pet_theme_worker_gets_the_app_language(self):
+        """G-1 배선: 실패 안내가 앱 언어로 나오려면 워커에 언어를 넘겨야 한다."""
+        controller = self._pet_theme_controller()
+        controller.language = "en"
+        panel_class = Mock()
+        panel = panel_class.openPanel.return_value
+        panel.runModal.return_value = desktop_cat.NSModalResponseOK
+        panel.URL.return_value.path.return_value = "/photos/pet.jpg"
+        alert = Mock()
+        alert.runModal.return_value = desktop_cat.NSAlertFirstButtonReturn
+        thread_class = Mock()
+
+        with (
+            patch.object(desktop_cat, "_load_api_key", return_value="sk-test"),
+            patch.object(desktop_cat, "theme_key_problem", return_value=None),
+            patch.object(desktop_cat, "NSOpenPanel", panel_class),
+            patch.object(desktop_cat, "new_cat_alert", return_value=alert),
+            patch.object(desktop_cat, "next_pet_theme_name", return_value="mypet"),
+            patch.object(desktop_cat, "NSApp", Mock()),
+            patch.object(desktop_cat.threading, "Thread", thread_class),
+        ):
+            controller.makePetTheme_(None)
+
+        kwargs = thread_class.call_args.kwargs
+        self.assertIs(kwargs["target"], desktop_cat._pet_theme_worker)
+        self.assertEqual(kwargs["args"][0], "/photos/pet.jpg")
+        self.assertEqual(kwargs["args"][-1], "en")
+        thread_class.return_value.start.assert_called_once()
 
     def test_diagnosis_tells_you_where_to_put_the_key_when_it_is_missing(self):
         content = desktop_cat.diagnosis_result_content(

@@ -9,6 +9,7 @@ from unittest.mock import Mock, call, patch
 
 from PIL import Image, ImageDraw
 
+import apppaths
 import desktop_cat
 import vision_theme
 
@@ -53,6 +54,8 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                # 진짜 .env 로 가는 길을 막는다.
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "OpenAI", return_value=client) as ctor,
             ):
                 result = vision_theme.generate_sheet(photo)
@@ -77,7 +80,7 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {}, clear=True),
-                patch.object(vision_theme, "load_dotenv"),
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "OpenAI") as client_class,
             ):
                 with self.assertRaisesRegex(
@@ -96,6 +99,8 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                # 진짜 .env 로 가는 길을 막는다.
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "OpenAI", return_value=client),
             ):
                 with self.assertRaisesRegex(
@@ -103,6 +108,7 @@ class VisionThemeTests(unittest.TestCase):
                     "OpenAI image generation failed: network unavailable",
                 ):
                     vision_theme.generate_sheet(photo)
+
 
     def test_build_theme_turns_six_detected_stages_into_a_complete_theme(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -248,6 +254,8 @@ class VisionThemeTests(unittest.TestCase):
             Image.new("RGB", (64, 64), "brown").save(photo)
             with (
                 patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+                # 진짜 .env 로 가는 길을 막는다.
+                patch.object(vision_theme, "load_dotenv_candidates"),
                 patch.object(vision_theme, "FRAMES_DIR", frames_dir),
                 patch.object(vision_theme, "OpenAI", return_value=client),
             ):
@@ -284,6 +292,46 @@ class VisionThemeTests(unittest.TestCase):
             stderr.getvalue(),
             "Error: OpenAI request failed: network unavailable\n",
         )
+
+
+class GenerateSheetDotenvEncodingTests(unittest.TestCase):
+    """메모장이 UTF-16("유니코드")으로 저장한 ``.env`` 도 읽어야 한다.
+
+    ⛔ 값은 절대 출력하지 않는다 — assertTrue(x == FAKE, ...) 만 쓴다.
+    ``apppaths.dotenv_candidates`` 를 임시 파일로 패치해 진짜 ``.env`` 로는
+    넘어가지 않는다.
+    """
+
+    FAKE = "sk-test-fake-encoding"
+
+    def test_utf16_env_key_reaches_the_openai_client(self):
+        generated = Image.new("RGB", (1536, 1024), "white")
+        response = SimpleNamespace(
+            data=[SimpleNamespace(b64_json=_png_b64(generated))]
+        )
+        client = Mock()
+        client.images.edit.return_value = response
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            photo = Path(temp_dir) / "pet.jpg"
+            Image.new("RGB", (64, 64), "brown").save(photo)
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text(f"OPENAI_API_KEY={self.FAKE}\n", encoding="utf-16")
+            missing = Path(temp_dir) / "missing" / ".env"
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                patch.object(apppaths, "dotenv_candidates",
+                             return_value=(env_path, missing)),
+                patch.object(vision_theme, "OpenAI", return_value=client) as ctor,
+            ):
+                # UnicodeDecodeError 가 나면 여기서 예외로 테스트가 실패한다.
+                vision_theme.generate_sheet(photo)
+
+        self.assertTrue(
+            ctor.call_args.kwargs["api_key"] == self.FAKE,
+            "UTF-16 .env 에서 읽은 키가 OpenAI 클라이언트로 전달되지 않음",
+        )
+
 
 FIXTURES = Path(__file__).with_name("fixtures")
 
@@ -340,6 +388,8 @@ class PhotoFormatTests(unittest.TestCase):
 
         with (
             patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            # 진짜 .env 로 가는 길을 막는다.
+            patch.object(vision_theme, "load_dotenv_candidates"),
             patch.object(vision_theme, "OpenAI", return_value=client),
         ):
             vision_theme.generate_sheet(FIXTURES / "pet.heic")
@@ -351,6 +401,99 @@ class PhotoFormatTests(unittest.TestCase):
     def test_the_photo_picker_only_offers_formats_the_app_can_handle(self):
         self.assertIn("heic", desktop_cat.PET_PHOTO_TYPES)
         self.assertIn("webp", desktop_cat.PET_PHOTO_TYPES)
+
+
+class LooksLikeHeicTests(unittest.TestCase):
+    """I-1: 못 여는 파일을 전부 HEIC 취급하면 안 된다 — 내용을 직접 본다."""
+
+    def test_a_real_heic_fixture_is_detected(self):
+        self.assertTrue(vision_theme.looks_like_heic(FIXTURES / "pet.heic"))
+
+    def test_major_brand_heic_is_detected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "synthetic.heic"
+            path.write_bytes(
+                b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"
+                + b"\x00" * 20
+            )
+            self.assertTrue(vision_theme.looks_like_heic(path))
+
+    def test_heic_only_in_the_compatible_brand_list_is_detected(self):
+        """주 브랜드는 heic 계열이 아니고 호환 브랜드 목록에만 있는 경우."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "synthetic2.heic"
+            # size=20, ftyp, major=mp41(비-HEIF), minor version, compat=heic
+            path.write_bytes(
+                b"\x00\x00\x00\x14ftypmp41\x00\x00\x00\x00heic"
+            )
+            self.assertTrue(vision_theme.looks_like_heic(path))
+
+    def test_a_short_text_file_is_not_heic(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "note.txt"
+            path.write_bytes(b"just an image!")  # 14 바이트, ftyp 없음
+            self.assertFalse(vision_theme.looks_like_heic(path))
+
+    def test_a_real_png_is_not_heic(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "pet.png"
+            Image.new("RGB", (4, 4), "white").save(path)
+            self.assertFalse(vision_theme.looks_like_heic(path))
+
+    def test_a_missing_file_is_not_heic(self):
+        self.assertFalse(
+            vision_theme.looks_like_heic(Path("/no/such/file.heic"))
+        )
+
+
+class RewriteAsJpegNonDarwinMessageTests(unittest.TestCase):
+    """I-1: 비-darwin 분기는 원인별로 다른 안내를 내고, macOS 는 언급하지 않는다.
+
+    ``generate_sheet``·``build_theme`` 등 로더는 부르지 않는다 — API 키·
+    ``.env`` 에 닿지 않는다.
+    """
+
+    def test_heic_content_gets_a_heic_specific_message_without_macos(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            photo = Path(temp_dir) / "pet.jpg"
+            photo.write_bytes((FIXTURES / "pet.heic").read_bytes())
+            destination = Path(temp_dir) / "out.jpg"
+            with patch.object(vision_theme.sys, "platform", "win32"):
+                with self.assertRaises(
+                    vision_theme.ThemeGenerationError
+                ) as ctx:
+                    vision_theme._rewrite_as_jpeg(photo, destination)
+        message = str(ctx.exception)
+        self.assertNotIn("macOS", message)
+        self.assertIn("HEIC", message)
+
+    def test_unreadable_content_gets_a_different_message_without_macos(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            photo = Path(temp_dir) / "broken.jpg"
+            photo.write_bytes(b"not an image!!")
+            destination = Path(temp_dir) / "out.jpg"
+            with patch.object(vision_theme.sys, "platform", "win32"):
+                with self.assertRaises(
+                    vision_theme.ThemeGenerationError
+                ) as ctx:
+                    vision_theme._rewrite_as_jpeg(photo, destination)
+        message = str(ctx.exception)
+        self.assertNotIn("macOS", message)
+        self.assertNotIn("HEIC", message)
+
+    def test_the_two_non_darwin_messages_differ(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            heic_photo = Path(temp_dir) / "pet.jpg"
+            heic_photo.write_bytes((FIXTURES / "pet.heic").read_bytes())
+            text_photo = Path(temp_dir) / "broken.jpg"
+            text_photo.write_bytes(b"not an image!!")
+            destination = Path(temp_dir) / "out.jpg"
+            with patch.object(vision_theme.sys, "platform", "win32"):
+                with self.assertRaises(vision_theme.ThemeGenerationError) as heic_ctx:
+                    vision_theme._rewrite_as_jpeg(heic_photo, destination)
+                with self.assertRaises(vision_theme.ThemeGenerationError) as text_ctx:
+                    vision_theme._rewrite_as_jpeg(text_photo, destination)
+        self.assertNotEqual(str(heic_ctx.exception), str(text_ctx.exception))
 
 
 if __name__ == "__main__":

@@ -33,7 +33,17 @@ if not exist "frames" (
     exit /b 1
 )
 
-REM i18n.py / metrics.py 는 저장소 루트에 있다. windows 폴더만 복사해 온
+REM exe 속성(회사명·저작권·버전)은 version_info.txt 에서 온다.
+if not exist "version_info.txt" (
+    echo.
+    echo [X] version_info.txt 가 없습니다. exe 속성에 저작권이 빠집니다.
+    echo     저장소를 통째로 받았는지 확인하세요.
+    popd
+    pause
+    exit /b 1
+)
+
+REM i18n.py / metrics.py / apppaths.py 는 저장소 루트에 있다. windows 폴더만 복사해 온
 REM 경우 여기서 걸러 준다. 없으면 빌드는 되지만 실행할 때 죽는다.
 if not exist "..\i18n.py" (
     echo.
@@ -53,14 +63,40 @@ if not exist "..\metrics.py" (
     exit /b 1
 )
 
-REM i18n.py / metrics.py 는 저장소 루트에 있다. --paths 로 import 경로에
-REM 넣고, 이름을 --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기
-REM 시작하면 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
+if not exist "..\apppaths.py" (
+    echo.
+    echo [X] ..\apppaths.py 를 찾을 수 없습니다.
+    echo     windows 폴더만 복사하지 말고 저장소를 통째로 받아 주세요.
+    popd
+    pause
+    exit /b 1
+)
+
+REM i18n.py / metrics.py 는 저장소 루트에 있다. apppaths.py / brain.py /
+REM personality.py / vision_theme.py / import_theme.py / ai_errors.py (진단·커스텀 테마 AI 기능)
+REM 도 마찬가지다. --paths 로 import 경로에 넣고, 이름을
+REM --hidden-import 로 대 준다. 루트 모듈을 하나 더 쓰기 시작하면
+REM 여기에도 더해야 한다 — WindowsBuildScriptTests 가 지킨다.
+REM win_ai.py / win_ai_ui.py 는 windows 폴더에 있지만 windows_cat.pyw 가
+REM try/except 로 가져온다. 못 담으면 exe 에서 AI 메뉴만 소리 없이 사라진다.
+REM win_app.py 도 windows 폴더에 있지만, win_ai 와 달리 windows_cat.pyw 가
+REM 바로 import 한다(필수 설정 이전 기능). 못 담으면 exe 가 켜지자마자
+REM 조용히 죽는다.
 pyinstaller --noconsole --onefile --name MemoryCat ^
     --add-data "frames;frames" ^
+    --version-file "version_info.txt" ^
     --paths ".." ^
     --hidden-import i18n ^
     --hidden-import metrics ^
+    --hidden-import apppaths ^
+    --hidden-import brain ^
+    --hidden-import personality ^
+    --hidden-import vision_theme ^
+    --hidden-import import_theme ^
+    --hidden-import ai_errors ^
+    --hidden-import win_ai ^
+    --hidden-import win_ai_ui ^
+    --hidden-import win_app ^
     windows_cat.pyw
 if errorlevel 1 (
     echo.

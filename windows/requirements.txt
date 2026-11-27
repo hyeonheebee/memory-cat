@@ -2,8 +2,20 @@
 # Upper bounds block the next major: this app gets registered to start
 # automatically, so an unannounced major upgrade must not break it.
 #
+# PySide6 is pinned exactly: 6.12.0 changed when the app quits after a
+# dialog closes (the Tool-window cat stopped counting). Upgrade on purpose
+# and re-test on a real Windows PC.
+#
 # Keep this file ASCII. pip decodes requirements files with the system
 # encoding when there is no BOM, so Korean comments here fail with
 # UnicodeDecodeError (cp949) on a Korean-language Windows install.
-PySide6>=6.5,<7
+PySide6==6.12.0
 psutil>=5.9,<8
+
+# Optional AI features: diagnosis (brain.py) and custom pet themes
+# (vision_theme.py). The app still runs without an OPENAI_API_KEY.
+openai>=2.46,<3
+pydantic>=2.9,<3
+python-dotenv>=1.2,<2
+Pillow>=10,<13
+numpy>=1.24,<3

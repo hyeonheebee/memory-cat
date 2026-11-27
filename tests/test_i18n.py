@@ -24,10 +24,13 @@ class FormatArgumentTests(unittest.TestCase):
     SOURCES = (
         "desktop_cat.py",
         "windows/windows_cat.pyw",
+        "windows/win_ai.py",
+        "windows/win_ai_ui.py",
         "brain.py",
         "personality.py",
         "vision_theme.py",
         "import_theme.py",
+        "ai_errors.py",
     )
 
     @staticmethod
@@ -95,6 +98,42 @@ class FormatArgumentTests(unittest.TestCase):
         en = set(i18n._STRINGS["en"])
         self.assertEqual(ko - en, set(), f"영어에 없는 키: {sorted(ko - en)}")
         self.assertEqual(en - ko, set(), f"한국어에 없는 키: {sorted(en - ko)}")
+
+
+#: 윈도우 AI 기능이 쓰는 문구. 새로 넣은 것과 맥과 함께 쓰는 것 모두.
+WINDOWS_AI_KEYS = (
+    "diagnosis_title", "windows_delete_warning", "theme_working", "theme_error_format",
+    "menu_diagnose", "menu_pet_theme", "missing_api_key_title", "missing_api_key_help",
+    "pet_theme_consent_title", "pet_theme_consent_body", "pet_theme_error_title",
+    "windows_diagnosis_source_fallback",
+    "theme_error_heic", "theme_error_unreadable", "theme_error_invalid_key",
+    "theme_error_generic",
+    # J-1: 테마 생성 완료 알림(R5 Task B) — 성공했을 때만 뜬다.
+    "theme_done_title", "theme_done_body",
+)
+
+
+class WindowsFeatureStringsTests(unittest.TestCase):
+    def test_every_new_key_exists_in_both_languages(self):
+        """한쪽만 넣으면 그 언어에서 창이 통째로 빈다. v0.3.0 의 사고다."""
+        for key in WINDOWS_AI_KEYS:
+            for language in ("ko", "en"):
+                with self.subTest(key=key, language=language):
+                    self.assertIn(key, i18n._STRINGS[language])
+                    self.assertTrue(i18n._STRINGS[language][key].strip())
+
+    def test_the_delete_warning_says_it_cannot_be_undone(self):
+        ko = i18n.tr("ko", "windows_delete_warning")
+        en = i18n.tr("en", "windows_delete_warning")
+        self.assertIn("되돌릴 수 없", ko)
+        self.assertIn("can't be recovered", en.lower())
+
+    def test_the_delete_warning_does_not_point_at_a_nonexistent_list(self):
+        """윈도우판엔 정리 목록이 없다 — "위 항목"·"above" 로 가리키면 안 된다."""
+        ko = i18n.tr("ko", "windows_delete_warning")
+        en = i18n.tr("en", "windows_delete_warning")
+        self.assertNotIn("위 항목", ko)
+        self.assertNotIn("above", en.lower())
 
 
 class I18nTests(unittest.TestCase):
@@ -194,6 +233,60 @@ class I18nTests(unittest.TestCase):
             i18n.tr("en", "disk_full_prompt_body"),
             "I'm so full… want a checkup?",
         )
+
+    def test_theme_working_key_is_documented_as_intentionally_unused(self):
+        """R5 M9: J-1 이 "만드는 중" 모달(이 키를 쓰던 곳)을 없앴다. 키
+        자체는 일부러 남겨 뒀는데, 나중에 누가 "안 쓰는 키니 지워도 되나?"
+        헷갈리지 않도록 그 이유를 적은 주석이 소스에 있어야 한다."""
+        source = (_REPO / "i18n.py").read_text(encoding="utf-8")
+        marker = source.index('"theme_working"')
+        preceding = source[:marker]
+        # 바로 앞 줄(들)에 이유를 설명하는 주석이 있는지 — "J-1" 과 "R5" 둘
+        # 다 언급해야 어떤 라운드의 어떤 결정인지 추적할 수 있다.
+        comment_window = preceding[-400:]
+        self.assertIn("J-1", comment_window)
+        self.assertIn("R5", comment_window)
+        self.assertIn("#", comment_window)
+
+
+class CleanPetNameTests(unittest.TestCase):
+    """맥·윈도우가 이름을 같은 규칙으로 저장한다(전엔 맥 두 곳에 같은 식이 따로 있었다)."""
+
+    def test_it_trims_and_caps_at_forty(self):
+        self.assertEqual(i18n.clean_pet_name("  몽이 "), "몽이")
+        self.assertEqual(len(i18n.clean_pet_name("가" * 50)), 40)
+
+    def test_empty_or_missing_means_no_name(self):
+        for raw in (None, "", "   "):
+            with self.subTest(raw=raw):
+                self.assertEqual(i18n.clean_pet_name(raw), "")
+
+
+class CreditTests(unittest.TestCase):
+    """만든 사람 표시(R7 추가 요청): exe 가 퍼져도 출처가 남게.
+
+    이름은 LICENSE 저작권자와 같은 사람이어야 한다 — 한쪽만 고치는 일을 막는다.
+    """
+
+    LICENSE = pathlib.Path(__file__).resolve().parent.parent / "LICENSE"
+
+    def test_url_points_at_the_public_repo(self):
+        self.assertEqual(i18n.CREDIT_URL, "https://github.com/hyeonheebee/memory-cat")
+
+    def test_both_languages_name_the_license_holder(self):
+        holder = next(line for line in self.LICENSE.read_text(encoding="utf-8").splitlines()
+                      if line.startswith("Copyright"))
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                credit, link = i18n.credit_lines(language)
+                self.assertIn("Hyeonhee Shim", credit)
+                self.assertIn("심현희", credit)
+                self.assertIn("Hyeonhee Shim (심현희)", holder)
+                self.assertIn("github.com/hyeonheebee/memory-cat", link)
+
+    def test_korean_and_english_wording(self):
+        self.assertTrue(i18n.credit_lines("ko")[0].startswith("만든 사람"))
+        self.assertTrue(i18n.credit_lines("en")[0].startswith("Made by"))
 
 
 if __name__ == "__main__":

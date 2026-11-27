@@ -1,0 +1,1171 @@
+"""``windows/win_app.py`` — 윈도우 앱 시작 로직 중 Qt 없는 부분을 검사한다.
+
+PySide6 는 맥 개발 환경에 없어서 ``windows_cat.pyw`` 자체는 못 돌린다.
+그래서 설정 파일을 옛 위치(exe 옆)에서 새 위치(``%APPDATA%\\Memory Cat``)로
+옮기는 판단만 여기 ``win_app.py`` 에 두고 테스트한다. ``windows_cat.pyw``
+와의 배선은 소스를 정적으로 검사해서 확인한다(직접 실행은 안 된다).
+"""
+import ast
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+_REPO = Path(__file__).resolve().parent.parent
+_WINDOWS_DIR = str(_REPO / "windows")
+if _WINDOWS_DIR not in sys.path:
+    sys.path.insert(0, _WINDOWS_DIR)
+
+import win_app  # noqa: E402
+
+
+class _FailingWriteHandle:
+    """진짜로 연 파일(exclusive "xb")을 감싸되, write 만 실패하게 흉내낸다.
+
+    디스크 꽉 참·OneDrive 동기화 충돌처럼 "만들기(open)는 되는데 쓰기는
+    실패" 하는 상황을 재현한다 — 진짜 디스크를 채우지 않고, 진짜 파일
+    시스템 위에서 실제로 빈 파일이 먼저 생기는 순서까지 그대로 흉내낸다.
+    """
+
+    def __init__(self, real_handle):
+        self._real = real_handle
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._real.close()
+        return False
+
+    def write(self, data):
+        raise OSError("simulated write failure (test)")
+
+
+def _open_with_failing_write(path, mode):
+    """``win_app.open`` 자리에 패치해서 쓰는 함수. target 은 진짜로 만들고
+    (exclusive 생성 시맨틱은 그대로 검사됨), write 호출만 실패시킨다."""
+    real_handle = open(path, mode)
+    return _FailingWriteHandle(real_handle)
+
+
+class MigrateLegacyConfigTests(unittest.TestCase):
+    def test_copies_legacy_file_when_target_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            # target 의 부모 폴더는 일부러 안 만든다 — 없어도 만들어져야 한다.
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertTrue(result)
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                              '{"theme": "derpy"}')
+            # 원본은 그대로 남는다.
+            self.assertTrue(legacy.is_file())
+            self.assertEqual(legacy.read_text(encoding="utf-8"),
+                              '{"theme": "derpy"}')
+
+    def test_does_not_overwrite_when_target_already_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+            target.parent.mkdir(parents=True)
+            target.write_text('{"theme": "cute"}', encoding="utf-8")
+
+            result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertFalse(result)
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                              '{"theme": "cute"}')
+
+    def test_write_failure_after_create_removes_the_partial_target(self):
+        """쓰기 실패(디스크 꽉 참 등)로 만든 빈/부분 target 을 남기면 다음
+        실행이 "target 이 이미 있다"고 착각해 영영 재시도하지 않는다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            with patch("win_app.open", _open_with_failing_write, create=True):
+                result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertFalse(result)
+            self.assertFalse(
+                target.exists(),
+                "쓰기 실패 뒤에도 빈/부분 target 파일이 남아 있습니다 — "
+                "다음 실행이 재시도를 못 합니다.",
+            )
+            # legacy 는 절대 안 건드린다.
+            self.assertTrue(legacy.is_file())
+            self.assertEqual(legacy.read_text(encoding="utf-8"),
+                              '{"theme": "derpy"}')
+
+    def test_a_second_call_after_a_failed_write_self_heals(self):
+        """실패로 지워진 뒤 다음 호출은 정상적으로 복사를 마친다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            with patch("win_app.open", _open_with_failing_write, create=True):
+                first = win_app.migrate_legacy_config(legacy, target)
+            self.assertFalse(first)
+            self.assertFalse(target.exists())
+
+            second = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertTrue(second)
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"),
+                              '{"theme": "derpy"}')
+
+    def test_returns_false_when_legacy_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"  # 안 만든다
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertFalse(result)
+            self.assertFalse(target.exists())
+
+    def test_returns_false_when_legacy_path_is_a_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy_dir"
+            legacy.mkdir()
+            target = Path(tmp) / "roaming" / "Memory Cat" / "config.json"
+
+            result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertFalse(result)
+            self.assertFalse(target.exists())
+
+    def test_returns_false_without_raising_when_target_parent_cannot_be_made(self):
+        """target 의 부모 자리에 파일이 있으면 mkdir 이 못 만든다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            legacy = Path(tmp) / "legacy" / "config.json"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('{"theme": "derpy"}', encoding="utf-8")
+            # "roaming" 자리를 폴더가 아니라 파일로 만들어 mkdir(parents=True)
+            # 가 실패하게 한다.
+            blocker = Path(tmp) / "roaming"
+            blocker.write_text("", encoding="utf-8")
+            target = blocker / "Memory Cat" / "config.json"
+
+            result = win_app.migrate_legacy_config(legacy, target)
+
+            self.assertFalse(result)
+
+
+class _RecordingLock:
+    """``QtCore.QLockFile`` 과 같은 모양(``setStaleLockTime``·``tryLock``·
+    ``error``)을 흉내내는 가짜. 호출 순서·인자를 기록해 둔다."""
+
+    def __init__(self, try_lock_result=True, error_value=None, raise_on=None):
+        self.calls = []
+        self._try_lock_result = try_lock_result
+        self._error_value = error_value
+        self._raise_on = raise_on  # 이 이름의 메서드가 불리면 예외를 던진다.
+
+    def setStaleLockTime(self, ms):
+        if self._raise_on == "setStaleLockTime":
+            raise RuntimeError("simulated failure (test)")
+        self.calls.append(("setStaleLockTime", ms))
+
+    def tryLock(self, timeout_ms):
+        if self._raise_on == "tryLock":
+            raise RuntimeError("simulated failure (test)")
+        self.calls.append(("tryLock", timeout_ms))
+        return self._try_lock_result
+
+    def error(self):
+        if self._raise_on == "error":
+            raise RuntimeError("simulated failure (test)")
+        self.calls.append(("error",))
+        return self._error_value
+
+
+#: QtCore.QLockFile.LockError.LockFailedError 자리에 넣는 표식. 진짜 enum 값이
+#: 무엇이든 상관없이 "이 값과 같은지"만 비교하는 로직인지를 검사한다.
+_LOCK_FAILED = object()
+
+
+class ClaimSingleInstanceTests(unittest.TestCase):
+    """``win_app.claim_single_instance`` — Qt 없이 판정 로직만 검사한다."""
+
+    def test_returns_true_when_the_lock_is_acquired(self):
+        lock = _RecordingLock(try_lock_result=True)
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_sets_stale_lock_time_to_zero_before_trying_the_lock(self):
+        lock = _RecordingLock(try_lock_result=True)
+        win_app.claim_single_instance(lock, _LOCK_FAILED)
+        self.assertEqual(
+            lock.calls[0], ("setStaleLockTime", 0),
+            "setStaleLockTime(0) 을 tryLock 보다 먼저 부르지 않습니다.",
+        )
+
+    def test_try_lock_is_called_with_a_zero_timeout(self):
+        lock = _RecordingLock(try_lock_result=True)
+        win_app.claim_single_instance(lock, _LOCK_FAILED)
+        self.assertIn(("tryLock", 0), lock.calls)
+
+    def test_returns_false_when_another_instance_already_holds_the_lock(self):
+        lock = _RecordingLock(try_lock_result=False, error_value=_LOCK_FAILED)
+        self.assertFalse(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_for_any_other_lock_error(self):
+        """권한 오류 등 LockFailedError 가 아닌 실패는 막지 않는다."""
+        other_error = object()
+        lock = _RecordingLock(try_lock_result=False, error_value=other_error)
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_when_try_lock_raises(self):
+        lock = _RecordingLock(raise_on="tryLock")
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_when_set_stale_lock_time_raises(self):
+        lock = _RecordingLock(raise_on="setStaleLockTime")
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+    def test_returns_true_when_error_raises(self):
+        lock = _RecordingLock(try_lock_result=False, raise_on="error")
+        self.assertTrue(win_app.claim_single_instance(lock, _LOCK_FAILED))
+
+
+class InstanceLockPathTests(unittest.TestCase):
+    """``win_app.instance_lock_path`` — 맥의 ``memory-cat.lock`` 과 같은 이름."""
+
+    def test_lock_file_lives_under_memory_cat_home_and_the_folder_is_made(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "mchome"  # 일부러 안 만든다 — 만들어지는지 본다.
+            with patch.dict(os.environ, {"MEMORY_CAT_HOME": str(home)}):
+                result = win_app.instance_lock_path()
+
+            self.assertEqual(Path(result), home / "memory-cat.lock")
+            self.assertTrue(
+                home.is_dir(),
+                "instance_lock_path() 가 사용자 데이터 폴더를 안 만듭니다.",
+            )
+
+
+class LogInstanceAlreadyRunningTests(unittest.TestCase):
+    """이미 다른 뚱냥이가 떠 있어 이번 실행을 접을 때, 창 하나 없이 그냥
+    끝나면 현장에서 원인을 알 방법이 없다 — exe 를 두 번 눌렀는지, 다른
+    이유로 죽었는지 구분이 안 된다. 흔적 한 줄을 남기되, 이 로그 기록
+    자체가 고양이를 못 띄우는 이유가 되면 안 된다(``win_ai.log_ai_failure``
+    와 같은 원칙)."""
+
+    def setUp(self):
+        self._log_tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._log_tmp.cleanup)
+        self._patch = patch.object(
+            win_app.apppaths, "log_dir", return_value=Path(self._log_tmp.name))
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+    def test_it_writes_a_timestamped_line(self):
+        win_app.log_instance_already_running()
+        entries = list(Path(self._log_tmp.name).iterdir())
+        self.assertEqual(len(entries), 1, "로그 파일이 정확히 하나 생겨야 합니다.")
+        text = entries[0].read_text(encoding="utf-8")
+        self.assertRegex(text, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+    def test_calling_twice_appends_rather_than_overwriting(self):
+        win_app.log_instance_already_running()
+        win_app.log_instance_already_running()
+        entries = list(Path(self._log_tmp.name).iterdir())
+        text = entries[0].read_text(encoding="utf-8")
+        self.assertEqual(
+            len([line for line in text.splitlines() if line.strip()]), 2,
+            "두 번 부르면 두 줄이 남아야 합니다(덮어쓰면 안 됩니다).",
+        )
+
+    def test_it_never_raises_when_the_log_folder_cannot_be_created(self):
+        blocked = Path(self._log_tmp.name) / "blocked-as-a-file"
+        blocked.write_text("파일")
+        with patch.object(win_app.apppaths, "log_dir", return_value=blocked / "logs"):
+            win_app.log_instance_already_running()      # 예외가 새면 실패
+
+
+class LanguageMenuLabelTests(unittest.TestCase):
+    """언어 메뉴 라벨에 ``{language}`` 같은 빈자리가 그대로 남지 않아야 한다.
+
+    11/24 PC1 실기에서 첫 항목이 ``자동 ({language})`` 로 보였다. ``tr()`` 은
+    값을 하나도 안 받으면 채우기를 하지 않으니, 문구가 **있는지만** 보는
+    시험은 이것을 못 잡는다. 그래서 라벨 글자 자체를 본다.
+    """
+
+    def test_no_label_keeps_a_placeholder(self):
+        from i18n import LANGUAGE_OVERRIDES
+        for language in ("ko", "en"):
+            for choice in LANGUAGE_OVERRIDES:
+                with self.subTest(language=language, choice=choice):
+                    label = win_app.language_menu_label(language, choice)
+                    self.assertNotIn("{", label)
+                    self.assertNotIn("}", label)
+
+    def test_auto_names_the_language_in_use(self):
+        self.assertEqual(win_app.language_menu_label("ko", "auto"), "자동 (한국어)")
+        self.assertEqual(
+            win_app.language_menu_label("en", "auto"), "Automatic (English)")
+
+    def test_fixed_choices_keep_their_own_names(self):
+        for language in ("ko", "en"):
+            with self.subTest(language=language):
+                self.assertEqual(win_app.language_menu_label(language, "ko"), "한국어")
+                self.assertEqual(win_app.language_menu_label(language, "en"), "English")
+
+
+class WindowsCatWiringTests(unittest.TestCase):
+    """``windows_cat.pyw`` 는 못 돌리니 소스를 정적으로 검사한다."""
+
+    APP = _REPO / "windows" / "windows_cat.pyw"
+
+    def setUp(self):
+        if not self.APP.is_file():
+            self.skipTest(f"파일이 없습니다: {self.APP}")
+        self.source = self.APP.read_text(encoding="utf-8")
+        self.tree = ast.parse(self.source, filename=str(self.APP))
+
+    def test_config_comes_from_apppaths_config_file(self):
+        found = False
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "CONFIG"
+                            for t in node.targets)):
+                dumped = ast.dump(node.value)
+                if "config_file" in dumped and "apppaths" in dumped:
+                    found = True
+        self.assertTrue(
+            found,
+            "CONFIG 가 apppaths.config_file() 에서 오지 않습니다 — "
+            "exe 를 다른 드라이브로 옮기면 설정이 또 떨어집니다.",
+        )
+
+    def test_win_app_is_imported_directly_not_inside_try_except(self):
+        """win_app 은 Qt·openai 의존이 없는 필수 모듈이라 그냥 import 한다."""
+        imports_win_app_at_top_level = any(
+            isinstance(node, ast.Import)
+            and any(alias.name == "win_app" for alias in node.names)
+            for node in self.tree.body
+        )
+        self.assertTrue(
+            imports_win_app_at_top_level,
+            "windows_cat.pyw 최상위에서 `import win_app` 을 직접 하지 않습니다.",
+        )
+
+    def test_language_menu_uses_language_menu_label(self):
+        """메뉴가 ``tr(language, f"language_{choice}")`` 로 빈자리를 남기지 않는다."""
+        self.assertIn("win_app.language_menu_label(", self.source)
+        self.assertNotIn('f"language_{choice}"', self.source)
+
+    def _main_function(self):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "main":
+                return node
+        return None
+
+    def _top_level_function(self, name):
+        for node in self.tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        return None
+
+    def _class_method(self, class_name, method_name):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == method_name:
+                        return item
+        return None
+
+    def test_menu_slot_handlers_log_and_never_show_the_raw_error(self):
+        """워커가 시작되기도 전에 터진 예외(``win_ai.has_api_key()`` 가 부르는
+        dotenv 로더, ``win_ai.check_photo`` 등)는 ``_DiagnosisWorker``·
+        ``_ThemeWorker`` 의 안전망(``win_ai_ui.py``)을 거치지 않는다 —
+        ``_start_diagnosis``·``_start_theme`` 이 직접 잡는데, 여기서
+        ``str(error)`` 를 그대로 ``QMessageBox`` 에 넘기면 영어 원문 예외가
+        화면에 뜬다. 리터럴 문자열 하나만 보면 포맷이 조금만 바뀌어도
+        놓치므로 AST 로 각 except 블록을 직접 본다: ``str(<예외 이름>)`` 호출이
+        없어야 하고, ``win_ai.log_ai_failure`` 는 반드시 불러야 한다.
+        """
+        for method_name in ("_start_diagnosis", "_start_theme"):
+            with self.subTest(method=method_name):
+                method = self._class_method("Cat", method_name)
+                self.assertIsNotNone(method, f"Cat.{method_name} 을 못 찾았습니다.")
+
+                handlers = [
+                    n for n in ast.walk(method) if isinstance(n, ast.ExceptHandler)
+                ]
+                self.assertTrue(handlers, f"{method_name} 에 except 블록이 없습니다.")
+                error_names = {h.name for h in handlers if h.name}
+                self.assertTrue(
+                    error_names,
+                    f"{method_name} 의 except 가 예외를 이름으로 받지 않습니다.",
+                )
+
+                logs_failure = False
+                for handler in handlers:
+                    for node in ast.walk(handler):
+                        if not isinstance(node, ast.Call):
+                            continue
+                        func = node.func
+                        if isinstance(func, ast.Name):
+                            call_name = func.id
+                        elif isinstance(func, ast.Attribute):
+                            call_name = func.attr
+                        else:
+                            continue
+                        if (call_name == "str" and node.args
+                                and isinstance(node.args[0], ast.Name)
+                                and node.args[0].id in error_names):
+                            self.fail(
+                                f"{method_name} 이 str(error) 를 그대로 다이얼로그에 "
+                                "넘깁니다 — 영어 원문 예외가 화면에 보입니다."
+                            )
+                        if call_name == "log_ai_failure":
+                            logs_failure = True
+                self.assertTrue(
+                    logs_failure,
+                    f"{method_name} 이 win_ai.log_ai_failure 를 부르지 않습니다.",
+                )
+
+    def test_disk_usage_imports_from_metrics_at_top_level(self):
+        """R27: 정보창·프레임 선택·진단이 같은 값을 봐야 한다.
+
+        ``windows_cat.pyw`` 는 PySide6 가 없는 맥에서 실행도 import 도 안
+        돼서, ``metrics.disk_usage`` 로 실제로 위임하는지는 직접 호출로
+        확인할 수 없다 — 소스를 정적으로 본다.
+        """
+        imports_disk_usage = any(
+            isinstance(node, ast.ImportFrom) and node.module == "metrics"
+            and any(alias.name == "disk_usage" for alias in node.names)
+            for node in self.tree.body
+        )
+        self.assertTrue(
+            imports_disk_usage,
+            "windows_cat.pyw 최상위에서 `from metrics import disk_usage`"
+            " (별칭 포함) 을 하지 않습니다.",
+        )
+
+    @staticmethod
+    def _non_docstring_body(func):
+        """함수 본문에서 독스트링(설명문)을 뺀 실행문만.
+
+        독스트링은 사람이 읽는 설명이라 "C:" 같은 옛 로직 얘기를 그대로
+        적어 둘 수 있다 — ``ast.dump`` 로 실행문만 검사해야 설명과 실제
+        코드를 헷갈리지 않는다.
+        """
+        body = func.body
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]
+        return ast.dump(ast.Module(body=body, type_ignores=[]))
+
+    def test_disk_usage_function_delegates_to_metrics_and_drops_c_drive_first(self):
+        """옛 ``disk_usage()`` 는 ``C:\\`` 를 먼저 봐서 ``SystemDrive`` 가
+        C: 가 아닌 PC 나 ``MEMORY_CAT_DEMO_DISK_PERCENT`` 데모 변수에서
+        ``win_ai`` 의 진단(``metrics.disk_usage`` 경유)과 어긋났다(R27).
+        이제는 ``metrics.disk_usage()`` 로 위임만 해야 한다 — 자체 fallback
+        체인이나 ``C:\\`` 하드코딩이 남아 있으면 안 된다.
+        """
+        func = self._top_level_function("disk_usage")
+        self.assertIsNotNone(func, "disk_usage() 함수를 못 찾았습니다.")
+        dumped = self._non_docstring_body(func)
+        self.assertIn(
+            "_metrics_disk_usage", dumped,
+            "disk_usage() 가 metrics 쪽 disk_usage 로 위임하지 않습니다.",
+        )
+        self.assertNotIn(
+            "C:", dumped,
+            "disk_usage() 에 C: 드라이브를 먼저 보는 옛 로직이 남아 있습니다.",
+        )
+        self.assertNotIn(
+            "psutil", dumped,
+            "disk_usage() 가 psutil 을 직접 불러 metrics 와 다른 값을 낼 "
+            "수 있습니다 — metrics.disk_usage() 위임 하나만 남아야 합니다.",
+        )
+
+    def test_human_gb_function_delegates_to_metrics(self):
+        """옛 ``human_gb()`` 는 ``metrics.human_gb`` 와 계산식이 텍스트로만
+        겹칠 뿐이었다(C-2 와 같은 종류의 문제 — 한쪽만 고치면 정보창과
+        진단이 다른 숫자를 보여준다). 이제는 위임만 해야 한다.
+        """
+        func = self._top_level_function("human_gb")
+        self.assertIsNotNone(func, "human_gb() 함수를 못 찾았습니다.")
+        dumped = self._non_docstring_body(func)
+        self.assertIn(
+            "_metrics_human_gb", dumped,
+            "human_gb() 가 metrics.human_gb 로 위임하지 않습니다.",
+        )
+        self.assertNotIn(
+            "1024", dumped,
+            "human_gb() 에 자체 계산식이 남아 있습니다 — metrics.human_gb "
+            "위임 하나만 남아야 합니다.",
+        )
+
+    def test_migrate_legacy_config_runs_inside_main_before_cat_is_built(self):
+        """``ast.walk`` 는 너비 우선이라 소스 순서와 다를 수 있다(바로 아래
+        ``test_claim_single_instance_runs_before_qapplication_is_built`` 의
+        설명과 같은 이유) — 여기도 소스 위치(``lineno``, ``col_offset``)로
+        정렬해서 실제 실행 순서를 본다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        calls = []
+        for node in ast.walk(main):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    name = func.id
+                elif isinstance(func, ast.Attribute):
+                    name = func.attr
+                else:
+                    continue
+                calls.append((node.lineno, node.col_offset, name))
+        calls.sort()
+        call_names = [name for _, _, name in calls]
+
+        self.assertIn("migrate_legacy_config", call_names,
+                       "main() 안에서 migrate_legacy_config 를 부르지 않습니다.")
+        self.assertIn("Cat", call_names,
+                       "main() 안에서 Cat(...) 을 만들지 않습니다.")
+        self.assertLess(
+            call_names.index("migrate_legacy_config"),
+            call_names.index("Cat"),
+            "migrate_legacy_config 는 Cat() 을 만들기 전에 불러야 합니다 — "
+            "안 그러면 옛 설정이 있어도 이번 실행엔 못 씁니다.",
+        )
+
+    def test_migrate_legacy_config_is_not_called_at_module_top_level(self):
+        """import 시점에 사용자 폴더에 쓰면 WindowsSourceRunTests 스텁 실행이
+        실제 %APPDATA% 를 건드릴 수 있다 — 반드시 main() 안에서만 불러야
+        한다."""
+        top_level_call_names = []
+        for node in self.tree.body:
+            # 함수·클래스 본문은 "정의"일 뿐 모듈을 import 할 때 실행되지
+            # 않는다. ast.walk 로 그 안까지 들어가면 main() 안의 정상 호출을
+            # 최상위 호출로 오인한다 — 정의 자체는 건너뛴다.
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    func = sub.func
+                    if isinstance(func, ast.Name):
+                        top_level_call_names.append(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        top_level_call_names.append(func.attr)
+        self.assertNotIn(
+            "migrate_legacy_config", top_level_call_names,
+            "migrate_legacy_config 가 모듈 최상위(함수 밖)에서 불립니다.",
+        )
+
+    def test_claim_single_instance_runs_before_qapplication_is_built(self):
+        """``ast.walk`` 는 너비 우선이라, ``if not win_app.claim_single_
+        instance(...):`` 처럼 조건문 안에 중첩된 호출은 실제로는 앞줄인데도
+        같은 깊이의 다른 statement 보다 늦게 나온다 — 그래서 순서는
+        ``ast.walk`` 가 뱉는 순서가 아니라 소스 위치(``lineno``,
+        ``col_offset``)로 판단한다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        calls = []
+        for node in ast.walk(main):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    name = func.id
+                elif isinstance(func, ast.Attribute):
+                    name = func.attr
+                else:
+                    continue
+                calls.append((node.lineno, node.col_offset, name))
+        calls.sort()
+        call_names = [name for _, _, name in calls]
+
+        self.assertIn(
+            "instance_lock_path", call_names,
+            "main() 안에서 win_app.instance_lock_path() 를 부르지 않습니다.",
+        )
+        self.assertIn(
+            "claim_single_instance", call_names,
+            "main() 안에서 win_app.claim_single_instance 를 부르지 않습니다.",
+        )
+        self.assertIn(
+            "QApplication", call_names,
+            "main() 안에서 QApplication(...) 을 만들지 않습니다.",
+        )
+        self.assertLess(
+            call_names.index("instance_lock_path"),
+            call_names.index("QApplication"),
+            "instance_lock_path 는 QApplication 을 만들기 전에 불러야 합니다.",
+        )
+        self.assertLess(
+            call_names.index("claim_single_instance"),
+            call_names.index("QApplication"),
+            "claim_single_instance 는 QApplication 을 만들기 전에 불러야 합니다 — "
+            "안 그러면 두 번째 인스턴스도 이벤트 루프까지 만들어 버립니다.",
+        )
+
+    def test_instance_already_running_is_logged_when_the_lock_is_taken(self):
+        """두 번째 인스턴스는 창 하나 없이 조용히 끝난다(``main()`` 의
+        ``return``) — ``win_app.log_instance_already_running()`` 을 그 분기
+        (``if not win_app.claim_single_instance(...):``) 안에서 불러야
+        현장에서 원인을 구분할 수 있다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        target_if = None
+        for node in ast.walk(main):
+            if isinstance(node, ast.If):
+                test = node.test
+                if (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
+                        and isinstance(test.operand, ast.Call)):
+                    func = test.operand.func
+                    name = (func.id if isinstance(func, ast.Name)
+                            else getattr(func, "attr", None))
+                    if name == "claim_single_instance":
+                        target_if = node
+        self.assertIsNotNone(
+            target_if,
+            "claim_single_instance() 결과를 뒤집은 if 문을 못 찾았습니다.",
+        )
+
+        call_names = []
+        for node in ast.walk(target_if):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    call_names.append(func.id)
+                elif isinstance(func, ast.Attribute):
+                    call_names.append(func.attr)
+        self.assertIn(
+            "log_instance_already_running", call_names,
+            "인스턴스가 이미 떠 있을 때 로그를 남기지 않습니다.",
+        )
+
+    def test_uses_the_exact_qlockfile_lock_failed_error_enum(self):
+        self.assertIn(
+            "QtCore.QLockFile.LockError.LockFailedError", self.source,
+            "PySide6 6.x 의 정확한 enum 이름"
+            "(QtCore.QLockFile.LockError.LockFailedError)을 쓰지 않습니다.",
+        )
+
+    def test_instance_lock_object_is_kept_alive_at_module_level(self):
+        """지역 변수로만 두면 GC 가 열려 있는 QLockFile 을 거둬 가서 잠금이
+        풀린다 — main() 안에서 global 로 선언하고 모듈 최상위에서도
+        초기화해야 프로세스가 끝날 때까지 붙잡혀 있다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        declares_global = any(
+            isinstance(node, ast.Global) and "_instance_lock" in node.names
+            for node in ast.walk(main)
+        )
+        self.assertTrue(
+            declares_global,
+            "main() 안에서 `_instance_lock` 을 global 로 선언하지 않습니다 — "
+            "지역 변수로 두면 GC 가 QLockFile 을 거둬 가서 잠금이 풀립니다.",
+        )
+
+        module_level_declared = any(
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_instance_lock"
+                    for t in node.targets)
+            for node in self.tree.body
+        )
+        self.assertTrue(
+            module_level_declared,
+            "`_instance_lock` 이 모듈 최상위에서 초기화되지 않습니다.",
+        )
+
+    def test_instance_lock_is_not_created_at_module_top_level(self):
+        """import 시점에 QLockFile 을 만들면 WindowsSourceRunTests 스텁
+        실행이 실제 파일 시스템에 잠금 파일을 만들 수 있다 — 반드시 main()
+        안에서만 만들어야 한다."""
+        top_level_call_names = []
+        for node in self.tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    func = sub.func
+                    if isinstance(func, ast.Name):
+                        top_level_call_names.append(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        top_level_call_names.append(func.attr)
+        self.assertNotIn(
+            "QLockFile", top_level_call_names,
+            "QLockFile 이 모듈 최상위(함수 밖)에서 만들어집니다.",
+        )
+        self.assertNotIn(
+            "claim_single_instance", top_level_call_names,
+            "claim_single_instance 가 모듈 최상위(함수 밖)에서 불립니다.",
+        )
+
+    def test_qlockfile_construction_and_enum_lookup_are_guarded(self):
+        """PySide6 버전 차이 등으로 ``QLockFile(...)`` 생성이나
+        ``QLockFile.LockError.LockFailedError`` 조회 자체가 예외를 낼 수
+        있다 — 이 둘이 try/except 밖에 있으면 ``.pyw`` 라 창도 로그도 없이
+        조용히 죽는다(``claim_single_instance`` 는 내부에서 모든 예외를
+        삼키지만, 그 호출 *이전의* 이 두 줄은 감싸져 있지 않으면 보호받지
+        못한다). 리터럴 문자열이 아니라 AST 로 "정말 try 블록 안에 있는가"
+        를 본다 — try/except 를 지우면 이 테스트가 반드시 떨어져야 한다."""
+        main = self._main_function()
+        self.assertIsNotNone(main, "main() 함수를 못 찾았습니다.")
+
+        def _calls_and_attrs(node):
+            names = []
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    func = sub.func
+                    if isinstance(func, ast.Name):
+                        names.append(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        names.append(func.attr)
+                elif isinstance(sub, ast.Attribute):
+                    names.append(sub.attr)
+            return names
+
+        # main() 최상위 문(try 블록 밖)에서 곧바로 일어나면 안 된다.
+        top_level_names = []
+        for stmt in main.body:
+            if isinstance(stmt, ast.Try):
+                continue
+            top_level_names.extend(_calls_and_attrs(stmt))
+        self.assertNotIn(
+            "QLockFile", top_level_names,
+            "QLockFile(...) 생성이 try 블록 밖(main() 최상위)에 있습니다 — "
+            "생성자가 예외를 내면 창도 로그도 없이 죽습니다.",
+        )
+        self.assertNotIn(
+            "LockFailedError", top_level_names,
+            "LockError.LockFailedError 조회가 try 블록 밖(main() 최상위)에 "
+            "있습니다.",
+        )
+
+        # try 블록 '안'에 두 호출이 실제로 있는지, 그 try 가 실제로 뭔가를
+        # 잡는지(except 가 있는지) 확인한다.
+        guarded = False
+        for stmt in main.body:
+            if not isinstance(stmt, ast.Try):
+                continue
+            body_names = []
+            for sub in stmt.body:
+                body_names.extend(_calls_and_attrs(sub))
+            if "QLockFile" in body_names and "LockFailedError" in body_names:
+                guarded = True
+                self.assertTrue(
+                    stmt.handlers,
+                    "QLockFile 생성을 감싼 try 에 except 가 없습니다 — "
+                    "감싸는 의미가 없습니다.",
+                )
+        self.assertTrue(
+            guarded,
+            "QLockFile(...) 생성과 LockError.LockFailedError 조회가 같은 "
+            "try 블록 안에 함께 있지 않습니다.",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class CatViewTests(unittest.TestCase):
+    """R7 #3: 윈도우도 맥과 같은 자로 몸집을 정한다(이슈 #40).
+
+    전엔 디스크를 직선으로 꽂아(``round(dpct/100*(n-1))``) 디스크 50% 에서
+    6장 중 4번째 그림인데 이름은 첫 단계였다. 이제 ``metrics.size_reading``
+    을 쓴다 — 그림은 이름 문턱(60·70·80·90·96)에서 바뀐다.
+    """
+
+    def _view(self, source, memory=72.0, disk=50.0, frames=40, language="ko"):
+        return win_app.cat_view(source, memory=memory, disk=disk,
+                                ram_percent=memory, frames=frames,
+                                language=language)
+
+    def test_memory_source_drives_the_body_and_the_first_line(self):
+        import metrics
+        view = self._view("memory")
+        self.assertEqual(view.index, round(metrics.body_percent(72.0) / 100 * 39))
+        self.assertEqual(view.l1, "램 72%")
+        self.assertEqual(view.l2, "디스크 50%")
+        self.assertEqual(view.score, 72.0)
+        self.assertIn("메모리 72%", view.mood_line)
+
+    def test_disk_below_the_first_threshold_keeps_the_first_picture(self):
+        """이름이 첫 단계면 그림도 첫 그림(프레임 0~3)이다 — 직선 매핑은 20."""
+        view = self._view("disk", disk=50.0)
+        self.assertLessEqual(view.index, 3)
+        self.assertEqual(view.l1, "디스크 50%")
+        self.assertIn("디스크 50%", view.mood_line)
+
+    def test_picture_and_name_change_together_at_90(self):
+        import i18n
+        below = self._view("disk", disk=89.9)
+        at = self._view("disk", disk=90.0)
+        self.assertLess(below.index, 28)
+        self.assertEqual(at.index, 28)
+        self.assertNotEqual(i18n.chonk_stage(89.9, "ko"),
+                            i18n.chonk_stage(90.0, "ko"))
+
+    def test_max_names_whichever_decided_the_body(self):
+        self.assertEqual(self._view("max", memory=61.0, disk=91.0).l1, "디스크 91%")
+        self.assertEqual(self._view("max", memory=71.5, disk=50.0).l1, "램 72%")
+
+    def test_few_frame_themes_stay_in_range(self):
+        for disk in (0.0, 59.0, 100.0):
+            with self.subTest(disk=disk):
+                self.assertIn(self._view("disk", disk=disk, frames=6).index,
+                              range(6))
+
+    def test_unknown_source_is_normalized_to_memory(self):
+        self.assertEqual(win_app.normalize_size_source("banana"), "memory")
+        self.assertEqual(win_app.normalize_size_source(None), "memory")
+        for value in ("memory", "disk", "max"):
+            self.assertEqual(win_app.normalize_size_source(value), value)
+
+
+class _PywStatic:
+    """``.pyw`` 는 못 돌리니 배선을 정적으로 본다(테스트 없는 도우미)."""
+
+    APP = _REPO / "windows" / "windows_cat.pyw"
+
+    def setUp(self):
+        if not self.APP.is_file():
+            self.skipTest(f"파일이 없습니다: {self.APP}")
+        self.source = self.APP.read_text(encoding="utf-8")
+        self.tree = ast.parse(self.source, filename=str(self.APP))
+
+    def _function(self, name):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return node
+        self.fail(f"windows_cat.pyw 에 {name} 이 없습니다")
+
+    @staticmethod
+    def _calls(node):
+        names = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                func = sub.func
+                if isinstance(func, ast.Attribute):
+                    names.add(func.attr)
+                elif isinstance(func, ast.Name):
+                    names.add(func.id)
+        return names
+
+
+class WindowsSizeSourceWiringTests(_PywStatic, unittest.TestCase):
+    def test_refresh_uses_the_shared_view_not_a_linear_map(self):
+        refresh = self._function("_refresh_once")
+        self.assertIn("cat_view", self._calls(refresh))
+        dumped = ast.dump(refresh)
+        self.assertNotIn("Constant(value=100)", dumped,
+                         "_refresh_once 에 /100 직선 매핑이 남아 있습니다")
+
+    def test_config_keeps_the_size_source(self):
+        self.assertIn("normalize_size_source", self._calls(self._function("load_config")))
+        self.assertIn("size_source", ast.dump(self._function("load_config")))
+
+    def test_menu_offers_the_three_sources(self):
+        menu = self._function("contextMenuEvent")
+        dumped = ast.dump(menu)
+        self.assertIn("SIZE_SOURCES", dumped)
+        self.assertIn("menu_size_source", dumped)
+        self.assertIn("set_size_source", dumped)
+
+    def test_choosing_a_source_saves_and_redraws(self):
+        calls = self._calls(self._function("set_size_source"))
+        self.assertIn("save_config", calls)
+        self.assertIn("refresh", calls)
+
+
+class FakeWinreg:
+    """``winreg`` 의 쓰는 부분만 흉내 낸다. 값은 dict 하나에 산다."""
+
+    HKEY_CURRENT_USER = "HKCU"
+    REG_SZ = 1
+    KEY_READ = 0x20019
+    KEY_SET_VALUE = 0x0002
+
+    def __init__(self, values=None, fail=False):
+        self.values = dict(values or {})
+        self.fail = fail
+        self.opened = []
+
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _check(self):
+        if self.fail:
+            raise PermissionError("access denied")
+
+    def OpenKey(self, root, path, reserved=0, access=0):
+        self._check()
+        self.opened.append((root, path))
+        return self._Key()
+
+    def CreateKey(self, root, path):
+        self._check()
+        self.opened.append((root, path))
+        return self._Key()
+
+    def QueryValueEx(self, key, name):
+        self._check()
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name], self.REG_SZ
+
+    def SetValueEx(self, key, name, reserved, kind, value):
+        self._check()
+        self.values[name] = value
+
+    def DeleteValue(self, key, name):
+        self._check()
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        del self.values[name]
+
+
+class AutostartTests(unittest.TestCase):
+    """R7 #4: 윈도우 켤 때 같이 실행. HKCU Run 값 하나(관리자 권한 불필요).
+
+    레지스트리 값 자체가 진실이다 — 설정 파일에 따로 적으면 둘이 엇갈린다.
+    기본은 꺼짐: 사용자가 메뉴에서 켜기 전엔 아무것도 쓰지 않는다.
+    """
+
+    EXE = r"C:\Users\me\Downloads\MemoryCat.exe"
+
+    def test_the_command_quotes_the_exe_path(self):
+        self.assertEqual(
+            win_app.autostart_command(self.EXE, frozen=True, script=None),
+            f'"{self.EXE}"')
+
+    def test_source_runs_use_pythonw_so_no_console_window_opens(self):
+        command = win_app.autostart_command(
+            r"C:\Python312\python.exe", frozen=False,
+            script=r"C:\cat\windows\windows_cat.pyw")
+        self.assertEqual(
+            command,
+            r'"C:\Python312\pythonw.exe" "C:\cat\windows\windows_cat.pyw"')
+
+    def test_off_by_default(self):
+        self.assertFalse(win_app.autostart_enabled(FakeWinreg()))
+
+    def test_turning_on_writes_one_run_value_under_hkcu(self):
+        reg = FakeWinreg()
+        self.assertTrue(win_app.set_autostart(True, '"x.exe"', reg))
+        self.assertEqual(reg.values, {win_app.AUTOSTART_VALUE_NAME: '"x.exe"'})
+        self.assertIn(("HKCU", win_app.RUN_KEY), reg.opened)
+        self.assertTrue(win_app.autostart_enabled(reg))
+
+    def test_turning_off_removes_it_and_tolerates_it_being_gone(self):
+        reg = FakeWinreg({win_app.AUTOSTART_VALUE_NAME: '"x.exe"'})
+        self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
+        self.assertEqual(reg.values, {})
+        self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
+
+    def test_turning_off_when_the_run_key_does_not_exist_is_success(self):
+        """Run 키 자체가 없으면 끌 것도 없다 — 실패 안내를 띄우면 안 된다."""
+        reg = FakeWinreg()
+
+        def missing(*args, **kwargs):
+            raise FileNotFoundError("Run key missing")
+
+        reg.OpenKey = missing
+        self.assertTrue(win_app.set_autostart(False, '"x.exe"', reg))
+
+    def test_registry_errors_report_failure_instead_of_crashing(self):
+        reg = FakeWinreg(fail=True)
+        self.assertFalse(win_app.set_autostart(True, '"x.exe"', reg))
+        self.assertFalse(win_app.autostart_enabled(reg))
+        win_app.refresh_autostart('"x.exe"', reg)  # 예외 없이 끝나야 한다
+
+    def test_a_moved_exe_is_rewritten_on_the_next_launch(self):
+        reg = FakeWinreg({win_app.AUTOSTART_VALUE_NAME: '"C:\\old\\MemoryCat.exe"'})
+        win_app.refresh_autostart(f'"{self.EXE}"', reg)
+        self.assertEqual(reg.values[win_app.AUTOSTART_VALUE_NAME], f'"{self.EXE}"')
+
+    def test_refresh_never_turns_it_on_by_itself(self):
+        reg = FakeWinreg()
+        win_app.refresh_autostart('"x.exe"', reg)
+        self.assertEqual(reg.values, {})
+
+    def test_no_registry_module_means_off_and_unchanged(self):
+        """맥·리눅스에는 winreg 가 없다 — None 이면 조용히 꺼짐으로 본다."""
+        self.assertFalse(win_app.autostart_enabled(None))
+        self.assertFalse(win_app.set_autostart(True, '"x.exe"', None))
+
+
+class WindowsAutostartWiringTests(_PywStatic, unittest.TestCase):
+    def test_menu_has_a_checkable_autostart_toggle(self):
+        dumped = ast.dump(self._function("contextMenuEvent"))
+        self.assertIn("menu_autostart", dumped)
+        self.assertIn("autostart_enabled", dumped)
+        self.assertIn("toggle_autostart", dumped)
+
+    def test_toggle_writes_and_tells_the_user_when_it_fails(self):
+        toggle = self._function("toggle_autostart")
+        calls = self._calls(toggle)
+        self.assertIn("set_autostart", calls)
+        self.assertIn("autostart_error", ast.dump(toggle))
+
+    def test_main_rewrites_a_moved_exe_path(self):
+        self.assertIn("refresh_autostart", self._calls(self._function("main")))
+
+    def test_menu_strings_exist_in_both_languages(self):
+        import i18n
+        for key in ("menu_autostart", "autostart_error"):
+            for language in ("ko", "en"):
+                self.assertIn(key, i18n._STRINGS[language])
+
+
+class WindowsPetNameWiringTests(_PywStatic, unittest.TestCase):
+    """이름 지어주기 배선(.pyw 는 못 돌리니 정적으로)."""
+
+    UI = _REPO / "windows" / "win_ai_ui.py"
+
+    def test_config_keeps_a_cleaned_pet_name(self):
+        load = self._function("load_config")
+        self.assertIn("clean_pet_name", self._calls(load))
+        self.assertIn("pet_name", ast.dump(load))
+
+    def test_menu_has_the_name_item(self):
+        dumped = ast.dump(self._function("contextMenuEvent"))
+        self.assertIn("menu_pet_name", dumped)
+        self.assertIn("set_pet_name", dumped)
+
+    def test_naming_asks_cleans_saves_and_confirms(self):
+        setter = self._function("set_pet_name")
+        calls = self._calls(setter)
+        for name in ("getText", "clean_pet_name", "save_config"):
+            self.assertIn(name, calls)
+        dumped = ast.dump(setter)
+        for key in ("pet_name_title", "pet_name_hint", "pet_name_saved_title"):
+            self.assertIn(key, dumped)
+
+    def test_diagnosis_gets_the_pet_name(self):
+        start = self._function("_start_diagnosis")
+        calls = [n for n in ast.walk(start) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "show_diagnosis"]
+        self.assertTrue(calls, "_start_diagnosis 가 show_diagnosis 를 안 부릅니다")
+        pet = [k for k in calls[0].keywords if k.arg == "pet"]
+        self.assertTrue(pet, "show_diagnosis 에 pet= 을 안 넘깁니다")
+        self.assertIn("pet_name", ast.dump(pet[0].value))
+        ui = ast.parse(self.UI.read_text(encoding="utf-8"))
+        shows = [n for n in ast.walk(ui)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_show_diagnosis"]
+        self.assertTrue(shows, "win_ai_ui._show_diagnosis 가 없습니다")
+        self.assertIn("diagnosis_heading", self._calls(shows[0]))
+
+
+class CatStaysAliveAfterDialogsTests(_PywStatic, unittest.TestCase):
+    """R7 실기: 진단 결과창·테마 안내창·사진 선택창을 닫으면 고양이가 꺼졌다.
+
+    고양이 창은 ``Tool`` 창이라 Qt 가 ``WA_QuitOnClose`` 를 꺼 둔다(앱을
+    붙잡는 창으로 안 센다). 그래서 대화상자가 닫히면 Qt 는 "마지막 창이
+    닫혔다" 고 보고 ``setQuitOnLastWindowClosed(True)`` 에 따라 앱을 끝낸다.
+    PySide6 6.12 로 맥에서 재현·확인: 속성을 켜면 대화상자를 닫아도 살고,
+    고양이 창을 닫으면 정상 종료. **setWindowFlags 뒤에** 켜야 한다 — 앞에서
+    켜면 setWindowFlags 가 다시 끈다(같은 실험으로 확인).
+    """
+
+    @staticmethod
+    def _is_quit_on_close_on(node):
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setAttribute"
+                and len(node.args) >= 2
+                and "WA_QuitOnClose" in ast.dump(node.args[0])
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value is True)
+
+    def test_cat_window_counts_as_the_window_that_keeps_the_app_alive(self):
+        init = None
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef) and node.name == "Cat":
+                init = next(n for n in node.body
+                            if isinstance(n, ast.FunctionDef) and n.name == "__init__")
+        self.assertIsNotNone(init, "Cat.__init__ 이 없습니다")
+        flags = [n.lineno for n in ast.walk(init) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "setWindowFlags"]
+        quit_on = [n.lineno for n in ast.walk(init) if self._is_quit_on_close_on(n)]
+        self.assertTrue(quit_on, "Cat 창에 WA_QuitOnClose 를 켜지 않습니다 — "
+                        "대화상자를 닫으면 앱이 꺼집니다")
+        self.assertTrue(flags, "Cat.__init__ 에 setWindowFlags 가 없습니다")
+        self.assertGreater(min(quit_on), max(flags),
+                           "WA_QuitOnClose 를 setWindowFlags 앞에서 켭니다 — "
+                           "setWindowFlags 가 다시 끕니다")
+
+
+class PySideIsPinnedTests(unittest.TestCase):
+    """PySide6 는 정확한 버전으로 고정한다.
+
+    ``>=6.5,<7`` 범위였을 때 빌드마다 그날 최신이 들어갔고, 6.11.2 → 6.12.0
+    으로 바뀐 빌드부터 대화상자를 닫으면 고양이가 꺼졌다(코드는 그대로).
+    맥에서 두 버전으로 같은 재현 스크립트를 돌려 확인했다. Qt 를 올릴 때는
+    일부러 올리고 실기로 확인한다.
+    """
+
+    def test_requirements_pin_an_exact_pyside6_version(self):
+        text = (_REPO / "windows" / "requirements.txt").read_text(encoding="ascii")
+        lines = [l.strip() for l in text.splitlines()
+                 if l.strip().lower().startswith("pyside6")]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertRegex(lines[0], r"^PySide6==\d+\.\d+\.\d+$")
+
+
+class WindowsCreditWiringTests(_PywStatic, unittest.TestCase):
+    """만든 사람 표시: 우클릭 메뉴에 크레딧 줄 + 누르면 저장소가 열리는 링크."""
+
+    def test_menu_shows_the_shared_credit_lines(self):
+        menu = self._function("contextMenuEvent")
+        calls = self._calls(menu)
+        self.assertIn("credit_lines", calls)
+        self.assertIn("openUrl", calls)
+        self.assertIn("CREDIT_URL", ast.dump(menu))
+
+
+class ThemePickerTimingWiringTests(unittest.TestCase):
+    """R7 실기 3a: 테마 메뉴 → 사진 창 약 4초. 키 확인과 사진 창 중 어디가
+    느린지 로그로 가른다 — 메뉴 누름·사진 창 여는 중·닫힘을 남긴다."""
+
+    UI = _REPO / "windows" / "win_ai_ui.py"
+
+    def test_make_theme_logs_around_the_photo_picker(self):
+        tree = ast.parse(self.UI.read_text(encoding="utf-8"))
+        make = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "make_theme")
+        events = []
+        for node in ast.walk(make):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr == "log_theme_step" and node.args:
+                events.append((node.lineno, node.args[0].value))
+            elif node.func.attr == "getOpenFileName":
+                events.append((node.lineno, "<picker>"))
+            elif node.func.attr == "has_api_key":
+                events.append((node.lineno, "<key exists?>"))
+        order = [name for _, name in sorted(events)]
+        self.assertEqual(order[:2], ["menu clicked", "<key exists?>"], order)
+        i = order.index("<picker>")
+        self.assertEqual(order[i - 1], "photo picker opening", order)
+        self.assertEqual(order[i + 1], "photo picker closed", order)
